@@ -1,0 +1,36 @@
+{
+  "props": {
+    "id": "s-perch-2",
+    "x": 400,
+    "y": 60,
+    "self": {
+      "id": "s-perch-2",
+      "kind": "session",
+      "label": "Fix terminal slash input",
+      "title": "Fix terminal slash input"
+    },
+    "canSplitNew": true,
+    "canSplitMore": true,
+    "offered": [
+      {
+        "id": "a",
+        "label": "Fix the terminal slash input when the IME composes"
+      },
+      {
+        "id": "b",
+        "label": "Draft the release notes for the native client"
+      },
+      {
+        "id": "c",
+        "label": "packages/web/src/stock-ui/navigator/main.tsx"
+      },
+      {
+        "id": "d",
+        "label": "Profile the terminal redraw on a 4k display"
+      }
+    ],
+    "inSplit": false,
+    "canStopAgent": true,
+    "extraItems": []
+  }
+}

@@ -76,6 +76,67 @@ pub fn open_in_perch(url: &str) -> io::Result<()> {
         .ok_or_else(|| io::Error::other(format!("{opener} failed: {status}")))
 }
 
+/// Open an https link in the system's browser, as the web's `openExternal` does. Call it only from a
+/// click. Anything but a plain https URL is refused, so a link can never name a file or an option.
+pub fn open_link(url: &str) -> io::Result<()> {
+    if !is_web_link(url) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "only an https link can be opened",
+        ));
+    }
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    let status = Command::new(opener).arg(url).status()?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| io::Error::other(format!("{opener} failed: {status}")))
+}
+
+/// Open a local file or folder with its default app, or show it in the file manager (`reveal`), as
+/// the desktop app's file menu does. `path` must be absolute, so it can never read as an option.
+pub fn open_path(path: &std::path::Path, reveal: bool) -> io::Result<()> {
+    if !path.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "only an absolute path can be opened",
+        ));
+    }
+    let mut command = if cfg!(target_os = "macos") {
+        let mut open = Command::new("open");
+        if reveal {
+            open.arg("-R");
+        }
+        open.arg(path);
+        open
+    } else {
+        // ponytail: xdg-open has no reveal; the folder that holds the entry opens instead.
+        let mut open = Command::new("xdg-open");
+        open.arg(if reveal {
+            path.parent().unwrap_or(path)
+        } else {
+            path
+        });
+        open
+    };
+    let status = command.status()?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| io::Error::other(format!("opening {} failed: {status}", path.display())))
+}
+
+fn is_web_link(url: &str) -> bool {
+    url.len() <= 2048
+        && url.starts_with("https://")
+        && url.len() > "https://".len()
+        && url.bytes().all(|b| b.is_ascii_graphic())
+}
+
 /// Only a link this module makes is opened, never a file or an option for the opener.
 fn is_perch_link(url: &str) -> bool {
     url.starts_with("perch://open?place=")
@@ -124,6 +185,25 @@ mod tests {
                 "{id:?}"
             );
         }
+    }
+
+    #[test]
+    fn only_a_plain_https_link_opens_in_the_browser() {
+        assert!(is_web_link("https://tailscale.com/download"));
+        for refused in [
+            "http://a.b",
+            "https://",
+            "file:///etc/passwd",
+            "-a Calculator",
+            "https://a b",
+            "https://a\n",
+        ] {
+            assert!(!is_web_link(refused), "{refused:?}");
+        }
+        assert_eq!(
+            open_link("file:///etc/passwd").unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
     }
 
     #[test]

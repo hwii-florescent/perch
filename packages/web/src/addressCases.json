@@ -1,0 +1,103 @@
+{
+  "//": "Address bar cases read by both links.test.ts / addressSuggestions.test.ts and the native client's browser/address.rs tests. Expected strings are exact.",
+  "addresses": [
+    { "input": "example.com", "expected": "https://example.com/" },
+    { "input": "  example.com/path?q=1  ", "expected": "https://example.com/path?q=1" },
+    { "input": "example.com:8443/path", "expected": "https://example.com:8443/path" },
+    { "input": "https://localhost:3000", "expected": "https://localhost:3000/" },
+    { "input": "http://example.com", "expected": "http://example.com/" },
+    { "input": "HTTPS://Example.COM/A", "expected": "https://example.com/A" },
+    { "input": "localhost", "expected": "http://localhost/" },
+    { "input": "localhost:3000", "expected": "http://localhost:3000/" },
+    { "input": "localhost:443", "expected": "http://localhost:443/" },
+    { "input": "localhost:3000/path?q=1#x", "expected": "http://localhost:3000/path?q=1#x" },
+    { "input": "app.localhost:5173", "expected": "http://app.localhost:5173/" },
+    { "input": "server.local", "expected": "http://server.local/" },
+    { "input": "127.0.0.1:8080", "expected": "http://127.0.0.1:8080/" },
+    { "input": "0.0.0.0:5173", "expected": "http://0.0.0.0:5173/" },
+    { "input": "192.168.1.2:3000", "expected": "http://192.168.1.2:3000/" },
+    { "input": "[::1]:3000", "expected": "http://[::1]:3000/" },
+    { "input": "devbox:3000", "expected": "http://devbox:3000/" },
+    { "input": "hello", "expected": "https://www.google.com/search?q=hello" },
+    { "input": "hello world", "expected": "https://www.google.com/search?q=hello+world" },
+    { "input": "what is x?", "expected": "https://www.google.com/search?q=what+is+x%3F" },
+    { "input": "C++ & Rust", "expected": "https://www.google.com/search?q=C%2B%2B+%26+Rust" },
+    { "input": "你好", "expected": "https://www.google.com/search?q=%E4%BD%A0%E5%A5%BD" },
+    { "input": "  hello  ", "expected": "https://www.google.com/search?q=hello" },
+    { "input": "C++ & 你好", "engine": "google", "expected": "https://www.google.com/search?q=C%2B%2B+%26+%E4%BD%A0%E5%A5%BD" },
+    { "input": "C++ & 你好", "engine": "duckduckgo", "expected": "https://duckduckgo.com/?q=C%2B%2B+%26+%E4%BD%A0%E5%A5%BD" },
+    { "input": "C++ & 你好", "engine": "bing", "expected": "https://www.bing.com/search?q=C%2B%2B+%26+%E4%BD%A0%E5%A5%BD" },
+    { "input": "C++ & 你好", "engine": "brave", "expected": "https://search.brave.com/search?q=C%2B%2B+%26+%E4%BD%A0%E5%A5%BD" },
+    { "input": "localhost:3000", "engine": "brave", "expected": "http://localhost:3000/" },
+    { "input": "hello", "engine": "unknown", "expected": "https://www.google.com/search?q=hello" },
+    { "input": "", "expected": null },
+    { "input": "  ", "expected": null },
+    { "input": "javascript:alert(1)", "expected": null },
+    { "input": "file:///etc/passwd", "expected": null },
+    { "input": "mailto:x", "expected": null },
+    { "input": "about:blank", "expected": null },
+    { "input": "https://", "expected": null },
+    { "input": "http://[bad", "expected": null }
+  ],
+  "rows": [
+    {
+      "typed": "example.com",
+      "history": [{ "url": "https://example.com/", "title": "Example" }, { "url": "https://example.com/docs", "title": "" }],
+      "suggestions": [],
+      "expected": [
+        { "kind": "go", "url": "https://example.com/", "title": "example.com" },
+        { "kind": "page", "url": "https://example.com/docs", "title": "example.com" }
+      ]
+    },
+    {
+      "typed": "hello world",
+      "history": [],
+      "suggestions": [],
+      "engine": "duckduckgo",
+      "expected": [{ "kind": "search", "url": "https://duckduckgo.com/?q=hello+world", "title": "hello world" }]
+    },
+    {
+      "typed": "",
+      "history": [{ "url": "https://example.com/", "title": "Example" }, { "url": "http://localhost:8080/x", "title": "" }],
+      "suggestions": [],
+      "expected": [
+        { "kind": "page", "url": "https://example.com/", "title": "Example" },
+        { "kind": "page", "url": "http://localhost:8080/x", "title": "localhost:8080" }
+      ]
+    },
+    {
+      "typed": "perch",
+      "history": [
+        { "url": "https://h0.test/", "title": "H0" }, { "url": "https://h1.test/", "title": "H1" }, { "url": "https://h2.test/", "title": "H2" },
+        { "url": "https://h3.test/", "title": "H3" }, { "url": "https://h4.test/", "title": "H4" }
+      ],
+      "suggestions": ["perch", "perch fish", "perchance", "perch parking", "perch bird", "perch tree"],
+      "expected": [
+        { "kind": "search", "url": "https://www.google.com/search?q=perch", "title": "perch" },
+        { "kind": "suggest", "url": "https://www.google.com/search?q=perch+fish", "title": "perch fish" },
+        { "kind": "suggest", "url": "https://www.google.com/search?q=perchance", "title": "perchance" },
+        { "kind": "suggest", "url": "https://www.google.com/search?q=perch+parking", "title": "perch parking" },
+        { "kind": "suggest", "url": "https://www.google.com/search?q=perch+bird", "title": "perch bird" },
+        { "kind": "page", "url": "https://h0.test/", "title": "H0" },
+        { "kind": "page", "url": "https://h1.test/", "title": "H1" },
+        { "kind": "page", "url": "https://h2.test/", "title": "H2" }
+      ]
+    },
+    {
+      "typed": "h",
+      "history": [
+        { "url": "https://h0.test/", "title": "H0" }, { "url": "https://h1.test/", "title": "H1" }, { "url": "https://h2.test/", "title": "H2" },
+        { "url": "https://h3.test/", "title": "H3" }, { "url": "https://h4.test/", "title": "H4" }
+      ],
+      "suggestions": [],
+      "expected": [
+        { "kind": "search", "url": "https://www.google.com/search?q=h", "title": "h" },
+        { "kind": "page", "url": "https://h0.test/", "title": "H0" },
+        { "kind": "page", "url": "https://h1.test/", "title": "H1" },
+        { "kind": "page", "url": "https://h2.test/", "title": "H2" },
+        { "kind": "page", "url": "https://h3.test/", "title": "H3" },
+        { "kind": "page", "url": "https://h4.test/", "title": "H4" }
+      ]
+    }
+  ]
+}

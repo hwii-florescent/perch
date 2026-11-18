@@ -1,0 +1,3181 @@
+{
+  "schema": "perch-native-parity-named-elements/1",
+  "note": "Selectors are evaluated with document.querySelectorAll on the web page (each resolves from the rendered stock source: test ids, classes and structure that already exist). A native renderer ignores them and emits the same names and keys. Fields: name, selector, description; textSized (width comes from the element's own text); font (its font is gated though its width is not its text's: text an engine draws); text (record the element's text); textRange (box is the element's own text node, for a label that is a bare text node); hoverOnly (drawn only on hover: recorded only when visible); key (how an instance is told apart: the attribute of the element itself, its closest ancestor, or a descendant, with a prefix stripped), else the instance's index among its name.",
+  "screens": {
+    "sidebar": {
+      "root": "aside.sidebar",
+      "overflow": [
+        "[data-testid=\"project-list\"]",
+        "aside.sidebar > div:first-child"
+      ],
+      "minElements": 11,
+      "elements": [
+        {
+          "name": "sidebar-root",
+          "selector": "aside.sidebar",
+          "description": "The whole sidebar: the box every other box is measured against."
+        },
+        {
+          "name": "sidebar-content",
+          "selector": "aside.sidebar > div:first-child",
+          "description": "The scrolling body above the settings bar."
+        },
+        {
+          "name": "host-switcher",
+          "selector": "[data-testid=\"host-switcher\"]",
+          "description": "The button across the top that names the shown host (present once there is more than this machine)."
+        },
+        {
+          "name": "host-chip",
+          "selector": "[data-testid=\"host-switcher\"] > div",
+          "description": "The chip inside it: badge row over the detail line."
+        },
+        {
+          "name": "host-badge",
+          "selector": ".sidebar__env-badge",
+          "description": "LOCAL, SSH, REMOTE or HOST badge.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "host-name",
+          "selector": ".sidebar__env-host",
+          "description": "The shown host's name.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "host-meta",
+          "selector": "[data-testid=\"host-switcher\"] > div > div:first-child > span:nth-child(3)",
+          "description": "Platform of this machine, or the state word (connected, error, ...) of a remote.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "host-line",
+          "selector": ".sidebar__env-cwd",
+          "description": "The folder and branch of this machine, or the address (or last error) of a remote.",
+          "text": true
+        },
+        {
+          "name": "host-caret",
+          "selector": "[data-testid=\"host-switcher\"] > span[aria-hidden=\"true\"]",
+          "description": "The switcher's down arrow.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "new-session-button",
+          "selector": "button[data-testid^=\"new-session-\"]",
+          "description": "The New session row.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "new-session-"
+          }
+        },
+        {
+          "name": "new-session-icon",
+          "selector": "button[data-testid^=\"new-session-\"] > svg",
+          "description": "Its plus mark."
+        },
+        {
+          "name": "new-session-label",
+          "selector": "button[data-testid^=\"new-session-\"]",
+          "description": "Its words (the text node only).",
+          "textRange": true,
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "new-session-shortcut",
+          "selector": "button[data-testid^=\"new-session-\"] > span",
+          "description": "Its key hint, right aligned.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "overview",
+          "selector": "[data-testid=\"workspace-overview\"]",
+          "description": "The project list section under New session."
+        },
+        {
+          "name": "overview-header",
+          "selector": "[data-testid=\"workspace-overview\"] > div:first-child",
+          "description": "Its header row: title on the left, actions on the right."
+        },
+        {
+          "name": "overview-title",
+          "selector": "[data-testid=\"workspace-overview\"] > div:first-child > div:first-child > span:first-child",
+          "description": "Projects or Sessions.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "needs-you-button",
+          "selector": "[data-testid=\"workspace-needs-you\"]",
+          "description": "The \"N need(s) you\" button, present while a chat needs the person.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "organize-button",
+          "selector": "[data-testid=\"workspace-organize\"]",
+          "description": "The organize menu button."
+        },
+        {
+          "name": "organize-icon",
+          "selector": "[data-testid=\"workspace-organize\"] > svg",
+          "description": "Its three-lines glyph."
+        },
+        {
+          "name": "add-project-button",
+          "selector": "[data-testid=\"workspace-add-project\"]",
+          "description": "The Add project button.",
+          "textSized": true
+        },
+        {
+          "name": "add-project-icon",
+          "selector": "[data-testid=\"workspace-add-project\"] > svg",
+          "description": "Its plus mark."
+        },
+        {
+          "name": "add-project-label",
+          "selector": "[data-testid=\"workspace-add-project\"]",
+          "description": "Its word (the text node only).",
+          "textRange": true,
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "project-list",
+          "selector": "[data-testid=\"project-list\"]",
+          "description": "The scrolling list of projects, or of status sections."
+        },
+        {
+          "name": "project",
+          "selector": ".workspace-project",
+          "description": "One project: header, workspaces, sessions.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "workspace-project-"
+          }
+        },
+        {
+          "name": "project-header",
+          "selector": ".workspace-project > div:first-child",
+          "description": "Its header row (the whole line a click folds).",
+          "key": {
+            "closest": ".workspace-project",
+            "attr": "data-testid",
+            "strip": "workspace-project-"
+          }
+        },
+        {
+          "name": "project-toggle",
+          "selector": "[data-testid^=\"project-toggle-\"]",
+          "description": "The header's button: chevron, folder mark, name, branch.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "project-toggle-"
+          }
+        },
+        {
+          "name": "project-chevron",
+          "selector": "[data-testid^=\"project-toggle-\"] > svg:not([data-testid])",
+          "description": "The fold chevron (down open, right folded); only a project with more than one checkout has one.",
+          "key": {
+            "closest": "[data-testid^=\"project-toggle-\"]",
+            "attr": "data-testid",
+            "strip": "project-toggle-"
+          }
+        },
+        {
+          "name": "project-folder-icon",
+          "selector": "[data-testid=\"project-folder-icon\"]",
+          "description": "The folder mark (filled for a favourite).",
+          "key": {
+            "closest": "[data-testid^=\"project-toggle-\"]",
+            "attr": "data-testid",
+            "strip": "project-toggle-"
+          }
+        },
+        {
+          "name": "project-name",
+          "selector": "[data-testid^=\"project-toggle-\"] strong",
+          "description": "The project's name.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"project-toggle-\"]",
+            "attr": "data-testid",
+            "strip": "project-toggle-"
+          }
+        },
+        {
+          "name": "project-branch",
+          "selector": "[data-testid^=\"project-toggle-\"] > span.whitespace-nowrap",
+          "description": "The branch of a one-checkout project, when it differs from the name.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"project-toggle-\"]",
+            "attr": "data-testid",
+            "strip": "project-toggle-"
+          }
+        },
+        {
+          "name": "project-dirty-mark",
+          "selector": "[data-testid^=\"project-toggle-\"] > span[title=\"Uncommitted changes\"]",
+          "description": "The dot for uncommitted changes on a one-checkout project.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"project-toggle-\"]",
+            "attr": "data-testid",
+            "strip": "project-toggle-"
+          }
+        },
+        {
+          "name": "project-rollup",
+          "selector": "[data-testid^=\"project-rollup-\"]",
+          "description": "A folded project's most urgent state and its count.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "project-rollup-"
+          }
+        },
+        {
+          "name": "project-rollup-badge",
+          "selector": "[data-testid^=\"project-rollup-\"] > span",
+          "description": "The coloured pill inside the rollup (state word and count).",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"project-rollup-\"]",
+            "attr": "data-testid",
+            "strip": "project-rollup-"
+          }
+        },
+        {
+          "name": "project-menu-button",
+          "selector": "[data-testid^=\"workspace-project-menu-\"]",
+          "description": "The header's three-dots button, shown on hover.",
+          "hoverOnly": true,
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "workspace-project-menu-"
+          }
+        },
+        {
+          "name": "project-add-button",
+          "selector": ".workspace-project > div:first-child .worktree-menu__btn",
+          "description": "The header's plus button, shown on hover.",
+          "hoverOnly": true,
+          "key": {
+            "closest": ".workspace-project",
+            "attr": "data-testid",
+            "strip": "workspace-project-"
+          }
+        },
+        {
+          "name": "project-workspaces",
+          "selector": ".workspace-project__workspaces",
+          "description": "The block under a header that holds workspaces, sessions, jobs and the hidden-worktrees line.",
+          "key": {
+            "closest": ".workspace-project",
+            "attr": "data-testid",
+            "strip": "workspace-project-"
+          }
+        },
+        {
+          "name": "workspace",
+          "selector": "[data-testid=\"workspace-tree-root\"] [data-testid^=\"workspace-entry-\"]",
+          "description": "One checkout of a multi-checkout project, with its sessions.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "workspace-entry-"
+          }
+        },
+        {
+          "name": "workspace-button",
+          "selector": "[data-testid=\"workspace-tree-root\"] button.workspace-entry__button",
+          "description": "The checkout's row button.",
+          "key": {
+            "closest": "[data-testid^=\"workspace-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-entry-"
+          }
+        },
+        {
+          "name": "workspace-icon",
+          "selector": "[data-testid=\"workspace-tree-root\"] [data-testid=\"workspace-checkout-icon\"]",
+          "description": "Diamond for a main folder, branch glyph for a worktree.",
+          "key": {
+            "closest": "[data-testid^=\"workspace-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-entry-"
+          }
+        },
+        {
+          "name": "workspace-name",
+          "selector": "[data-testid=\"workspace-tree-root\"] strong[title=\"Double-click to rename\"]",
+          "description": "The checkout's name.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"workspace-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-entry-"
+          }
+        },
+        {
+          "name": "workspace-branch",
+          "selector": "[data-testid=\"workspace-tree-root\"] button.workspace-entry__button > span.items-baseline > span",
+          "description": "Its branch, when it differs from the name.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"workspace-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-entry-"
+          }
+        },
+        {
+          "name": "workspace-dirty-mark",
+          "selector": "[data-testid=\"workspace-tree-root\"] button.workspace-entry__button > span[title=\"Uncommitted changes\"]",
+          "description": "The dot for uncommitted changes.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"workspace-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-entry-"
+          }
+        },
+        {
+          "name": "workspace-pinned-label",
+          "selector": "[data-testid=\"workspace-tree-root\"] button.workspace-entry__button > span.shrink-0:not([title])",
+          "description": "The word pinned (or sleeping).",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"workspace-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-entry-"
+          }
+        },
+        {
+          "name": "hidden-worktrees-button",
+          "selector": "[data-testid^=\"workspace-hidden-\"]",
+          "description": "The \"N hidden worktrees\" line at the end of a project.",
+          "text": true,
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "workspace-hidden-"
+          }
+        },
+        {
+          "name": "session-row",
+          "selector": "div[class~=\"group/row\"]",
+          "description": "One session row: its button, a lead's chevron, and its \"...\" button.",
+          "key": {
+            "find": "button[data-testid^=\"workspace-session-\"]:not([data-testid^=\"workspace-session-close-\"])",
+            "attr": "data-testid",
+            "strip": "workspace-session-"
+          }
+        },
+        {
+          "name": "session-button",
+          "selector": "button[data-testid^=\"workspace-session-\"]:not([data-testid^=\"workspace-session-close-\"])",
+          "description": "The row's button (the whole clickable line).",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "workspace-session-"
+          }
+        },
+        {
+          "name": "session-mark",
+          "selector": ".agent-mark",
+          "description": "The agent's mark at the start of the row.",
+          "key": {
+            "closest": "button[data-testid^=\"workspace-session-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-session-"
+          }
+        },
+        {
+          "name": "session-mark-icon",
+          "selector": ".agent-mark > span > *",
+          "description": "The agent artwork inside the mark.",
+          "key": {
+            "closest": "button[data-testid^=\"workspace-session-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-session-"
+          }
+        },
+        {
+          "name": "session-title",
+          "selector": "button[data-testid^=\"workspace-session-\"] > span.whitespace-nowrap",
+          "description": "The session's title, in the project and Quickchat lists.",
+          "text": true,
+          "key": {
+            "closest": "button[data-testid^=\"workspace-session-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-session-"
+          }
+        },
+        {
+          "name": "status-row-title",
+          "selector": "button[data-session] span.truncate:not([data-testid])",
+          "description": "The session's title in By status.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "button[data-testid^=\"workspace-session-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-session-"
+          }
+        },
+        {
+          "name": "status-row-detail",
+          "selector": "[data-testid=\"status-row-detail\"]",
+          "description": "What a By status row adds: its workspace, or why it needs you.",
+          "text": true,
+          "key": {
+            "closest": "button[data-testid^=\"workspace-session-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-session-"
+          }
+        },
+        {
+          "name": "session-state-badge",
+          "selector": "[data-testid^=\"session-state-\"]",
+          "description": "The state word at the end of a row (Needs you, Working, Done; Idle shows none).",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "session-state-"
+          }
+        },
+        {
+          "name": "session-menu-button",
+          "selector": "[data-testid^=\"session-menu-button-\"]",
+          "description": "The row's \"...\" button, shown on hover, focus or when the row is the open one.",
+          "hoverOnly": true,
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "session-menu-button-"
+          }
+        },
+        {
+          "name": "session-fold-button",
+          "selector": "[data-testid^=\"session-fold-\"]",
+          "description": "The chevron after a lead's title that folds its sub-sessions.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "session-fold-"
+          }
+        },
+        {
+          "name": "session-elbow",
+          "selector": "[data-testid^=\"session-elbow-\"]",
+          "description": "The connector that takes a sub-session's row off its lead's icon column.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "session-elbow-"
+          }
+        },
+        {
+          "name": "session-rollup",
+          "selector": "[data-testid^=\"session-rollup-\"]",
+          "description": "A folded lead's most urgent state among its hidden sub-sessions.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "session-rollup-"
+          }
+        },
+        {
+          "name": "chats",
+          "selector": "[data-testid=\"workspace-chats\"]",
+          "description": "The Quickchat section."
+        },
+        {
+          "name": "chats-header",
+          "selector": "[data-testid=\"workspace-chats\"] > div:first-child",
+          "description": "Its header row."
+        },
+        {
+          "name": "chats-toggle",
+          "selector": "[data-testid=\"workspace-chats-collapse\"]",
+          "description": "The header's fold button."
+        },
+        {
+          "name": "chats-label",
+          "selector": "[data-testid=\"workspace-chats-collapse\"]",
+          "description": "The word Quickchat (the text node only).",
+          "textRange": true,
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "chats-chevron",
+          "selector": "[data-testid=\"workspace-chats-collapse\"] > svg",
+          "description": "Its fold chevron."
+        },
+        {
+          "name": "chats-menu-button",
+          "selector": "[data-testid=\"workspace-chats-menu\"]",
+          "description": "The Quickchat actions button, shown on hover.",
+          "hoverOnly": true
+        },
+        {
+          "name": "chats-new-button",
+          "selector": "[data-testid=\"workspace-chats-new\"]",
+          "description": "The New chat button."
+        },
+        {
+          "name": "chats-new-icon",
+          "selector": "[data-testid=\"workspace-chats-new\"] > svg",
+          "description": "Its pencil-over-page glyph."
+        },
+        {
+          "name": "status-view",
+          "selector": "[data-testid=\"workspace-status-view\"]",
+          "description": "By status: the whole list."
+        },
+        {
+          "name": "status-section",
+          "selector": "[data-testid^=\"status-section-\"]:not([data-testid^=\"status-section-title-\"])",
+          "description": "One status section (Needs you, Done, Working, Idle, or Offline).",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "status-section-"
+          }
+        },
+        {
+          "name": "status-heading",
+          "selector": "[data-testid^=\"status-section-title-\"], [data-testid=\"status-no-sessions-title\"]",
+          "description": "A section's heading line (also the No sessions heading).",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "status-heading-dot",
+          "selector": "[data-testid^=\"status-section-title-\"] > span:first-child, [data-testid=\"status-no-sessions-title\"] > span:first-child",
+          "description": "The state dot (hollow for Idle and for headings that claim no state).",
+          "key": {
+            "closest": "[data-testid^=\"status-section-title-\"], [data-testid=\"status-no-sessions-title\"]",
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "status-heading-label",
+          "selector": "[data-testid^=\"status-section-title-\"] > span:nth-child(2), [data-testid=\"status-no-sessions-title\"] > span:nth-child(2)",
+          "description": "The section's name.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"status-section-title-\"], [data-testid=\"status-no-sessions-title\"]",
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "status-heading-count",
+          "selector": "[data-testid^=\"status-section-title-\"] > span[aria-label], [data-testid=\"status-no-sessions-title\"] > span[aria-label]",
+          "description": "How many chats (or projects) are in it.",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"status-section-title-\"], [data-testid=\"status-no-sessions-title\"]",
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "status-heading-note",
+          "selector": "[data-testid^=\"status-section-title-\"] > span.truncate, [data-testid=\"status-no-sessions-title\"] > span.truncate",
+          "description": "A note after the count (the offline reason).",
+          "text": true,
+          "textSized": true,
+          "key": {
+            "closest": "[data-testid^=\"status-section-title-\"], [data-testid=\"status-no-sessions-title\"]",
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "status-project",
+          "selector": "div[data-testid^=\"status-project-\"]",
+          "description": "A project's cluster inside a section.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "status-project-"
+          }
+        },
+        {
+          "name": "status-project-header",
+          "selector": "div[data-testid^=\"status-project-\"] > div:first-child",
+          "description": "The cluster's header row.",
+          "key": {
+            "closest": "div[data-testid^=\"status-project-\"]",
+            "attr": "data-testid",
+            "strip": "status-project-"
+          }
+        },
+        {
+          "name": "status-project-icon",
+          "selector": "div[data-testid^=\"status-project-\"] > div:first-child > svg",
+          "description": "The folder mark.",
+          "key": {
+            "closest": "div[data-testid^=\"status-project-\"]",
+            "attr": "data-testid",
+            "strip": "status-project-"
+          }
+        },
+        {
+          "name": "status-project-title",
+          "selector": "[data-testid=\"status-project-title\"]",
+          "description": "The project's name.",
+          "text": true,
+          "key": {
+            "closest": "div[data-testid^=\"status-project-\"]",
+            "attr": "data-testid",
+            "strip": "status-project-"
+          }
+        },
+        {
+          "name": "status-empty-project",
+          "selector": "[data-testid^=\"status-empty-project-\"]",
+          "description": "A project with no chats, listed under No sessions.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "status-empty-project-"
+          }
+        },
+        {
+          "name": "status-empty-project-icon",
+          "selector": "[data-testid^=\"status-empty-project-\"] > button:first-child > svg",
+          "description": "Its folder mark.",
+          "key": {
+            "closest": "[data-testid^=\"status-empty-project-\"]",
+            "attr": "data-testid",
+            "strip": "status-empty-project-"
+          }
+        },
+        {
+          "name": "status-empty-project-title",
+          "selector": "[data-testid^=\"status-empty-project-\"] > button > span.whitespace-nowrap",
+          "description": "Its name.",
+          "text": true,
+          "key": {
+            "closest": "[data-testid^=\"status-empty-project-\"]",
+            "attr": "data-testid",
+            "strip": "status-empty-project-"
+          }
+        },
+        {
+          "name": "settings-bar",
+          "selector": "aside.sidebar > div:last-child",
+          "description": "The strip at the foot of the sidebar."
+        },
+        {
+          "name": "settings-gear",
+          "selector": "[data-testid=\"settings-gear\"]",
+          "description": "The Settings button."
+        },
+        {
+          "name": "settings-gear-icon",
+          "selector": "[data-testid=\"settings-gear\"] > svg",
+          "description": "Its cog glyph."
+        }
+      ]
+    },
+    "tabs": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "tab-strip",
+          "selector": "[data-testid=\"tab-bar\"]",
+          "description": "The strip: a row of tabs and the + button, scrolling sideways when they do not fit; 8px side and 6px top and bottom padding, 3px between tabs."
+        },
+        {
+          "name": "tab-slot",
+          "selector": "[data-tab-entry]",
+          "description": "One tab's slot: the room for the tab and its x (7rem to 16rem wide, sharing the strip equally).",
+          "key": {
+            "self": true,
+            "attr": "data-tab-entry"
+          }
+        },
+        {
+          "name": "tab-separator",
+          "selector": "[data-testid=\"tab-separator\"]",
+          "description": "The hairline in the gap between two tabs that are neither focused.",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          }
+        },
+        {
+          "name": "tab",
+          "selector": "button.tab-bar__tab",
+          "description": "The tab button: filled when focused, plain otherwise; soft corners (square) or a pill (round).",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          },
+          "text": true
+        },
+        {
+          "name": "tab-icon",
+          "selector": "button.tab-bar__tab > span[aria-hidden=\"true\"]",
+          "description": "The slot of the tab's mark, drawn at 80% opacity.",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          }
+        },
+        {
+          "name": "tab-icon-glyph",
+          "selector": "button.tab-bar__tab > span[aria-hidden=\"true\"] > *",
+          "description": "The mark: the agent's icon, a file, the review, or a page's icon or a globe.",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          }
+        },
+        {
+          "name": "tab-label",
+          "selector": "button.tab-bar__tab > span.truncate",
+          "description": "The tab's name, cut with an ellipsis when the tab is narrower (italic for a previewed file).",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          },
+          "text": true
+        },
+        {
+          "name": "tab-dirty",
+          "selector": "button.tab-bar__tab > span[aria-label=\"unsaved changes\"]",
+          "description": "The dot after a file's name while it has unsaved changes.",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-close",
+          "selector": "[data-tab-entry] > button[aria-label^=\"Close\"]",
+          "description": "The x at the tab's right edge.",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          }
+        },
+        {
+          "name": "tab-close-glyph",
+          "selector": "[data-tab-entry] > button[aria-label^=\"Close\"] > svg",
+          "description": "Its cross.",
+          "key": {
+            "closest": "[data-tab-entry]",
+            "attr": "data-tab-entry"
+          }
+        },
+        {
+          "name": "tab-new",
+          "selector": "[data-testid=\"tab-new\"]",
+          "description": "The + button after the last tab: a 28px segment."
+        },
+        {
+          "name": "tab-new-glyph",
+          "selector": "[data-testid=\"tab-new\"] > svg",
+          "description": "Its plus mark."
+        }
+      ]
+    },
+    "status": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 5,
+      "elements": [
+        {
+          "name": "status-bar",
+          "selector": "footer.status-bar",
+          "description": "The bar: 24px high, window wide, 12px side padding, 12px between its three blocks."
+        },
+        {
+          "name": "status-location",
+          "selector": ".status-bar__location",
+          "description": "The left block: dot, host, folder and branch; takes the room the others leave."
+        },
+        {
+          "name": "status-dot",
+          "selector": ".status-bar__location > span:first-child",
+          "description": "The connection dot: green when the focused host is online, yellow when reconnecting."
+        },
+        {
+          "name": "status-host",
+          "selector": "[data-testid=\"status-host\"]",
+          "description": "The host's name (Local on this machine), at most 6rem.",
+          "text": true
+        },
+        {
+          "name": "status-cwd",
+          "selector": ".status-item--cwd",
+          "description": "The folder of the focused session, cut with an ellipsis.",
+          "text": true
+        },
+        {
+          "name": "status-branch",
+          "selector": ".status-bar__branch",
+          "description": "The branch block: its mark and name, at most 45% of the left block."
+        },
+        {
+          "name": "status-branch-icon",
+          "selector": ".status-bar__branch > svg",
+          "description": "The branch mark."
+        },
+        {
+          "name": "status-branch-name",
+          "selector": ".status-bar__branch > span",
+          "description": "The branch name, cut with an ellipsis.",
+          "text": true
+        },
+        {
+          "name": "status-details",
+          "selector": ".status-bar__details",
+          "description": "The middle block (zoom, context, cost), right aligned; hidden when the window is under 900px wide."
+        },
+        {
+          "name": "zoom-indicator",
+          "selector": "[data-testid=\"zoom-indicator\"]",
+          "description": "The zoom percentage button, present while the zoom is not 100%.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "status-detail",
+          "selector": ".status-bar__details > span",
+          "description": "One of the focused agent's context tokens (ctx 48.2k) or cost ($0.424), in that order.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "status-usage",
+          "selector": ".status-bar__usage",
+          "description": "The right block: plan usage, pulled 8px left to align its button's text."
+        },
+        {
+          "name": "usage-summary",
+          "selector": "[data-testid=\"usage-summary\"]",
+          "description": "The button that lists every account's windows and opens the details."
+        },
+        {
+          "name": "usage-unavailable",
+          "selector": "[data-testid=\"usage-summary\"] > span:only-child",
+          "description": "Usage unavailable: shown when the core has reported no account.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "usage-account",
+          "selector": "[data-testid=\"usage-summary\"] > span.flex",
+          "description": "One account's group: its name, then its windows."
+        },
+        {
+          "name": "usage-account-name",
+          "selector": "[data-testid=\"usage-summary\"] > span.flex > span:first-child",
+          "description": "The provider (and the account's label when there are several of that provider).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "usage-window",
+          "selector": "[data-testid=\"usage-summary\"] > span.flex > span:not(:first-child)",
+          "description": "One window's label and percent; the first of an account is full text colour, 70% and over yellow, 90% and over red.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "status-connection",
+          "selector": "[data-testid=\"status-connection\"]",
+          "description": "The connection check at the right end: a tick when online, an exclamation mark otherwise."
+        },
+        {
+          "name": "status-connection-glyph",
+          "selector": "[data-testid=\"status-connection\"] > svg",
+          "description": "Its glyph."
+        }
+      ]
+    },
+    "navigator": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 5,
+      "elements": [
+        {
+          "name": "navigator-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "The dimming layer over the whole window (55% black); a press on it closes the palette."
+        },
+        {
+          "name": "navigator-panel",
+          "selector": "[data-testid=\"navigator\"]",
+          "description": "The palette: at most 560px wide and 480px high, centred, its top 12% of the window down; rounded, on the panel fill with a shadow."
+        },
+        {
+          "name": "navigator-input",
+          "selector": "[data-testid=\"navigator-input\"]",
+          "description": "The search field across the top (surface fill, 0.95rem); `text` is what was typed, `placeholder` what shows while it is empty.",
+          "text": true
+        },
+        {
+          "name": "navigator-chips",
+          "selector": "[data-testid=\"navigator\"] > div:nth-child(2)",
+          "description": "The row of state chips under the field."
+        },
+        {
+          "name": "navigator-chip",
+          "selector": "[data-testid^=\"navigator-filter-\"]",
+          "description": "One chip (All, Working, Blocked, Done, Idle); the chosen one is on the lighter fill in the accent colour.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "navigator-filter-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "navigator-list",
+          "selector": "[data-testid=\"navigator\"] > div:nth-child(3)",
+          "description": "The scrolling list of notices, commands and sessions."
+        },
+        {
+          "name": "navigator-notice",
+          "selector": "[data-testid=\"navigator\"] > div:nth-child(3) > p[role]",
+          "description": "A line of status or error text: Searching files, the shell-mode hint, a search error (red).",
+          "text": true
+        },
+        {
+          "name": "navigator-empty",
+          "selector": "[data-testid=\"navigator\"] div.text-center",
+          "description": "No matches, centred.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "navigator-command",
+          "selector": "[data-testid^=\"navigator-command-\"]",
+          "description": "One command row: New Terminal, an agent to start, Manage agents, or Run <command>; the highlighted one is on the lighter fill.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "navigator-command-"
+          }
+        },
+        {
+          "name": "navigator-command-title",
+          "selector": "[data-testid^=\"navigator-command-\"] > span:first-child",
+          "description": "Its name.",
+          "key": {
+            "closest": "[data-testid^=\"navigator-command-\"]",
+            "attr": "data-testid",
+            "strip": "navigator-command-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "navigator-command-detail",
+          "selector": "[data-testid^=\"navigator-command-\"] > span:last-child",
+          "description": "Its folder or help, right aligned, small, in the muted colour.",
+          "key": {
+            "closest": "[data-testid^=\"navigator-command-\"]",
+            "attr": "data-testid",
+            "strip": "navigator-command-"
+          },
+          "text": true
+        },
+        {
+          "name": "navigator-row",
+          "selector": "[data-testid^=\"navigator-row-\"]",
+          "description": "One session row; the highlighted one is on the lighter fill.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "navigator-row-"
+          }
+        },
+        {
+          "name": "navigator-row-dot",
+          "selector": "[data-testid^=\"navigator-row-\"] > :first-child",
+          "description": "The session's status mark: its agent's icon in a ring of its state's colour.",
+          "key": {
+            "closest": "[data-testid^=\"navigator-row-\"]",
+            "attr": "data-testid",
+            "strip": "navigator-row-"
+          }
+        },
+        {
+          "name": "navigator-row-title",
+          "selector": "[data-testid^=\"navigator-row-\"] > span:nth-child(2)",
+          "description": "The session's title (bold for the one on screen).",
+          "key": {
+            "closest": "[data-testid^=\"navigator-row-\"]",
+            "attr": "data-testid",
+            "strip": "navigator-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "navigator-row-detail",
+          "selector": "[data-testid^=\"navigator-row-\"] > span:last-child",
+          "description": "Its folder, with the host's name before it when it is not this machine.",
+          "key": {
+            "closest": "[data-testid^=\"navigator-row-\"]",
+            "attr": "data-testid",
+            "strip": "navigator-row-"
+          },
+          "text": true
+        },
+        {
+          "name": "navigator-note",
+          "selector": "[data-testid=\"navigator\"] > p:last-child",
+          "description": "The footnote under the list while files are searched: where, and what is skipped.",
+          "text": true
+        }
+      ]
+    },
+    "pane-menu": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "pane-menu",
+          "selector": "[data-testid=\"pane-context-menu\"]",
+          "description": "The menu: at least 180px wide, on the lighter surface fill with a shadow, placed at its corner (moved in near an edge)."
+        },
+        {
+          "name": "pane-menu-item",
+          "selector": "[data-testid=\"pane-context-menu\"] > button",
+          "description": "One row: Split right, Split below, Add session inside this tab, Show beside an open tab, Zoom or Restore, Rename pane, Stop agent (red), Close pane (red; 40% opacity when disabled).",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "pane-menu-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "pane-menu-divider",
+          "selector": "[data-testid=\"pane-context-menu\"] > div.h-px",
+          "description": "The hairline before the red rows."
+        },
+        {
+          "name": "pane-menu-rename-row",
+          "selector": "[data-testid=\"pane-context-menu\"] > div.flex",
+          "description": "The rename row: the field and OK, replacing the rows."
+        },
+        {
+          "name": "pane-menu-rename-input",
+          "selector": "[data-testid=\"pane-menu-rename-input\"]",
+          "description": "The rename field (surface fill), holding the pane's title.",
+          "text": true
+        },
+        {
+          "name": "pane-menu-rename-confirm",
+          "selector": "[data-testid=\"pane-menu-rename-confirm\"]",
+          "description": "Its OK button (primary).",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "confirm": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 5,
+      "elements": [
+        {
+          "name": "confirm-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "The dimming layer over the whole window (55% black); a press on it cancels."
+        },
+        {
+          "name": "confirm-panel",
+          "selector": "[data-testid=\"confirm-dialog\"]",
+          "description": "The panel: 360px wide (less 2rem of the window), centred, 16px inside, on the panel fill with a shadow."
+        },
+        {
+          "name": "confirm-message",
+          "selector": ".confirm-dialog__message",
+          "description": "The message: line breaks kept, long words broken anywhere; 0.88rem on a 1.4 line.",
+          "text": true
+        },
+        {
+          "name": "confirm-extra",
+          "selector": "[data-testid=\"confirm-dialog\"] > :not(.confirm-dialog__message):not(div.flex)",
+          "description": "What the caller adds under the message: the close warning's keep-running link and its do-not-warn-again box.",
+          "text": true
+        },
+        {
+          "name": "confirm-buttons",
+          "selector": "[data-testid=\"confirm-dialog\"] > div.flex",
+          "description": "The row of buttons, right aligned, 8px apart."
+        },
+        {
+          "name": "confirm-cancel",
+          "selector": "[data-testid=\"confirm-cancel\"]",
+          "description": "The Cancel button.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "confirm-accept",
+          "selector": "[data-testid=\"confirm-accept\"]",
+          "description": "The confirm button (primary): the caller's label, or Starting... while busy.",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "dialog": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 5,
+      "elements": [
+        {
+          "name": "dialog-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "The dimming layer over the whole window (55% black); a press on it closes the dialog."
+        },
+        {
+          "name": "dialog-panel",
+          "selector": "[data-testid=\"file-name-dialog\"]",
+          "description": "The panel: 30rem wide (92% of a narrower window), centred, 16px inside, on the panel fill with a shadow; rows 0.6rem apart."
+        },
+        {
+          "name": "dialog-title",
+          "selector": "[data-testid=\"file-name-dialog\"] > h2",
+          "description": "The title, 0.9rem semibold.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "dialog-input",
+          "selector": "[data-testid=\"file-name-input\"]",
+          "description": "The caller's field: surface fill, 0.85rem; `text` is its value.",
+          "text": true
+        },
+        {
+          "name": "dialog-hint",
+          "selector": "[data-testid=\"file-name-dialog\"] > p:not([role])",
+          "description": "The caller's hint under the field (red).",
+          "text": true
+        },
+        {
+          "name": "dialog-error",
+          "selector": "[data-testid=\"file-name-dialog\"] > p[role=\"alert\"]",
+          "description": "The caller's error line (red).",
+          "text": true
+        },
+        {
+          "name": "dialog-buttons",
+          "selector": "[data-testid=\"file-name-dialog\"] > div.flex",
+          "description": "The caller's row of buttons, right aligned."
+        },
+        {
+          "name": "dialog-cancel",
+          "selector": "[data-testid=\"file-name-dialog\"] > div.flex > button:first-child",
+          "description": "Cancel.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "dialog-confirm",
+          "selector": "[data-testid=\"file-name-confirm\"]",
+          "description": "Create (primary); 55% opacity while the field is not valid.",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "toast": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 4,
+      "elements": [
+        {
+          "name": "toast-stack",
+          "selector": "[data-testid=\"toast\"]",
+          "description": "The column of toasts: top right, 12px from the window edges, 320px wide, 8px between toasts, the newest first."
+        },
+        {
+          "name": "toast-card",
+          "selector": "[data-testid=\"toast\"] .animate-toast-in",
+          "description": "One toast: the lighter surface fill, rounded, with a shadow."
+        },
+        {
+          "name": "toast-open",
+          "selector": "[data-testid^=\"toast-\"]:not([data-testid^=\"toast-dismiss-\"])",
+          "description": "The button that fills the card (a click opens what the toast is about)."
+        },
+        {
+          "name": "toast-mark",
+          "selector": "[data-testid^=\"toast-\"]:not([data-testid^=\"toast-dismiss-\"]) > :first-child",
+          "description": "The mark at the left: the session's status mark, a mod's own character, or a plain ring (teal; yellow for a usage alert or a warning; red for an error or a blocked session)."
+        },
+        {
+          "name": "toast-heading",
+          "selector": "[data-testid^=\"toast-\"]:not([data-testid^=\"toast-dismiss-\"]) > span.min-w-0 > span:first-child",
+          "description": "The first line: what happened, bold 0.82rem.",
+          "text": true
+        },
+        {
+          "name": "toast-detail",
+          "selector": "[data-testid^=\"toast-\"]:not([data-testid^=\"toast-dismiss-\"]) > span.min-w-0 > span:nth-child(2)",
+          "description": "The second line: to what, in the muted colour.",
+          "text": true
+        },
+        {
+          "name": "toast-dismiss",
+          "selector": "[data-testid^=\"toast-dismiss-\"]",
+          "description": "The x at the card's right edge."
+        },
+        {
+          "name": "toast-dismiss-glyph",
+          "selector": "[data-testid^=\"toast-dismiss-\"] > svg",
+          "description": "Its cross."
+        }
+      ]
+    },
+    "pane-header": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "pane-header",
+          "selector": "[data-testid^=\"pane-header-\"]",
+          "description": "The header row: 28px high, on the panel fill, 6px each side, 6px between its parts; 12px muted text.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "pane-header-"
+          }
+        },
+        {
+          "name": "pane-header-icon",
+          "selector": "[data-testid^=\"pane-header-\"] > span.shrink-0:not([data-testid])",
+          "description": "The slot of the agent's icon (the name and state take the room the controls leave).",
+          "key": {
+            "closest": "[data-testid^=\"pane-header-\"]",
+            "attr": "data-testid",
+            "strip": "pane-header-"
+          }
+        },
+        {
+          "name": "pane-header-icon-glyph",
+          "selector": "[data-testid^=\"pane-header-\"] > span.shrink-0:not([data-testid]) > *",
+          "description": "The agent's icon, 12px.",
+          "key": {
+            "closest": "[data-testid^=\"pane-header-\"]",
+            "attr": "data-testid",
+            "strip": "pane-header-"
+          }
+        },
+        {
+          "name": "pane-header-name",
+          "selector": "[data-testid^=\"pane-header-\"] > span.truncate",
+          "description": "The tab's name, cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid^=\"pane-header-\"]",
+            "attr": "data-testid",
+            "strip": "pane-header-"
+          },
+          "text": true
+        },
+        {
+          "name": "pane-header-state",
+          "selector": "[data-testid^=\"pane-header-\"] > span.flex[title]",
+          "description": "The state group: its dot and its word.",
+          "key": {
+            "closest": "[data-testid^=\"pane-header-\"]",
+            "attr": "data-testid",
+            "strip": "pane-header-"
+          }
+        },
+        {
+          "name": "pane-header-state-dot",
+          "selector": "[data-testid^=\"pane-header-\"] > span.flex[title] > span.rounded-full",
+          "description": "The 5px dot in the state's colour.",
+          "key": {
+            "closest": "[data-testid^=\"pane-header-\"]",
+            "attr": "data-testid",
+            "strip": "pane-header-"
+          }
+        },
+        {
+          "name": "pane-header-state-word",
+          "selector": "[data-testid^=\"pane-header-\"] > span.flex[title] > span.truncate",
+          "description": "Working, Waiting for you, Done or Idle.",
+          "key": {
+            "closest": "[data-testid^=\"pane-header-\"]",
+            "attr": "data-testid",
+            "strip": "pane-header-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "pane-controls",
+          "selector": "[data-testid^=\"tile-controls-\"]",
+          "description": "The two buttons at the right (or alone in the corner).",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "tile-controls-"
+          }
+        },
+        {
+          "name": "pane-expand",
+          "selector": "[data-testid^=\"tile-expand-\"]",
+          "description": "Leave the split: a 24px ghost button.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "tile-expand-"
+          }
+        },
+        {
+          "name": "pane-expand-glyph",
+          "selector": "[data-testid^=\"tile-expand-\"] > svg",
+          "description": "Its four corners.",
+          "key": {
+            "closest": "[data-testid^=\"tile-expand-\"]",
+            "attr": "data-testid",
+            "strip": "tile-expand-"
+          }
+        },
+        {
+          "name": "pane-close",
+          "selector": "[data-testid^=\"tile-close-\"]",
+          "description": "Close the tab: a 24px ghost button.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "tile-close-"
+          }
+        },
+        {
+          "name": "pane-close-glyph",
+          "selector": "[data-testid^=\"tile-close-\"] > svg",
+          "description": "Its cross.",
+          "key": {
+            "closest": "[data-testid^=\"tile-close-\"]",
+            "attr": "data-testid",
+            "strip": "tile-close-"
+          }
+        },
+        {
+          "name": "pane-corner",
+          "selector": "div.pointer-events-auto.absolute",
+          "description": "The corner variant's box: top right, 4px in, on the panel fill, rounded."
+        }
+      ]
+    },
+    "new-session": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "launcher",
+          "selector": ".new-session-popover",
+          "description": "The popover: 200px to 320px wide, 4px below its anchor, left aligned (12px from the window edge at least), on the lighter surface fill with a shadow."
+        },
+        {
+          "name": "launcher-filter",
+          "selector": "[data-testid=\"new-tab-filter\"]",
+          "description": "The filter field at the top (scoped form); `text` is what was typed, `placeholder` what shows while it is empty.",
+          "text": true
+        },
+        {
+          "name": "launcher-list",
+          "selector": "#new-tab-launcher-list",
+          "description": "The list of agents and extras."
+        },
+        {
+          "name": "launcher-option",
+          "selector": "[role=\"option\"]",
+          "description": "One row: an agent, New browser, New file, or Manage agents (muted); the highlighted one is on the lighter fill; disabled while the host's agents are not ready (40% opacity).",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "launcher-option-icon",
+          "selector": "[role=\"option\"] > :first-child:not(span.flex-1):not(kbd)",
+          "description": "The row's mark: the agent's icon or the extra's.",
+          "key": {
+            "closest": "[role=\"option\"]",
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "launcher-option-label",
+          "selector": "[role=\"option\"] > span.flex-1",
+          "description": "The row's name.",
+          "key": {
+            "closest": "[role=\"option\"]",
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "launcher-option-key",
+          "selector": "[role=\"option\"] > kbd",
+          "description": "The row's number key, 1 to 9, while nothing is typed.",
+          "key": {
+            "closest": "[role=\"option\"]",
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "launcher-note",
+          "selector": ".new-session-popover p[role]",
+          "description": "A line under the list: No match, Checking agents, the host's error (red), or Enable or install an agent.",
+          "text": true
+        },
+        {
+          "name": "agent-select",
+          "selector": "[data-testid=\"new-session-popover-agent\"]",
+          "description": "The agent dropdown at the top of the unscoped form.",
+          "text": true
+        },
+        {
+          "name": "agent-manage",
+          "selector": ".new-session-popover > div:first-child > button:not([data-testid])",
+          "description": "Manage agents, under the dropdown (unscoped form).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "project-option",
+          "selector": "[data-testid^=\"project-option-\"]",
+          "description": "One known project folder (unscoped form).",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "project-option-"
+          }
+        },
+        {
+          "name": "project-option-name",
+          "selector": "[data-testid^=\"project-option-\"]",
+          "description": "Its folder's name (the text node only).",
+          "key": {
+            "closest": "[data-testid^=\"project-option-\"]",
+            "attr": "data-testid",
+            "strip": "project-option-"
+          },
+          "textRange": true,
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "project-option-path",
+          "selector": "[data-testid^=\"project-option-\"] > span",
+          "description": "Its full path, small and muted.",
+          "key": {
+            "closest": "[data-testid^=\"project-option-\"]",
+            "attr": "data-testid",
+            "strip": "project-option-"
+          },
+          "text": true
+        }
+      ]
+    },
+    "tab-menu": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "tab-menu",
+          "selector": "[data-testid=\"tab-split-menu\"]",
+          "description": "The menu: 280 px wide, on the lighter surface fill with a shadow; its height follows its rows (and is cut at the window's bottom edge)."
+        },
+        {
+          "name": "tab-menu-item",
+          "selector": "[data-testid=\"tab-split-menu\"] > button",
+          "description": "One row: Rename tab, Split right / below with new terminal, Show this tab full size, Separate all tabs, an opener's row, Stop agent (red), Close tab (red); disabled rows are 40% opacity.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-show-beside",
+          "selector": "[data-testid=\"tab-menu-show-beside\"]",
+          "description": "The 'Show beside' row with its chevron; it opens the list of open tabs beside the menu (hover, click, Right arrow or Enter).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-beside-list",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"]",
+          "description": "The list of open tabs, beside the menu's right edge (left when there is no room), on the menu's surface with its shadow; it scrolls past the window's height."
+        },
+        {
+          "name": "tab-menu-beside-item",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button",
+          "description": "One open tab to show beside this one.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-item-label",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button > span.block",
+          "description": "The name inside an open tab's row, cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button",
+            "attr": "data-testid"
+          },
+          "text": true
+        },
+        {
+          "name": "tab-menu-empty",
+          "selector": "[data-testid=\"tab-menu-empty\"]",
+          "description": "No other open tab available.",
+          "text": true
+        },
+        {
+          "name": "tab-menu-divider",
+          "selector": "[data-testid=\"tab-split-menu\"] > div.h-px",
+          "description": "A hairline between groups of rows."
+        },
+        {
+          "name": "tab-menu-rename-form",
+          "selector": "[data-testid=\"tab-split-menu\"] > form",
+          "description": "The rename form, replacing the rows."
+        },
+        {
+          "name": "tab-menu-rename-input",
+          "selector": "[data-testid=\"tab-menu-rename-input\"]",
+          "description": "The name field.",
+          "text": true
+        },
+        {
+          "name": "tab-menu-rename-save",
+          "selector": "[data-testid=\"tab-split-menu\"] > form > button",
+          "description": "Save (primary).",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "select": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 1,
+      "elements": [
+        {
+          "name": "select-field",
+          "selector": "[data-testid=\"select-demo\"]",
+          "description": "The field: a button (or, with freeText, a text input) in the caller's class; the SDK default is the surface fill, 0.8rem text, soft corners.",
+          "text": true
+        },
+        {
+          "name": "select-field-label",
+          "selector": "[data-testid=\"select-demo\"] > span.truncate",
+          "description": "The chosen option's label (or the placeholder).",
+          "text": true
+        },
+        {
+          "name": "select-chevron",
+          "selector": "[data-testid=\"select-demo\"] > svg",
+          "description": "The chevron at the field's right end."
+        },
+        {
+          "name": "select-list",
+          "selector": "[role=\"listbox\"]",
+          "description": "The open list: lighter surface fill, shadow, scrolls when taller than its limit."
+        },
+        {
+          "name": "select-option",
+          "selector": "[role=\"listbox\"] > [role=\"option\"]",
+          "description": "One option; the highlighted one is on the lighter fill, a disabled one is 40% opacity.",
+          "key": {
+            "self": true,
+            "attr": "data-value"
+          }
+        },
+        {
+          "name": "select-option-label",
+          "selector": "[role=\"listbox\"] > [role=\"option\"] > span.truncate",
+          "description": "The option's label.",
+          "key": {
+            "closest": "[role=\"option\"]",
+            "attr": "data-value"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "select-option-check",
+          "selector": "[role=\"listbox\"] > [role=\"option\"] > span[aria-hidden]",
+          "description": "The tick on the chosen option, in the accent colour.",
+          "key": {
+            "closest": "[role=\"option\"]",
+            "attr": "data-value"
+          },
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "keybind-help": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 5,
+      "elements": [
+        {
+          "name": "keybind-help-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "The dimming layer over the whole window (55% black); a press on it closes the help."
+        },
+        {
+          "name": "keybind-help-panel",
+          "selector": "[data-testid=\"keybind-help\"]",
+          "description": "The panel: 560 px wide at most, centred, on the panel fill with a shadow."
+        },
+        {
+          "name": "keybind-help-header",
+          "selector": "[data-testid=\"keybind-help\"] > div:first-child",
+          "description": "The title row: 16 px side padding."
+        },
+        {
+          "name": "keybind-help-title",
+          "selector": "[data-testid=\"keybind-help\"] h2",
+          "description": "Keybindings, 1rem semibold.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "keybind-help-close",
+          "selector": "[aria-label=\"Close keybind help\"]",
+          "description": "The close button at the right."
+        },
+        {
+          "name": "keybind-help-close-glyph",
+          "selector": "[aria-label=\"Close keybind help\"] > svg",
+          "description": "Its cross."
+        },
+        {
+          "name": "keybind-help-search",
+          "selector": "[data-testid=\"keybind-help-search\"]",
+          "description": "The search field (surface fill, 0.85rem); `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "keybind-help-list",
+          "selector": "[data-testid=\"keybind-help\"] > div:last-child",
+          "description": "The scrolling list of groups."
+        },
+        {
+          "name": "keybind-help-empty",
+          "selector": "[data-testid=\"keybind-help\"] div.text-center",
+          "description": "No matching keybindings.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "keybind-help-group",
+          "selector": "[data-testid=\"keybind-help\"] section",
+          "description": "One group: 16 px side padding."
+        },
+        {
+          "name": "keybind-help-group-title",
+          "selector": "[data-testid=\"keybind-help\"] section > h3",
+          "description": "The group's name in small capitals-style uppercase (0.78rem, muted, spaced).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "keybind-help-row",
+          "selector": "[data-testid=\"keybind-help\"] li",
+          "description": "One binding: its keys, then its description, 12 px apart."
+        },
+        {
+          "name": "keybind-help-keys",
+          "selector": "[data-testid=\"keybind-help\"] li > kbd",
+          "description": "The key label in a lighter chip, at least 9rem wide, centred, monospace 0.72rem, accent colour.",
+          "text": true
+        },
+        {
+          "name": "keybind-help-description",
+          "selector": "[data-testid=\"keybind-help\"] li > span",
+          "description": "What the binding does, 0.8rem.",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "launcher": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 4,
+      "elements": [
+        {
+          "name": "launcher-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "The dimming layer over the whole window (55% black); a press on it closes the launcher."
+        },
+        {
+          "name": "launcher-panel",
+          "selector": "[data-testid=\"new-session-dialog\"]",
+          "description": "The panel: 480 px wide at most, 420 px high at most, its top 12% of the window down; rounded, on the panel fill with a shadow."
+        },
+        {
+          "name": "launcher-title",
+          "selector": "[data-testid=\"new-session-dialog\"] > p",
+          "description": "'New session in...' or 'New in <project>', small and muted.",
+          "text": true
+        },
+        {
+          "name": "launcher-filter",
+          "selector": "[data-testid=\"new-session-filter\"]",
+          "description": "The filter field on the panel fill (no lighter band); `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "launcher-list",
+          "selector": "#new-session-list",
+          "description": "The scrolling list of rows."
+        },
+        {
+          "name": "launcher-row",
+          "selector": "[data-testid^=\"new-session-row-\"]",
+          "description": "One row; the highlighted one is on the lighter fill; muted rows are in the muted colour; disabled rows are 40% opacity.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "new-session-row-"
+          }
+        },
+        {
+          "name": "launcher-row-icon",
+          "selector": "[data-testid^=\"new-session-row-\"] > :first-child:not(span):not(kbd)",
+          "description": "The agent's icon, or the browser or file mark.",
+          "key": {
+            "closest": "[data-testid^=\"new-session-row-\"]",
+            "attr": "data-testid",
+            "strip": "new-session-row-"
+          }
+        },
+        {
+          "name": "launcher-row-label",
+          "selector": "[data-testid^=\"new-session-row-\"] > span.shrink-0",
+          "description": "The row's name.",
+          "key": {
+            "closest": "[data-testid^=\"new-session-row-\"]",
+            "attr": "data-testid",
+            "strip": "new-session-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "launcher-row-detail",
+          "selector": "[data-testid^=\"new-session-row-\"] > span.ml-auto",
+          "description": "The project's path (or the Quickchat note), right aligned, small, cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid^=\"new-session-row-\"]",
+            "attr": "data-testid",
+            "strip": "new-session-row-"
+          },
+          "text": true
+        },
+        {
+          "name": "launcher-row-key",
+          "selector": "[data-testid^=\"new-session-row-\"] > kbd",
+          "description": "The row's number key, 1 to 9, while nothing is typed.",
+          "key": {
+            "closest": "[data-testid^=\"new-session-row-\"]",
+            "attr": "data-testid",
+            "strip": "new-session-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "launcher-note",
+          "selector": "#new-session-list > p",
+          "description": "No match, Checking agents, or the host's error (red).",
+          "text": true
+        }
+      ]
+    },
+    "session-menu": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "tab-menu",
+          "selector": "[data-testid=\"tab-split-menu\"]",
+          "description": "The menu: 280 px wide, on the lighter surface fill with a shadow; its height follows its rows (and is cut at the window's bottom edge)."
+        },
+        {
+          "name": "tab-menu-item",
+          "selector": "[data-testid=\"tab-split-menu\"] > button",
+          "description": "One row: Rename tab, Split right / below with new terminal, Show this tab full size, Separate all tabs, a sidebar row (Move up, Move down), an inbound choice, Close tab (red); disabled rows are 40% opacity.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-show-beside",
+          "selector": "[data-testid=\"tab-menu-show-beside\"]",
+          "description": "The 'Show beside' row with its chevron; it opens the list of open tabs beside the menu (hover, click, Right arrow or Enter).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-beside-list",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"]",
+          "description": "The list of open tabs, beside the menu's right edge (left when there is no room), on the menu's surface with its shadow; it scrolls past the window's height."
+        },
+        {
+          "name": "tab-menu-beside-item",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button",
+          "description": "One open tab to show beside this one.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-menu-item-label",
+          "selector": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button > span.block",
+          "description": "The name inside an open tab's row, cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid=\"tab-split-menu\"] [role=\"menu\"] > button",
+            "attr": "data-testid"
+          },
+          "text": true
+        },
+        {
+          "name": "tab-menu-empty",
+          "selector": "[data-testid=\"tab-menu-empty\"]",
+          "description": "No other open tab available.",
+          "text": true
+        },
+        {
+          "name": "tab-menu-divider",
+          "selector": "[data-testid=\"tab-split-menu\"] > div.h-px",
+          "description": "A hairline between groups of rows."
+        }
+      ]
+    },
+    "tab-drag": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 1,
+      "elements": [
+        {
+          "name": "tab-drag-layer",
+          "selector": "[data-testid=\"tab-drag-layer\"]",
+          "description": "The transparent sheet over the whole window (no fill: the page shows through); it grabs the pointer so nothing under it reacts, with the grabbing cursor."
+        },
+        {
+          "name": "tab-drag-pane",
+          "selector": "[data-testid=\"tab-drag-layer\"] > div.bg-surface-1\\/30",
+          "description": "The pane under the pointer, dimmed with a translucent fill (30% of the lighter surface)."
+        },
+        {
+          "name": "tab-drop-zone",
+          "selector": "[data-testid=\"tab-drop-zone\"]",
+          "description": "The half a split would take (`data-zone`: left, right, up, down, or blocked): the accent at 35% with an inner glow, or the muted fill at 60% when blocked.",
+          "key": {
+            "self": true,
+            "attr": "data-zone"
+          }
+        },
+        {
+          "name": "tab-drop-label",
+          "selector": "[data-testid=\"tab-drop-zone\"] > span",
+          "description": "The label centred in the highlight: Split left / right / above / below, or the reason a split cannot take the tab; on the window's own fill, 0.75rem, with a shadow.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "tab-drag-ghost",
+          "selector": "[data-testid=\"tab-drag-ghost\"]",
+          "description": "The copy of the dragged tab, at the pointer less the grab offset, the tab's own size, with a drop shadow."
+        }
+      ]
+    },
+    "start": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "start-panel",
+          "selector": "[data-testid=\"no-session-panel\"], [data-testid=\"cli-start-panel\"]",
+          "description": "The page: fills the box on the panel fill, its content centred and scrolling when too tall (16 px side padding, 32 px top)."
+        },
+        {
+          "name": "start-column",
+          "selector": "[data-testid$=\"-panel\"] > div",
+          "description": "The column holding everything, at most 24 rem wide (26 rem on the connecting page), centred, 16 px between its rows."
+        },
+        {
+          "name": "start-logo",
+          "selector": "[data-testid=\"no-session-panel\"] img",
+          "description": "The perch mark on the home page: 80x80, soft corners."
+        },
+        {
+          "name": "start-name",
+          "selector": "[data-testid$=\"-panel\"] h1, [data-testid=\"no-session-panel\"] h1, [data-testid=\"no-session-panel\"] h2",
+          "description": "The page's name: 'perch' on the home page (2.4rem, bold), the workspace's name (1.6rem, bold, cut with an ellipsis) or the connecting title (1rem, semibold).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-hint",
+          "selector": "[data-testid$=\"-panel\"] p",
+          "description": "A muted line: the path, 'What do you want to open?', the home hint, or the connecting line; 0.85rem.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-target",
+          "selector": "[data-testid=\"workspace-start-target\"], [data-testid=\"cli-start-target\"]",
+          "description": "The 'Where to open' picker (a select field on the darker fill): the chosen place and a chevron.",
+          "text": true
+        },
+        {
+          "name": "start-action",
+          "selector": "[data-testid=\"home-add-project\"], [data-testid=\"no-session-create\"], [data-testid^=\"workspace-start-\"]:not([data-testid=\"workspace-start-target\"]), [data-testid^=\"cli-start-agent-\"]",
+          "description": "A start button: Add project, New session, or one agent; soft, large, 40% opacity when disabled.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-status",
+          "selector": "[role=\"status\"], [role=\"alert\"]",
+          "description": "The agent list's note in the CLI page: Checking providers, no providers, or the error (red), with a Retry link.",
+          "text": true
+        },
+        {
+          "name": "start-status-action",
+          "selector": "[role=\"status\"] > button, [role=\"alert\"] > button",
+          "description": "Retry: underlined, in the accent colour.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-link",
+          "selector": "[data-testid$=\"-panel\"] button.text-subtext-0",
+          "description": "A small muted link under the buttons: 'Open one automatically: Settings → Empty workspace opens' (and Manage agents in the CLI page); underlined on hover.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-shortcut-row",
+          "selector": "[data-testid=\"no-session-panel\"] dl > div",
+          "description": "One line of the home page's keys: the action at the left, its keys at the right."
+        },
+        {
+          "name": "start-shortcut-label",
+          "selector": "[data-testid=\"no-session-panel\"] dl dt",
+          "description": "The action's name (0.8rem, muted).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "start-shortcut-key",
+          "selector": "[data-testid=\"no-session-panel\"] dl kbd",
+          "description": "One key in a chip on the darker fill, at least 1.5rem wide.",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "folder-browser": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "folder-browser",
+          "selector": "[data-testid=\"dir-browser\"]",
+          "description": "The browser: fills its panel, at least 13 rem high."
+        },
+        {
+          "name": "folder-browser-mode-toggle",
+          "selector": "[data-testid=\"dir-browser-mode-toggle\"]",
+          "description": "The Type path / Browse button at the top right (small, plain).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-up",
+          "selector": "[data-testid=\"dir-browser-up\"]",
+          "description": "The up-one-level arrow at the left of the breadcrumb; 40% opacity at the root."
+        },
+        {
+          "name": "folder-browser-crumbs",
+          "selector": "[data-testid=\"dir-browser\"] span.min-w-0.flex-1",
+          "description": "The path as buttons for each folder; the last is the text colour, the others muted; cut with an ellipsis.",
+          "text": true
+        },
+        {
+          "name": "folder-browser-crumb",
+          "selector": "[data-testid=\"dir-browser\"] span.min-w-0.flex-1 button",
+          "description": "One folder of the path (a click goes there; the last one is disabled).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-filter",
+          "selector": "[data-testid=\"dir-browser-filter\"]",
+          "description": "The filter field (lighter surface fill, 0.78rem); `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "folder-browser-list",
+          "selector": "[data-testid=\"dir-browser\"] div.overflow-y-auto",
+          "description": "The scrolling list of subfolders: 60 to 260 px high."
+        },
+        {
+          "name": "folder-browser-entry",
+          "selector": "[data-testid^=\"dir-browser-entry-\"]",
+          "description": "One subfolder row: the name and, for a repository, a git badge at the right; the row takes the lighter fill on hover.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "dir-browser-entry-"
+          }
+        },
+        {
+          "name": "folder-browser-entry-name",
+          "selector": "[data-testid^=\"dir-browser-entry-\"] > span:first-child",
+          "description": "The folder's name, cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid^=\"dir-browser-entry-\"]",
+            "attr": "data-testid",
+            "strip": "dir-browser-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-git",
+          "selector": "[data-testid^=\"dir-browser-entry-\"] > span:last-child:not(:first-child)",
+          "description": "The 'git' badge: lighter fill, 0.62rem, in the accent colour.",
+          "key": {
+            "closest": "[data-testid^=\"dir-browser-entry-\"]",
+            "attr": "data-testid",
+            "strip": "dir-browser-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-note",
+          "selector": "[data-testid=\"dir-browser\"] div.overflow-y-auto > div",
+          "description": "Loading... or No subfolders (muted, 0.76rem).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-use",
+          "selector": "[data-testid=\"dir-browser-use\"]",
+          "description": "Use this folder / Use this path: the primary button at the right, 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "folder-browser-path-input",
+          "selector": "[data-testid=\"project-path-input\"]",
+          "description": "The typed path field in Type path mode; `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        }
+      ]
+    },
+    "instructions": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 4,
+      "elements": [
+        {
+          "name": "instructions-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "The dimming layer over the whole window; a press on it closes the dialog."
+        },
+        {
+          "name": "instructions-panel",
+          "selector": "[data-testid=\"instructions-dialog\"]",
+          "description": "The dialog panel: 30 rem wide at most, the panel fill, soft corners, a shadow, 16 px of padding, 9.6 px between its rows."
+        },
+        {
+          "name": "instructions-title",
+          "selector": "[data-testid=\"instructions-dialog\"] > h2",
+          "description": "'Instructions for <name>'.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-intro",
+          "selector": "[data-testid=\"instructions-dialog\"] > p",
+          "description": "What the dialog is for: 0.75rem, muted.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-label",
+          "selector": "[data-testid=\"instructions-dialog\"] > label > span:first-child",
+          "description": "The caption of a field: 'Instructions' with the count, 'Reference files and folders' with its hint.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-count",
+          "selector": "[data-testid=\"instructions-count\"]",
+          "description": "The length of the text over the cap.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-text",
+          "selector": "[data-testid=\"instructions-text\"]",
+          "description": "The instructions field (9 rows, the darker fill, 0.5rem 0.4rem padding); `text` is what is in it, 40% opacity while disabled.",
+          "text": true
+        },
+        {
+          "name": "instructions-folders",
+          "selector": "[data-testid=\"instructions-folders\"]",
+          "description": "The reference paths, one per line, in the monospace font (4 rows); `text` is what is in it.",
+          "text": true
+        },
+        {
+          "name": "instructions-error",
+          "selector": "[data-testid=\"instructions-error\"]",
+          "description": "The red line under the fields.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-cancel",
+          "selector": "[data-testid=\"instructions-dialog\"] > div.flex.justify-end > button:first-child",
+          "description": "Cancel.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "instructions-save",
+          "selector": "[data-testid=\"instructions-save\"]",
+          "description": "Save, the primary button; 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "memory": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 4,
+      "elements": [
+        {
+          "name": "memory-scrim",
+          "selector": "body > div.fixed.inset-0",
+          "description": "A dimming layer over the whole window: the dialog's, and, while a delete is asked, the confirmation's over it.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "memory-panel",
+          "selector": "[data-testid=\"memory-dialog\"]",
+          "description": "The dialog panel: 30 rem wide at most, the panel fill, a shadow, 16 px of padding, 9.6 px between rows."
+        },
+        {
+          "name": "memory-title",
+          "selector": "[data-testid=\"memory-dialog\"] > h2",
+          "description": "'Memory for <name>'.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-intro",
+          "selector": "[data-testid=\"memory-dialog\"] > p",
+          "description": "What the notes are (0.75rem, muted).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-caps",
+          "selector": "[data-testid=\"memory-caps\"]",
+          "description": "'n / 64 files, up to 16000 characters each' at the left of the toolbar.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-new",
+          "selector": "[data-testid=\"memory-new\"]",
+          "description": "New file at the right of the toolbar; 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-enabled",
+          "selector": "[data-testid=\"memory-enabled\"]",
+          "description": "The box that lets the project's agents use memory."
+        },
+        {
+          "name": "memory-enabled-label",
+          "selector": "[data-testid=\"memory-dialog\"] > label.flex > span",
+          "description": "The box's line (its '(off: ...)' note when unticked).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-note",
+          "selector": "[data-testid=\"memory-dialog\"] > span.text-subtext-0",
+          "description": "'Loading...' or 'No memory files yet.'",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-row",
+          "selector": "[data-testid^=\"memory-row-\"]",
+          "description": "One file: the row button on the darker fill and its Delete button, 8 px apart.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "memory-row-"
+          }
+        },
+        {
+          "name": "memory-open",
+          "selector": "[data-testid^=\"memory-open-\"]",
+          "description": "The file's row button: three lines, on the darker fill.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "memory-open-"
+          }
+        },
+        {
+          "name": "memory-file-title",
+          "selector": "[data-testid^=\"memory-row-\"] button > span:first-child",
+          "description": "The file's name, monospace 0.8rem.",
+          "key": {
+            "closest": "[data-testid^=\"memory-row-\"]",
+            "attr": "data-testid",
+            "strip": "memory-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-file-summary",
+          "selector": "[data-testid^=\"memory-row-\"] button > span.truncate",
+          "description": "The summary, one line cut with an ellipsis (0.75rem, muted).",
+          "key": {
+            "closest": "[data-testid^=\"memory-row-\"]",
+            "attr": "data-testid",
+            "strip": "memory-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-file-meta",
+          "selector": "[data-testid^=\"memory-row-\"] button > span:last-child",
+          "description": "'who - how long ago - n chars' (0.68rem, the dimmer colour).",
+          "key": {
+            "closest": "[data-testid^=\"memory-row-\"]",
+            "attr": "data-testid",
+            "strip": "memory-row-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-delete",
+          "selector": "[data-testid^=\"memory-delete-\"]",
+          "description": "A row's Delete button.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "memory-delete-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-error",
+          "selector": "[data-testid=\"memory-error\"]",
+          "description": "The red line above the buttons.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-close",
+          "selector": "[data-testid=\"memory-dialog\"] > div.flex.justify-end > button",
+          "description": "Close, at the bottom right of the list page.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-file-name",
+          "selector": "[data-testid=\"memory-file-name\"]",
+          "description": "The open file's name (monospace 0.8rem).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-name",
+          "selector": "[data-testid=\"memory-name\"]",
+          "description": "The name field of a new file (monospace); `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "memory-count",
+          "selector": "[data-testid=\"memory-count\"]",
+          "description": "The text's length over the cap.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-text",
+          "selector": "[data-testid=\"memory-text\"]",
+          "description": "The file's text (12 rows, monospace); `text` is what is in it.",
+          "text": true
+        },
+        {
+          "name": "memory-conflict",
+          "selector": "[data-testid=\"memory-conflict\"]",
+          "description": "The stale-edit notice, in red: two lines.",
+          "text": true
+        },
+        {
+          "name": "memory-reload",
+          "selector": "[data-testid=\"memory-reload\"]",
+          "description": "Load their version.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-back",
+          "selector": "[data-testid=\"memory-back\"]",
+          "description": "Back.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-save",
+          "selector": "[data-testid=\"memory-save\"]",
+          "description": "Save, the primary button; 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "memory-confirm",
+          "selector": "[data-testid=\"confirm-dialog\"]",
+          "description": "The delete question's panel (the stock confirmation, the `confirm` screen), over the dialog."
+        },
+        {
+          "name": "memory-confirm-message",
+          "selector": ".confirm-dialog__message",
+          "description": "The question: 'Delete <file>? Agents and people lose this note.'",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "worktree": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "worktree-plus",
+          "selector": "[data-testid^=\"worktree-menu-\"]",
+          "description": "The + button the popover hangs from (an icon button, here shown; the sidebar shows it on hover)."
+        },
+        {
+          "name": "worktree-popover",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"]",
+          "description": "The popover: 420 px wide at most, the lighter surface fill, soft corners, a shadow; under the button, or over it when there is more room above."
+        },
+        {
+          "name": "worktree-heading",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"] > div:first-child > span:first-child",
+          "description": "'Worktrees' or 'New workspace', small uppercase, semibold, muted, spaced.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-project",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"] > div:first-child > span:last-child",
+          "description": "The project's folder name at the right of the heading, in the accent colour, cut with an ellipsis.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-list",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"] > div.overflow-y-auto",
+          "description": "The scrolling list of entries, 240 px high at most."
+        },
+        {
+          "name": "worktree-note",
+          "selector": "[role=\"dialog\"][aria-label=\"Git worktrees\"] > div.overflow-y-auto > div:not(.worktree-menu__entry)",
+          "description": "'Loading...' or 'No worktrees' (muted, 0.76rem).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-entry",
+          "selector": "[data-testid^=\"worktree-entry-\"]",
+          "description": "One worktree: branch and path at the left, Open and Delete at the right; the row takes the lighter fill on hover.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "worktree-entry-"
+          }
+        },
+        {
+          "name": "worktree-entry-branch",
+          "selector": ".worktree-menu__entry-branch",
+          "description": "The branch (0.8rem, semibold, cut with an ellipsis), or '(detached <short commit>)', with its badges.",
+          "key": {
+            "closest": "[data-testid^=\"worktree-entry-\"]",
+            "attr": "data-testid",
+            "strip": "worktree-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-badge",
+          "selector": "[data-testid^=\"worktree-entry-\"] .worktree-menu__entry-branch > span",
+          "description": "The 'primary' badge (accent) or the 'dirty' badge (yellow): 0.6rem, on the darker fill.",
+          "key": {
+            "closest": "[data-testid^=\"worktree-entry-\"]",
+            "attr": "data-testid",
+            "strip": "worktree-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-entry-path",
+          "selector": ".worktree-menu__entry-path",
+          "description": "The checkout path (0.68rem, muted), cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid^=\"worktree-entry-\"]",
+            "attr": "data-testid",
+            "strip": "worktree-entry-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-open",
+          "selector": "[data-testid^=\"worktree-open-\"]",
+          "description": "Open: a small plain button.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "worktree-open-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-remove",
+          "selector": "[data-testid^=\"worktree-remove-\"]",
+          "description": "Delete (or Remove on a host that cannot delete the branch); red on hover; never on the primary checkout.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "worktree-remove-"
+          },
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-error",
+          "selector": "[data-testid=\"worktree-error\"]",
+          "description": "The core's refusal, in red, with its line breaks.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-new",
+          "selector": "[data-testid=\"worktree-new\"]",
+          "description": "'+ New worktree...': a menu row at the bottom of the list page.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-name-input",
+          "selector": "[data-testid=\"worktree-name-input\"]",
+          "description": "The task name field; `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "worktree-start-input",
+          "selector": "[data-testid=\"worktree-start-input\"]",
+          "description": "The start-from field (a free-text select); `text` is what was typed.",
+          "text": true
+        },
+        {
+          "name": "worktree-branch-input",
+          "selector": "[data-testid=\"worktree-branch-input\"]",
+          "description": "The branch field; its placeholder follows the task name.",
+          "text": true
+        },
+        {
+          "name": "worktree-parent-select",
+          "selector": "[data-testid=\"worktree-parent-select\"]",
+          "description": "The parent workspace select.",
+          "text": true
+        },
+        {
+          "name": "worktree-new-branch",
+          "selector": "[data-testid=\"worktree-new-branch\"]",
+          "description": "The 'new branch' box of an older host."
+        },
+        {
+          "name": "worktree-path-input",
+          "selector": "[data-testid=\"worktree-path-input\"]",
+          "description": "The checkout path field, previewing the default path once a branch is known.",
+          "text": true
+        },
+        {
+          "name": "worktree-agent-select",
+          "selector": "[data-testid=\"worktree-agent-select\"]",
+          "description": "The starting pane select.",
+          "text": true
+        },
+        {
+          "name": "worktree-create-cancel",
+          "selector": "[data-testid=\"worktree-create-cancel\"]",
+          "description": "Cancel.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-create-submit",
+          "selector": "[data-testid=\"worktree-create-submit\"]",
+          "description": "Create (primary); 40% opacity while disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-confirm",
+          "selector": "[data-testid=\"confirm-dialog\"]",
+          "description": "A question over the page (a removal, the force question or the kept-branch review): the stock confirmation panel."
+        },
+        {
+          "name": "worktree-confirm-message",
+          "selector": ".confirm-dialog__message",
+          "description": "The question with its line breaks.",
+          "text": true
+        },
+        {
+          "name": "worktree-confirm-accept",
+          "selector": "[data-testid=\"confirm-accept\"]",
+          "description": "The accepting button (Delete, Force remove, Delete branch).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "worktree-confirm-cancel",
+          "selector": "[data-testid=\"confirm-cancel\"]",
+          "description": "The refusing button (Cancel, Keep branch).",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "terminal-search": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "terminal-frame",
+          "selector": "[data-testid=\"persistent-agent-terminal\"]",
+          "description": "The terminal pane the bar floats over (the card fill here; the terminal's own picture is not drawn)."
+        },
+        {
+          "name": "term-search",
+          "selector": "[data-testid=\"term-search\"]",
+          "description": "The bar: the lighter surface fill, soft corners, a shadow, 8 px down and 12 px from the right edge of the pane; 0.3rem between its parts."
+        },
+        {
+          "name": "term-search-input",
+          "selector": "[data-testid=\"term-search-input\"]",
+          "description": "The field (11 rem wide, the darker fill, 0.8rem); `text` is what was typed, `placeholder` what shows while empty.",
+          "text": true
+        },
+        {
+          "name": "term-search-button",
+          "selector": "[data-testid=\"term-search\"] > button",
+          "description": "Previous (up arrow), Next (down arrow) and Close (cross): 1.4 rem squares on the lighter fill, muted; the cross is larger.",
+          "key": {
+            "self": true,
+            "attr": "title"
+          },
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "agent-control": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "terminal-frame",
+          "selector": "[data-testid=\"persistent-agent-terminal\"]",
+          "description": "The terminal pane the controls float over."
+        },
+        {
+          "name": "agent-control-chip",
+          "selector": "[data-testid=\"agent-control-chip\"]",
+          "description": "The chip: the glass surface (translucent, blurred), 8 px down and 12 px from the right; its text then its buttons."
+        },
+        {
+          "name": "agent-control-label",
+          "selector": "[data-testid=\"agent-control-chip\"] > span",
+          "description": "How this view stands.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "agent-control-button",
+          "selector": "[data-testid=\"agent-control-chip\"] > button",
+          "description": "Retry CLI or Take control (soft, medium); 40% opacity while pending or disabled.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "agent-control-error",
+          "selector": ".terminal__cli-error",
+          "description": "The red notice: centred, 12 px above the bottom, at most 90% wide, on a reddish fill.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "agent-control-ended",
+          "selector": ".terminal__exited",
+          "description": "The banner: centred in the pane, the lighter panel fill with a shadow, a column of its text then its buttons.",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          }
+        },
+        {
+          "name": "agent-control-ended-text",
+          "selector": ".terminal__exited-text",
+          "description": "What happened to the agent.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "agent-control-ended-button",
+          "selector": ".terminal__exited-actions > button",
+          "description": "Restart CLI / Resume agent (primary) and Close session (soft).",
+          "key": {
+            "self": true,
+            "attr": "data-testid"
+          },
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "phone-size": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 2,
+      "elements": [
+        {
+          "name": "terminal-frame",
+          "selector": "[data-testid=\"persistent-agent-terminal\"]",
+          "description": "The terminal pane the notice floats over."
+        },
+        {
+          "name": "phone-size-notice",
+          "selector": "[data-testid=\"phone-size-notice\"]",
+          "description": "The open notice: a glass panel (translucent, blurred, pane-rounded corners, a shadow), 12 px padding, 8 px between its rows."
+        },
+        {
+          "name": "phone-size-chip",
+          "selector": "[data-testid=\"phone-size-chip\"]",
+          "description": "The folded chip at the same corner."
+        },
+        {
+          "name": "phone-size-heading",
+          "selector": "[data-testid=\"phone-size-notice\"] span.font-semibold",
+          "description": "'Your phone is sizing this terminal' (semibold, the text colour).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "phone-size-text",
+          "selector": "[data-testid=\"phone-size-notice\"] span:not(.font-semibold)",
+          "description": "The explanation (0.8rem, muted).",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "phone-size-fold",
+          "selector": "[aria-label=\"Keep phone size and hide this\"]",
+          "description": "The cross that folds the notice.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "phone-size-button",
+          "selector": "[data-testid=\"phone-size-notice\"] div.flex.flex-wrap > button, [data-testid=\"phone-size-chip\"] > button",
+          "description": "Take back this tab (primary), Take back all tabs (soft), or the folded chip's 'Phone size'; 40% opacity while pending.",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "window": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "sidebar-card",
+          "selector": "[data-testid=\"sidebar-card\"]",
+          "description": "The sidebar card: 12px round, the card colour, 8px from the window edge, 240px wide by default."
+        },
+        {
+          "name": "main-card",
+          "selector": "[data-testid=\"main-card\"]",
+          "description": "The main card: takes what the other two leave."
+        },
+        {
+          "name": "tools-card",
+          "selector": "[data-testid=\"tools-card\"]",
+          "description": "The drawer card: 46% of the window (at most 760) by default."
+        },
+        {
+          "name": "sidebar-toggle",
+          "selector": "[data-testid=\"sidebar-collapse-toggle\"]",
+          "description": "The sidebar toggle: 28px, in a card's 44px head."
+        },
+        {
+          "name": "drawer-toggle",
+          "selector": "[data-testid=\"workspace-tools-toggle\"]",
+          "description": "The drawer toggle, in the main card's head while the drawer is closed, else in the drawer's."
+        },
+        {
+          "name": "resize-sidebar",
+          "selector": "[data-testid=\"resize-sidebar\"]",
+          "description": "The gutter that resizes the sidebar: 8px."
+        },
+        {
+          "name": "resize-tools",
+          "selector": "[data-testid=\"resize-tools\"]",
+          "description": "The gutter that resizes the drawer: 8px."
+        },
+        {
+          "name": "tools-tab",
+          "selector": "nav[aria-label=\"Files, Git and Browser\"] > button",
+          "description": "One of the drawer's tabs.",
+          "text": true
+        },
+        {
+          "name": "status-bar",
+          "selector": "footer.status-bar",
+          "description": "The status bar, below the cards on the backdrop."
+        }
+      ]
+    },
+    "settings": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 8,
+      "elements": [
+        {
+          "name": "settings-modal",
+          "selector": "[data-testid=\"settings-modal\"]",
+          "description": "The page over the whole window: the app's backdrop with 8 px around two cards."
+        },
+        {
+          "name": "settings-nav-card",
+          "selector": "[data-testid=\"settings-modal\"] > nav",
+          "description": "The section list's card: 15 rem wide, the full height, the card fill."
+        },
+        {
+          "name": "settings-close",
+          "selector": "[data-testid=\"settings-close\"]",
+          "description": "'Back to app': a ghost button with a chevron, after room for the traffic lights.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "settings-nav",
+          "selector": "nav [data-testid^=\"settings-nav-\"]",
+          "description": "A section's button in the list; the chosen one has the raised fill.",
+          "text": true,
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "settings-nav-"
+          }
+        },
+        {
+          "name": "settings-main-card",
+          "selector": "[data-testid=\"settings-modal\"] > main",
+          "description": "The section's card: the rest of the width, the card fill."
+        },
+        {
+          "name": "settings-search",
+          "selector": "[data-testid=\"settings-search\"]",
+          "description": "The search field, 16 rem wide at the card's top right.",
+          "text": true
+        },
+        {
+          "name": "settings-title",
+          "selector": "[data-testid=\"settings-modal\"] > main h1",
+          "description": "The section's name (or 'Search results'), 1.6 rem.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "settings-body",
+          "selector": "[data-testid=\"settings-modal\"] .settings-modal__body",
+          "description": "The scrolling body: 2 rem at the sides, the section centred in at most 46 rem."
+        },
+        {
+          "name": "settings-group-title",
+          "selector": "[data-testid=\"settings-modal\"] > main h3",
+          "description": "A block's heading above its card.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "settings-group-card",
+          "selector": "[data-testid=\"settings-modal\"] > main section > div.rounded-ui",
+          "description": "A block's card: the surface fill, 1 rem at the sides."
+        },
+        {
+          "name": "settings-row",
+          "selector": "[data-testid=\"settings-modal\"] [data-setting-row]",
+          "description": "One setting: its name and description on the left, its control on the right."
+        },
+        {
+          "name": "settings-row-title",
+          "selector": "[data-testid=\"settings-modal\"] [data-setting-row] > div:first-child > div:first-child",
+          "description": "A setting's name.",
+          "text": true,
+          "textSized": true
+        },
+        {
+          "name": "settings-row-description",
+          "selector": "[data-testid=\"settings-modal\"] [data-setting-row] > div:first-child > div:nth-child(2)",
+          "description": "A setting's description.",
+          "text": true
+        },
+        {
+          "name": "settings-result-title",
+          "selector": "[data-testid^=\"settings-result-\"] > h2",
+          "description": "A section's name above its matching rows while searching.",
+          "text": true,
+          "textSized": true
+        }
+      ]
+    },
+    "files": {
+      "root": "[data-parity-card]",
+      "scope": "body",
+      "overflow": [],
+      "minElements": 3,
+      "elements": [
+        {
+          "name": "files-explorer",
+          "selector": "[data-testid=\"workspace-files-view\"]",
+          "description": "The explorer layout: the tree under its header, filling the drawer's body."
+        },
+        {
+          "name": "files-tree",
+          "selector": "[data-testid=\"workspace-file-tree-scroll\"]",
+          "description": "The tree's scroll area."
+        },
+        {
+          "name": "files-entry",
+          "selector": "[data-testid^=\"workspace-file-entry-\"]",
+          "description": "One entry's row: 22px, 13px text, 12px in from the left, 8px more per level; filled when selected.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "workspace-file-entry-"
+          }
+        },
+        {
+          "name": "files-entry-icon",
+          "selector": "[data-testid^=\"workspace-file-entry-\"] > svg[data-file-icon]",
+          "description": "The entry's file or folder icon, 14px.",
+          "key": {
+            "closest": "[data-testid^=\"workspace-file-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-file-entry-"
+          }
+        },
+        {
+          "name": "files-entry-name",
+          "selector": "[data-testid^=\"workspace-file-entry-\"] > span.flex-1",
+          "description": "The entry's name, cut with an ellipsis.",
+          "key": {
+            "closest": "[data-testid^=\"workspace-file-entry-\"]",
+            "attr": "data-testid",
+            "strip": "workspace-file-entry-"
+          },
+          "text": true
+        },
+        {
+          "name": "files-pane",
+          "selector": "[data-testid=\"workspace-file-pane\"]",
+          "description": "The editor layout: one file's header, its bars and its editor, filling the tab's pane."
+        },
+        {
+          "name": "files-file-title",
+          "selector": ".workspace-files__file-title > span:first-child",
+          "description": "The file's path in its header, muted.",
+          "text": true
+        },
+        {
+          "name": "files-dirty",
+          "selector": ".workspace-files__file-title > span[title=\"Unsaved changes\"]",
+          "description": "The dot after the path while the draft is unsaved."
+        },
+        {
+          "name": "files-save",
+          "selector": ".workspace-files__save",
+          "description": "Save: muted while saved, full colour with an unsaved draft.",
+          "text": true
+        },
+        {
+          "name": "files-markdown-view",
+          "selector": "[aria-label=\"Markdown view\"]",
+          "description": "A Markdown file's Source and Preview toggle, in its header."
+        },
+        {
+          "name": "files-markdown-preview-button",
+          "selector": "[aria-label=\"Markdown view\"] > button:last-child",
+          "description": "The toggle's Preview button.",
+          "text": true
+        },
+        {
+          "name": "files-markdown-preview",
+          "selector": "[data-testid=\"workspace-markdown-preview\"]",
+          "description": "A Markdown file's rendered preview of its draft, in place of the editor."
+        },
+        {
+          "name": "files-conflict",
+          "selector": "[data-testid=\"workspace-file-conflict\"]",
+          "description": "The conflict bar: tinted red, its title, what to do, the two versions and the three choices."
+        },
+        {
+          "name": "files-conflict-title",
+          "selector": "[data-testid=\"workspace-file-conflict\"] > strong",
+          "description": "“File changed on disk.” in red.",
+          "text": true
+        },
+        {
+          "name": "files-conflict-action",
+          "selector": "[data-testid=\"workspace-file-conflict\"] button",
+          "description": "Compare, Reload disk, Overwrite disk (in red).",
+          "text": true
+        },
+        {
+          "name": "files-editor",
+          "selector": "[data-testid=\"workspace-file-editor-area\"]",
+          "description": "The editor's box (CodeMirror on the web, the editor engine natively): gated on its box only."
+        },
+        {
+          "name": "editor-text",
+          "selector": "[data-testid=\"workspace-file-editor-area\"] .cm-scroller",
+          "description": "The editor's text: CodeMirror's scroller on the web, the editor engine's text natively. Its font is gated: family, size and line height (12px on 1.5 lines on a Mac).",
+          "font": true
+        },
+        {
+          "name": "files-asset",
+          "selector": "[data-testid=\"workspace-file-asset\"]",
+          "description": "The media viewer (`FileAsset`): its header over the picture, card or message."
+        },
+        {
+          "name": "files-asset-header",
+          "selector": "[data-testid=\"workspace-file-asset\"] > header",
+          "description": "The viewer's header: the path, then the file's buttons (Download on the web; Quick Look and Open with Default App natively)."
+        },
+        {
+          "name": "files-asset-title",
+          "selector": "[data-testid=\"workspace-file-asset\"] > header > strong",
+          "description": "The file's path in the viewer's header, cut with an ellipsis.",
+          "text": true
+        },
+        {
+          "name": "files-image-viewer",
+          "selector": "[data-testid=\"workspace-image-viewer\"]",
+          "description": "The image viewer: its toolbar over the picture (an <img> on the web, the image engine natively); gated on its box, not on what it draws."
+        },
+        {
+          "name": "files-image-toolbar",
+          "selector": "[data-testid=\"workspace-image-viewer\"] > [role=\"toolbar\"]",
+          "description": "−, +, Fit (pressed while fitted) and 100%, then the size and scale."
+        },
+        {
+          "name": "files-image-status",
+          "selector": "[data-testid=\"workspace-image-info\"]",
+          "description": "'W × H · Fit' or the scale in percent.",
+          "text": true
+        }
+      ]
+    },
+    "review": {
+      "root": "[data-testid=\"workspace-git-review\"]",
+      "minElements": 4,
+      "elements": [
+        {
+          "name": "review-root",
+          "selector": "[data-testid=\"workspace-git-review\"]",
+          "description": "The whole review: the box every other box is measured against."
+        },
+        {
+          "name": "git-refresh",
+          "selector": "[data-testid=\"git-refresh\"]",
+          "description": "The header's Refresh button.",
+          "textSized": true
+        },
+        {
+          "name": "git-status",
+          "selector": "[data-testid=\"git-status\"]",
+          "description": "The rail of changed files beside the diff."
+        },
+        {
+          "name": "git-diff",
+          "selector": "[data-testid=\"git-diff\"]",
+          "description": "The diff's scroll surface: on the native client, the DiffView engine slot by its box."
+        },
+        {
+          "name": "git-diff-empty",
+          "selector": "[data-testid=\"git-diff-empty\"]",
+          "description": "The note shown when the comparison has no changes."
+        },
+        {
+          "name": "git-file-header",
+          "selector": "[data-testid=\"git-diff\"] article > header",
+          "description": "A file's header row in the diff (path, status), in order."
+        },
+        {
+          "name": "git-hunk-header",
+          "selector": "[data-testid=\"git-diff\"] section > div:first-child",
+          "description": "A hunk's header row (the @@ line), in order."
+        },
+        {
+          "name": "git-diff-line",
+          "selector": "[data-testid=\"git-diff-line\"]",
+          "description": "A line of the diff, in order; it holds the comment thread under it."
+        },
+        {
+          "name": "git-line-comments",
+          "selector": "[data-testid=\"git-line-comments\"]",
+          "description": "The comment thread under a line, in order."
+        },
+        {
+          "name": "git-comment-composer",
+          "selector": "[data-testid=\"git-comment-composer\"]",
+          "description": "The composer pinned below the diff once lines are selected."
+        }
+      ]
+    }
+  }
+}

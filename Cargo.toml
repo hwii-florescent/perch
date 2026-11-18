@@ -5,6 +5,8 @@ members = ["crates/ghostty-sys", "crates/perch-core", "crates/perch-desktop", "c
 # depends on webkit2gtk (via tauri) which isn't installable on this devpod.
 # perch-native is left out too, so a plain build or test never compiles GPUI; use `-p perch-native`.
 default-members = ["crates/perch-core", "crates/perchd"]
+# Vendored crates keep their own workspaces and formatting (see THIRD_PARTY_NOTICES.md).
+exclude = ["vendor/gpui-kit", "vendor/gpui-pre", "vendor/gpui-pre-macos", "vendor/quickjs-jit-runtime"]
 
 [workspace.package]
 version = "0.0.1"
@@ -20,3 +22,37 @@ license = "GPL-3.0-only"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# A stripped macOS proc-macro loses what rustc loads from it ("can't find crate
+# for `rquickjs_macro`" in perch-native's release build), as herdr-app found.
+# Build-time code only; the shipped binaries are still stripped.
+[profile.release.build-override]
+strip = "none"
+
+# The mod engine's QuickJS interpreter (C) runs every script call against a time budget (50 ms for a render);
+# built at -O0 in a debug build it is several times slower than shipped, and the React sidebar mod overruns it.
+[profile.dev.package.quickjs-jit-sys]
+opt-level = 2
+
+# The editor's syntax highlighter: at -O0 its regexes parse a few hundred lines a second, too slow for its tests.
+[profile.dev.package.syntect]
+opt-level = 2
+[profile.dev.package.fancy-regex]
+opt-level = 2
+[profile.dev.package.regex-automata]
+opt-level = 2
+
+# perch-native's mod engine (vendored gpui-shell): LLRT modules name `rquickjs`,
+# and must share the shell's quickjs-jit VM, as gpui-kit's own workspace does.
+[patch.crates-io]
+rquickjs = { path = "vendor/gpui-kit/crates/shell/rquickjs-compat" }
+# GPUI stays at 0.3.8; these copies add only the herdr-app API gpui-shell names
+# (`AssetSource::image_resource`, `Application::with_activation_policy`,
+# `ActivationPolicy::Prohibited`), each marked `PERCH:`.
+gpui-pre = { path = "vendor/gpui-pre" }
+gpui-pre-macos = { path = "vendor/gpui-pre-macos" }
+
+# The JIT runtime with herdr-app's fix for copying all call feedback on every
+# refresh scan (longbridge/quickjs-jit#38, marked HERDR: in the source).
+[patch."https://github.com/longbridge/quickjs-jit"]
+quickjs-jit-runtime = { path = "vendor/quickjs-jit-runtime" }

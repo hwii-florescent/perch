@@ -1,0 +1,62 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "phone-size",
+  "note": "The box is one terminal pane of the shown workspace (the main card's canvas less the 28 px pane header: 1016x688; half of it, 505 wide, when split), on the card fill: the terminal's own picture (xterm) is not drawn, the chrome floats over `.terminal` (position: relative). The notice over a desktop terminal whose size a phone holds (stock-ui/phone-size): at the top right (8 px down, 12 px in), at most 22 rem wide and the pane's width less 1.5 rem, a glass panel with the heading, one line of explanation, a cross that folds it, and Take back this tab and Take back all tabs. Folded, it is a small chip 'Phone size' that opens it again. Props are `PhoneSizeProps`: `generation` (a new phone opens it again) and `pending`; the two actions are no-ops. Folding is the screen's own state, reached with a click step.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1016,
+    "height": 688
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "props": {
+    "generation": 1,
+    "pending": false
+  },
+  "states": [
+    {
+      "id": "notice",
+      "title": "The notice open: 'Your phone is sizing this terminal', its explanation, the cross, and the two Take back buttons (this tab primary)",
+      "props": {
+        "generation": 1,
+        "pending": false
+      }
+    },
+    {
+      "id": "pending",
+      "title": "A take-back in flight: both buttons disabled (40%)",
+      "props": {
+        "generation": 1,
+        "pending": true
+      }
+    },
+    {
+      "id": "folded",
+      "title": "The cross pressed: folded to the 'Phone size' chip at the same corner",
+      "props": {
+        "generation": 1,
+        "pending": false
+      },
+      "steps": [
+        {
+          "click": "[aria-label=\"Keep phone size and hide this\"]"
+        }
+      ]
+    },
+    {
+      "id": "split-pane",
+      "title": "In one of two side-by-side panes (505 px wide): the notice is as wide as 22 rem allows, within the pane",
+      "props": {
+        "generation": 1,
+        "pending": false
+      },
+      "size": {
+        "width": 505,
+        "height": 688
+      }
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "props": {
+    "id": "s-perch-2",
+    "x": 1270,
+    "y": 790,
+    "self": {
+      "id": "s-perch-2",
+      "kind": "session",
+      "label": "Fix terminal slash input",
+      "title": "Fix terminal slash input"
+    },
+    "canSplitNew": true,
+    "canSplitMore": true,
+    "offered": [
+      {
+        "id": "s-perch-1",
+        "label": "Port the sidebar to GPUI"
+      },
+      {
+        "id": "s-perch-3",
+        "label": "Review agent mail"
+      }
+    ],
+    "inSplit": false,
+    "canStopAgent": true,
+    "extraItems": [
+      {
+        "label": "✓ Accept messages from other sessions",
+        "testId": "session-inbound-accept-s-perch-2"
+      },
+      {
+        "label": "Hold messages for my approval",
+        "testId": "session-inbound-hold-s-perch-2"
+      },
+      {
+        "label": "Refuse messages from other sessions",
+        "testId": "session-inbound-refuse-s-perch-2"
+      }
+    ]
+  }
+}

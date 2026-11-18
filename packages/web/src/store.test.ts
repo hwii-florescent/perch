@@ -462,6 +462,23 @@ describe("usage.alert", () => {
   });
 });
 
+describe("daemon.health", () => {
+  it("shows one toast for the terminal host's state, replacing the previous one", () => {
+    usePerchStore.setState({ toasts: [] });
+    try {
+      handleServerMessage({ type: "daemon.health", healthy: false, problem: "stuck: session a: resize for 12.0s" });
+      handleServerMessage({ type: "daemon.health", healthy: false, problem: "it did not answer a health check within 10 s" });
+      expect(usePerchStore.getState().toasts).toMatchObject([
+        { title: "Terminal host is not responding", level: "error", body: expect.stringContaining("nothing was restarted") },
+      ]);
+      handleServerMessage({ type: "daemon.health", healthy: true });
+      expect(usePerchStore.getState().toasts).toMatchObject([{ title: "Terminal host is responding again", level: "info" }]);
+    } finally {
+      usePerchStore.setState({ toasts: [] });
+    }
+  });
+});
+
 describe("desktop notification delivery", () => {
   it("keeps sound independent and preserves newer toasts when native sends fail asynchronously", async () => {
     const before = usePerchStore.getState();

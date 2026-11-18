@@ -1,0 +1,5 @@
+{
+  "name": "Split with session",
+  "description": "The web app's stock Split with session picker, unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

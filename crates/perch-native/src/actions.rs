@@ -112,14 +112,6 @@ pub const ACTIONS: [Action; 17] = [
     ),
 ];
 
-/// How the sidebar lists work: the tree of projects, or sections by state.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Organize {
-    #[default]
-    Project,
-    Status,
-}
-
 /// The New session panel: which computer and project it will start in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NewSession {
@@ -157,6 +149,9 @@ pub enum Outcome {
         host_id: String,
         session_id: String,
     },
+    /// Show this workspace (or project, for one shown as a single place) with no session of it:
+    /// its start page, as the web's `openEmptyWorkspace`.
+    Workspace(String),
 }
 
 /// The sidebar's view state: what is picked, shown or folded. The core's facts live in the
@@ -167,7 +162,6 @@ pub struct Nav {
     /// A checkout picked with no session in it to show.
     pub workspace: Option<String>,
     pub sidebar_visible: bool,
-    pub organize: Organize,
     /// Folded projects, as `host/project`.
     pub collapsed: HashSet<String>,
     pub new_session: Option<NewSession>,
@@ -179,7 +173,6 @@ impl Default for Nav {
             selected: None,
             workspace: None,
             sidebar_visible: true,
-            organize: Organize::default(),
             collapsed: HashSet::new(),
             new_session: None,
         }
@@ -211,6 +204,26 @@ impl Nav {
         }
     }
 
+    /// Whether the rows of `project` are folded away. A project with one plain checkout has
+    /// nothing to fold, so a fold left over from before never hides its sessions.
+    pub fn folded(&self, host_id: &str, project: &ProjectView) -> bool {
+        project.foldable()
+            && self
+                .collapsed
+                .contains(&Self::project_key(host_id, &project.id))
+    }
+
+    /// A project's header was picked. A project with checkouts folds or unfolds; one plain
+    /// checkout has nothing to fold, so the header opens it, as the web's does.
+    pub fn pick_project(&mut self, model: &Model, host_id: &str, project: &ProjectView) -> Outcome {
+        if project.foldable() {
+            self.toggle_project(host_id, &project.id);
+            Outcome::Nothing
+        } else {
+            self.pick_workspace(model, &project.id)
+        }
+    }
+
     /// Run the action called `id`. `None`: this is not one of the sidebar's actions.
     pub fn run(&mut self, id: &str, model: &Model) -> Option<Outcome> {
         let outcome = match id {
@@ -230,15 +243,10 @@ impl Nav {
                 self.new_session = Some(self.new_session_target(model, true));
                 Outcome::Nothing
             }
+            "agent.next" => self.step_agent(model, 1),
+            "agent.prev" => self.step_agent(model, -1),
             "nests.prev" => self.step_workspace(model, -1),
             "nests.next" => self.step_workspace(model, 1),
-            "sidebar.organize" => {
-                self.organize = match self.organize {
-                    Organize::Project => Organize::Status,
-                    Organize::Status => Organize::Project,
-                };
-                Outcome::Nothing
-            }
             jump => {
                 let n = jump.strip_prefix("nests.jump")?.parse::<usize>().ok()?;
                 self.jump_workspace(model, n)
@@ -260,6 +268,43 @@ impl Nav {
                 session_id: next,
             },
             None => Outcome::Nothing,
+        }
+    }
+
+    /// `agent.next` / `agent.prev`: the next session of the shown computer, in the sidebar's
+    /// order, that is an agent (not a plain terminal), wrapping round, as the web's.
+    fn step_agent(&mut self, model: &Model, step: isize) -> Outcome {
+        let agents: Vec<(String, String)> = self
+            .stops(model)
+            .into_iter()
+            .flat_map(|stop| stop.sessions)
+            .filter(|(_, id)| {
+                let row = model.hosts.iter().flat_map(|h| &h.projects).find_map(|p| {
+                    p.sessions
+                        .iter()
+                        .chain(p.workspaces.iter().flat_map(|w| &w.sessions))
+                        .find(|s| &s.id == id)
+                });
+                row.is_some_and(|s| {
+                    s.provider_id.as_deref() != Some(perch_core::agent_fleet::TERMINAL_PROVIDER)
+                })
+            })
+            .collect();
+        if agents.is_empty() {
+            return Outcome::Nothing;
+        }
+        let current = self.selected.as_ref().map(|(_, id)| id.as_str());
+        let at = agents
+            .iter()
+            .position(|(_, id)| Some(id.as_str()) == current);
+        let len = agents.len() as isize;
+        let next = at.map_or(if step > 0 { 0 } else { len - 1 }, |at| {
+            (at as isize + step).rem_euclid(len)
+        });
+        let (host_id, session_id) = agents[next as usize].clone();
+        Outcome::Open {
+            host_id,
+            session_id,
         }
     }
 
@@ -313,7 +358,7 @@ impl Nav {
                 host_id: host_id.clone(),
                 session_id: session_id.clone(),
             },
-            None => Outcome::Nothing,
+            None => Outcome::Workspace(stop.id.clone()),
         }
     }
 
@@ -553,9 +598,10 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), ACTIONS.len(), "an id is listed once");
-        // Every action has a handler, and an id that is not ours is declined.
+        // Every action has a handler, and an id that is not ours is declined. The sidebar's view
+        // settings (`sidebar.organize`) are the `perch` module's, which the window runs first.
         let model = model(vec![project("a", &["s1"])], &[]);
-        for action in &ACTIONS {
+        for action in ACTIONS.iter().filter(|a| a.id != "sidebar.organize") {
             assert!(
                 Nav::default().run(action.id, &model).is_some(),
                 "{} has no handler",
@@ -567,7 +613,44 @@ mod tests {
     }
 
     #[test]
-    fn the_sidebar_toggles_and_organize_switches() {
+    fn agent_next_and_prev_step_through_agents_only_wrapping() {
+        let mut a = project("a", &["claude1", "shell", "codex"]);
+        a.sessions[0].provider_id = Some("claude".into());
+        a.sessions[1].provider_id = Some("terminal".into());
+        a.sessions[2].provider_id = Some("codex".into());
+        let mut b = project("b", &["claude2"]);
+        b.sessions[0].provider_id = Some("claude".into());
+        let model = model(vec![a, b], &[]);
+        let mut nav = Nav {
+            selected: Some((LOCAL.into(), "claude1".into())),
+            ..Nav::default()
+        };
+        let mut step = |id: &str| {
+            let outcome = nav.run(id, &model);
+            if let Some(Outcome::Open { session_id, .. }) = &outcome {
+                nav.selected = Some((LOCAL.into(), session_id.clone()));
+            }
+            outcome
+        };
+        assert_eq!(step("agent.next"), open("codex"), "the terminal is skipped");
+        assert_eq!(step("agent.next"), open("claude2"));
+        assert_eq!(step("agent.next"), open("claude1"), "wraps round");
+        assert_eq!(step("agent.prev"), open("claude2"), "and back");
+        let terminals = model_with_terminal_only();
+        assert_eq!(
+            Nav::default().run("agent.next", &terminals),
+            Some(Outcome::Nothing)
+        );
+    }
+
+    fn model_with_terminal_only() -> Model {
+        let mut a = project("a", &["shell"]);
+        a.sessions[0].provider_id = Some("terminal".into());
+        model(vec![a], &[])
+    }
+
+    #[test]
+    fn the_sidebar_toggles() {
         let model = model(vec![], &[]);
         let mut nav = Nav::default();
         assert!(nav.sidebar_visible);
@@ -575,10 +658,6 @@ mod tests {
         assert!(!nav.sidebar_visible);
         nav.run("global.sidebar", &model);
         assert!(nav.sidebar_visible);
-        nav.run("sidebar.organize", &model);
-        assert_eq!(nav.organize, Organize::Status);
-        nav.run("sidebar.organize", &model);
-        assert_eq!(nav.organize, Organize::Project);
     }
 
     #[test]
@@ -646,8 +725,11 @@ mod tests {
         nav.selected = Some((LOCAL.into(), "s1".into()));
         assert_eq!(nav.run("nests.next", &model), open("s3"));
         nav.selected = Some((LOCAL.into(), "s3".into()));
-        // b2 has no session: the key still lands there.
-        assert_eq!(nav.run("nests.next", &model), Some(Outcome::Nothing));
+        // b2 has no session: the key still lands there, on its start page.
+        assert_eq!(
+            nav.run("nests.next", &model),
+            Some(Outcome::Workspace("b2".into()))
+        );
         assert_eq!(nav.workspace.as_deref(), Some("b2"));
         nav.selected = None;
         assert_eq!(
@@ -660,14 +742,14 @@ mod tests {
         nav.workspace = Some("a".into());
         assert_eq!(
             nav.run("nests.prev", &model),
-            Some(Outcome::Nothing),
+            Some(Outcome::Workspace("b2".into())),
             "back to b2"
         );
         assert_eq!(nav.workspace.as_deref(), Some("b2"));
         nav.workspace = None;
         assert_eq!(
             nav.run("nests.prev", &model),
-            Some(Outcome::Nothing),
+            Some(Outcome::Workspace("b2".into())),
             "none picked: the last"
         );
         assert_eq!(nav.workspace.as_deref(), Some("b2"));
@@ -780,6 +862,37 @@ mod tests {
         assert!(!nav.collapsed.contains("box/a"));
         nav.toggle_project("local", "a");
         assert!(nav.collapsed.is_empty());
+    }
+
+    /// The web folds only a project with checkouts to fold away. One plain checkout has no
+    /// row of its own, its header opens it, and its sessions are always listed, so a session
+    /// created there is never hidden by a fold.
+    #[test]
+    fn a_project_with_one_plain_checkout_is_never_folded_and_its_header_opens_it() {
+        let mut single = project("a", &["s1", "s2"]);
+        single.single_checkout = true;
+        let several = project("b", &["s3"]);
+        let model = model(vec![single.clone(), several.clone()], &[]);
+        let mut nav = Nav::default();
+
+        // A fold left over from before (a checkout was removed) does not hide it.
+        nav.collapsed.insert(Nav::project_key(LOCAL, "a"));
+        assert!(!nav.folded(LOCAL, &single));
+        // The header opens the checkout, and folds nothing.
+        assert_eq!(
+            nav.pick_project(&model, LOCAL, &single),
+            open("s1").unwrap()
+        );
+        assert_eq!(nav.workspace.as_deref(), Some("a"));
+        assert!(!nav.folded(LOCAL, &single));
+
+        // A project with checkouts folds and unfolds, per computer.
+        assert!(!nav.folded(LOCAL, &several));
+        assert_eq!(nav.pick_project(&model, LOCAL, &several), Outcome::Nothing);
+        assert!(nav.folded(LOCAL, &several));
+        assert!(!nav.folded("box", &several));
+        assert_eq!(nav.pick_project(&model, LOCAL, &several), Outcome::Nothing);
+        assert!(!nav.folded(LOCAL, &several));
     }
 
     #[test]

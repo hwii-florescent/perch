@@ -6,13 +6,14 @@
 //! output to [`AttachReader`]s.
 
 use crate::proto::{self, *};
+use parking_lot::{Condvar, Mutex};
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Condvar, Mutex};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(15);
@@ -69,7 +70,7 @@ struct EndState {
 
 impl EndState {
     fn set(&self, end: AttachEnd) {
-        let mut slot = self.end.lock().unwrap();
+        let mut slot = self.end.lock();
         if slot.is_none() {
             *slot = Some(end);
         }
@@ -120,6 +121,9 @@ pub struct Client {
 impl Client {
     pub fn connect(socket: &Path) -> Result<Self, Error> {
         let stream = UnixStream::connect(socket)?;
+        // A daemon that stops reading must not block every caller behind the
+        // writer lock forever: a stalled write fails, closing the connection.
+        stream.set_write_timeout(Some(CALL_TIMEOUT))?;
         let reader = stream.try_clone()?;
         let client = Self::from_transport(reader, stream);
         client.hello()?;
@@ -202,10 +206,20 @@ impl Client {
     }
 
     fn send(&self, frame: &Frame) -> Result<(), Error> {
-        let mut w = self.inner.writer.lock().unwrap();
-        proto::write_frame(&mut *w, frame)?;
-        w.flush()?;
-        Ok(())
+        let mut w = self.inner.writer.lock();
+        if self.is_closed() {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "daemon connection closed",
+            )));
+        }
+        let written = proto::write_frame(&mut *w, frame).and_then(|_| w.flush());
+        if written.is_err() {
+            // A frame may be half written: nothing more may follow it on this
+            // connection. The next `client()` reconnects.
+            self.inner.closed.store(true, Ordering::SeqCst);
+        }
+        Ok(written?)
     }
 
     fn call(&self, req: Request) -> Result<serde_json::Value, Error> {
@@ -217,16 +231,16 @@ impl Client {
         }
         let rid = self.inner.next_rid.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = mpsc::channel();
-        self.inner.pending.lock().unwrap().insert(rid, tx);
+        self.inner.pending.lock().insert(rid, tx);
         let json = serde_json::to_vec(&ClientMsg { rid, req }).unwrap();
         if let Err(e) = self.send(&Frame::Json(json)) {
-            self.inner.pending.lock().unwrap().remove(&rid);
+            self.inner.pending.lock().remove(&rid);
             return Err(e);
         }
         match rx.recv_timeout(CALL_TIMEOUT) {
             Ok(result) => result,
             Err(_) => {
-                self.inner.pending.lock().unwrap().remove(&rid);
+                self.inner.pending.lock().remove(&rid);
                 Err(Error::Io(io::Error::new(
                     io::ErrorKind::TimedOut,
                     "daemon did not reply",
@@ -296,7 +310,7 @@ impl Client {
         let next_seq = Arc::new(AtomicU64::new(0));
         // Registered before the request: replay frames can arrive right
         // behind the reply.
-        let previous = self.inner.sinks.lock().unwrap().insert(
+        let previous = self.inner.sinks.lock().insert(
             id.to_string(),
             Sink {
                 data: data_tx,
@@ -360,7 +374,7 @@ impl Client {
     }
 
     fn drop_sink(&self, id: &str, end: &Arc<EndState>) {
-        let mut sinks = self.inner.sinks.lock().unwrap();
+        let mut sinks = self.inner.sinks.lock();
         if sinks.get(id).is_some_and(|s| Arc::ptr_eq(&s.end, end)) {
             sinks.remove(id);
         }
@@ -368,7 +382,7 @@ impl Client {
 
     /// Stop receiving `id`'s output. The process keeps running.
     pub fn detach(&self, id: &str) -> Result<(), Error> {
-        if let Some(sink) = self.inner.sinks.lock().unwrap().remove(id) {
+        if let Some(sink) = self.inner.sinks.lock().remove(id) {
             sink.end.set(AttachEnd::Detached);
         }
         self.call(Request::Detach { id: id.into() }).map(|_| ())
@@ -468,7 +482,7 @@ fn route(inner: Arc<Inner>, reader: impl Read) {
     while let Ok(Some(frame)) = proto::read_frame(&mut reader) {
         match frame {
             Frame::Data { id, seq, bytes } => {
-                let mut sinks = inner.sinks.lock().unwrap();
+                let mut sinks = inner.sinks.lock();
                 if let Some(sink) = sinks.get(&id) {
                     let end_seq = seq + bytes.len() as u64;
                     if sink.send(bytes) {
@@ -482,7 +496,7 @@ fn route(inner: Arc<Inner>, reader: impl Read) {
             }
             Frame::Json(json) => match serde_json::from_slice::<ServerMsg>(&json) {
                 Ok(ServerMsg::Reply { rid, error, data }) => {
-                    if let Some(tx) = inner.pending.lock().unwrap().remove(&rid) {
+                    if let Some(tx) = inner.pending.lock().remove(&rid) {
                         let _ = tx.send(match error {
                             Some(e) => Err(Error::Server(e)),
                             None => Ok(data),
@@ -490,12 +504,12 @@ fn route(inner: Arc<Inner>, reader: impl Read) {
                     }
                 }
                 Ok(ServerMsg::Exit { id, code }) => {
-                    if let Some(sink) = inner.sinks.lock().unwrap().remove(&id) {
+                    if let Some(sink) = inner.sinks.lock().remove(&id) {
                         sink.end.set(AttachEnd::Exited(code));
                     }
                 }
                 Ok(ServerMsg::HistoryError { id, message }) => {
-                    let mut sinks = inner.sinks.lock().unwrap();
+                    let mut sinks = inner.sinks.lock();
                     if let Some(sink) = sinks.get(&id) {
                         if !sink.send(history_notice(&message)) {
                             sink.end.set(AttachEnd::Dropped);
@@ -504,7 +518,7 @@ fn route(inner: Arc<Inner>, reader: impl Read) {
                     }
                 }
                 Ok(ServerMsg::Dropped { id }) => {
-                    if let Some(sink) = inner.sinks.lock().unwrap().remove(&id) {
+                    if let Some(sink) = inner.sinks.lock().remove(&id) {
                         sink.end.set(AttachEnd::Dropped);
                     }
                 }
@@ -513,13 +527,13 @@ fn route(inner: Arc<Inner>, reader: impl Read) {
         }
     }
     inner.closed.store(true, Ordering::SeqCst);
-    for (_, tx) in inner.pending.lock().unwrap().drain() {
+    for (_, tx) in inner.pending.lock().drain() {
         let _ = tx.send(Err(Error::Io(io::Error::new(
             io::ErrorKind::NotConnected,
             "daemon connection closed",
         ))));
     }
-    for (_, sink) in inner.sinks.lock().unwrap().drain() {
+    for (_, sink) in inner.sinks.lock().drain() {
         sink.end.set(AttachEnd::Disconnected);
     }
 }
@@ -563,17 +577,17 @@ pub struct AttachWaiter {
 
 impl AttachWaiter {
     pub fn wait(&self) -> AttachEnd {
-        let mut slot = self.end.end.lock().unwrap();
+        let mut slot = self.end.end.lock();
         loop {
             if let Some(end) = *slot {
                 return end;
             }
-            slot = self.end.cv.wait(slot).unwrap();
+            self.end.cv.wait(&mut slot);
         }
     }
 
     pub fn try_end(&self) -> Option<AttachEnd> {
-        *self.end.end.lock().unwrap()
+        *self.end.end.lock()
     }
 
     /// Seq of the next byte not yet received — pass as `since` to resume.

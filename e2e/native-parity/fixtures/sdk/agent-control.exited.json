@@ -1,0 +1,24 @@
+{
+  "props": {
+    "ac": {
+      "agent": "claude",
+      "label": null,
+      "connected": true,
+      "pending": false,
+      "retry": false,
+      "control": null,
+      "error": null,
+      "ended": {
+        "sleeping": false,
+        "exitCode": 1,
+        "close": true
+      },
+      "state": {
+        "controlling": false,
+        "shared": false,
+        "writable": false,
+        "phone": false
+      }
+    }
+  }
+}

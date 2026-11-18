@@ -1,0 +1,51 @@
+{
+  "props": {
+    "id": "s-api-1",
+    "x": 120,
+    "y": 300,
+    "extraItems": []
+  },
+  "menu": [
+    {
+      "testId": "tab-menu-rename",
+      "text": "Rename tab"
+    },
+    {
+      "testId": "tab-menu-split-right",
+      "text": "Split right with new terminal"
+    },
+    {
+      "testId": "tab-menu-split-below",
+      "text": "Split below with new terminal"
+    },
+    {
+      "divider": true
+    },
+    {
+      "testId": null,
+      "text": "No other open tab available"
+    },
+    {
+      "divider": true
+    },
+    {
+      "testId": "session-inbound-accept-s-api-1",
+      "text": "✓ Accept messages from other sessions"
+    },
+    {
+      "testId": "session-inbound-hold-s-api-1",
+      "text": "Hold messages for my approval"
+    },
+    {
+      "testId": "session-inbound-refuse-s-api-1",
+      "text": "Refuse messages from other sessions"
+    },
+    {
+      "divider": true
+    },
+    {
+      "testId": "tab-menu-close",
+      "text": "Close tab"
+    }
+  ]
+}

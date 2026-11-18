@@ -1,0 +1,5 @@
+{
+  "name": "Instructions",
+  "description": "The web app's stock Instructions dialog (a project's or workspace's text and reference folders for new sessions), unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

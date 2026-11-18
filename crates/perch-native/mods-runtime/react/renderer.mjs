@@ -1,0 +1,443 @@
+//! The React renderer: React 19 through `react-reconciler` onto the retained host tree of `dom.mjs`, so a stock
+//! screen's unchanged source (`useRef`, `createPortal(..., document.body)`, `event.currentTarget.closest(...)`)
+//! runs as it does in the page. After every commit the tree is described for the engine (`describe.mjs`) and handed
+//! to `perch.render(description)`.
+//!
+//! The engine talks back through the handle `mount` returns: `dispatch(id, type, init)` runs a DOM event through
+//! the tree (capture on `window`, `document` and the ancestors, the target, then bubble, with React's `on<Type>`
+//! and `on<Type>Capture` props at their element), `hover(id, on)` and `focus(id)` set the interaction state the
+//! cascade reads for group variants, and `flush()` runs pending effects. An event is a discrete update: React
+//! commits it before `dispatch` returns.
+import Reconciler from "react-reconciler";
+import { unstable_recoverFromCut } from "scheduler";
+import { ConcurrentRoot, DefaultEventPriority, DiscreteEventPriority, NoEventPriority } from "react-reconciler/constants";
+import { createElement } from "react";
+import { HostElement, HostText, fromMarkup, installGlobals, isTextField, submits } from "./dom.mjs";
+import { describe } from "./describe.mjs";
+import { styleSheet } from "./sheet.mjs";
+
+let currentPriority = NoEventPriority;
+
+/** Whether new props can change what is described: a re-render passes new handler functions every time, which
+ * dispatch reads live, so only a value, a `style` entry or a handler appearing or going counts. */
+function styleRelevantChange(before, after) {
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  for (const key of keys) {
+    if (key === "children") continue;
+    const a = before[key], b = after[key];
+    if (a === b || (typeof a === "function" && typeof b === "function")) continue;
+    if (key === "style" && a && b && typeof a === "object" && typeof b === "object") {
+      const styleKeys = new Set([...Object.keys(a), ...Object.keys(b)]);
+      if ([...styleKeys].every((k) => a[k] === b[k])) continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+/** Whether a press or a key may focus `element`, as a browser's: a field, a button or link, or anything with a
+ * `tabIndex`, when it is not disabled. */
+const focusable = (element) =>
+  !element.props.disabled && (/^(button|input|select|textarea)$/.test(element.tagName) || (element.tagName === "a" && element.props.href != null) || element.props.tabIndex != null);
+
+/** `element` holding the nodes its `dangerouslySetInnerHTML` copies, when that is the shim's own markup (an element's
+ * `outerHTML`, `dom.mjs`); other HTML is not drawn. */
+function withMarkup(element, props) {
+  for (const node of fromMarkup(props.dangerouslySetInnerHTML?.__html, element.ownerDocument) ?? []) element.appendChild(node);
+  return element;
+}
+
+const hostConfig = {
+  rendererPackageName: "perch-native",
+  rendererVersion: "1.0.0",
+  supportsMutation: true,
+  supportsPersistence: false,
+  supportsHydration: false,
+  supportsMicrotasks: true,
+  supportsResources: false,
+  supportsSingletons: false,
+  supportsTestSelectors: false,
+  isPrimaryRenderer: true,
+  noTimeout: -1,
+  NotPendingTransition: null,
+  HostTransitionContext: null,
+  scheduleTimeout: (fn, ms) => setTimeout(fn, ms),
+  cancelTimeout: (id) => clearTimeout(id),
+  scheduleMicrotask: (fn) => queueMicrotask(fn),
+
+  // React works on one root at a time, whichever screen's call it runs in: the host runs it as that root's screen.
+  getRootHostContext: (container) => { container.ownerDocument?.perch?.enter?.(); return null; },
+  getChildHostContext: (parent) => parent,
+  getPublicInstance: (instance) => instance,
+  prepareForCommit: (container) => { container.ownerDocument?.perch?.enter?.(); return null; },
+  resetAfterCommit: (container) => container.ownerDocument?.afterCommit?.(),
+  preparePortalMount: () => {},
+  createInstance: (type, props, root) => withMarkup(new HostElement(type, props, root.ownerDocument), props),
+  createTextInstance: (text, root) => new HostText(text),
+  appendInitialChild: (parent, child) => { parent.appendChild(child); },
+  // `autoFocus` focuses the element once it is in the tree, as React DOM does.
+  finalizeInitialChildren: (instance, type, props) => !!props.autoFocus,
+  shouldSetTextContent: () => false,
+  appendChild: (parent, child) => { parent.appendChild(child); },
+  appendChildToContainer: (container, child) => { container.appendChild(child); },
+  insertBefore: (parent, child, before) => { parent.insertBefore(child, before); },
+  insertInContainerBefore: (container, child, before) => { container.insertBefore(child, before); },
+  removeChild: (parent, child) => { parent.removeChild(child); },
+  removeChildFromContainer: (container, child) => { container.removeChild(child); },
+  clearContainer: (container) => { for (const child of [...container.childNodes]) container.removeChild(child); },
+  commitUpdate: (instance, type, oldProps, newProps) => {
+    instance.props = newProps;
+    // A property the source sets again replaces what was written to `element.style`, as React DOM's write does.
+    if (instance.inline) for (const key of Object.keys(instance.inline)) if (oldProps.style?.[key] !== newProps.style?.[key]) delete instance.inline[key];
+    if (oldProps.dangerouslySetInnerHTML?.__html !== newProps.dangerouslySetInnerHTML?.__html) {
+      for (const child of [...instance.childNodes]) instance.removeChild(child);
+      withMarkup(instance, newProps);
+    }
+    if (styleRelevantChange(oldProps, newProps)) instance.touch();
+  },
+  commitTextUpdate: (text, oldText, newText) => { text.data = String(newText); },
+  commitMount: (instance) => { instance.focus(); },
+  resetTextContent: () => {},
+  hideInstance: (instance) => { instance.hidden = true; instance.touch(); },
+  unhideInstance: (instance) => { instance.hidden = false; instance.touch(); },
+  hideTextInstance: (text) => { text.hidden = true; },
+  unhideTextInstance: (text) => { text.hidden = false; },
+  detachDeletedInstance: () => {},
+  beforeActiveInstanceBlur: () => {},
+  afterActiveInstanceBlur: () => {},
+  getInstanceFromNode: () => null,
+  getInstanceFromScope: () => null,
+  prepareScopeUpdate: () => {},
+  setCurrentUpdatePriority: (priority) => { currentPriority = priority; },
+  getCurrentUpdatePriority: () => currentPriority,
+  resolveUpdatePriority: () => (currentPriority !== NoEventPriority ? currentPriority : DefaultEventPriority),
+  resolveEventType: () => null,
+  resolveEventTimeStamp: () => -1.1,
+  shouldAttemptEagerTransition: () => false,
+  trackSchedulerEvent: () => {},
+  requestPostPaintCallback: () => {},
+  maySuspendCommit: () => false,
+  maySuspendCommitOnUpdate: () => false,
+  maySuspendCommitInSyncRender: () => false,
+  preloadInstance: () => true,
+  startSuspendingCommit: () => null,
+  suspendInstance: () => {},
+  waitForCommitToBeReady: () => null,
+  getSuspendedCommitReason: () => null,
+  resetFormInstance: () => {},
+  bindToConsole: (method, args) => Function.prototype.bind.call(console[method], console, ...args),
+};
+
+export let reconciler = Reconciler(hostConfig);
+/** How many times React was replaced (`fresh`): a tree mounted on an earlier one is dead. */
+let generation = 0;
+
+/** A call into React that the engine cut past its time budget never unwinds (the cut cannot be caught and `finally`
+ * does not run), so React stays mid-render: from then on it renders nothing and says nothing, and every screen drawn
+ * by it stays as the cut left it (the Files drawer stayed blank, opened again or not). Before each call from outside
+ * React, a React left so is replaced by a fresh one; the trees mounted on it are dead (`handle.dead()`) and their
+ * screens mount them again. */
+function fresh() {
+  if (!reconciler.isAlreadyRendering()) return;
+  // The cut may have stopped the scheduler's loop as well (`perch-scheduler-cut` in `build.mjs`).
+  unstable_recoverFromCut?.();
+  reconciler = Reconciler(hostConfig);
+  generation += 1;
+  currentPriority = NoEventPriority;
+}
+export const createPortal = (children, container, key = null) => reconciler.createPortal(children, container, null, key);
+
+/** React's prop for a DOM event type (`click` is `onClick`, `dblclick` `onDoubleClick`). */
+const PROP = {
+  click: "onClick", dblclick: "onDoubleClick", contextmenu: "onContextMenu", mousedown: "onMouseDown", mouseup: "onMouseUp", mousemove: "onMouseMove",
+  pointerdown: "onPointerDown", pointerup: "onPointerUp", pointermove: "onPointerMove", pointercancel: "onPointerCancel",
+  keydown: "onKeyDown", keyup: "onKeyUp", focus: "onFocus", blur: "onBlur", input: "onInput", change: "onChange",
+  submit: "onSubmit", scroll: "onScroll",
+};
+
+const MOUSE_BUTTON_EVENTS = new Set(["click", "dblclick", "mousedown", "mouseup"]);
+const CONTROLS = new Set(["button", "input", "select", "textarea", "fieldset"]);
+/** Whether `node` is a disabled form control or inside one. */
+const insideDisabled = (node) => {
+  for (let n = node; n instanceof HostElement; n = n.parentNode) if (n.props.disabled && CONTROLS.has(n.tagName)) return true;
+  return false;
+};
+
+/** A DOM-shaped event: what a handler in the source reads (`clientX`, `key`, `pointerType`, `currentTarget`). */
+class HostEvent {
+  constructor(type, init, target) {
+    Object.assign(this, { clientX: 0, clientY: 0, button: 0, buttons: 0, pointerType: "mouse", key: "", code: "", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false, repeat: false, isComposing: false, keyCode: 0 }, init);
+    this.type = type;
+    this.target = target;
+    this.currentTarget = null;
+    this.defaultPrevented = false;
+    this.propagationStopped = false;
+    this.timeStamp = Date.now();
+  }
+  get nativeEvent() { return this; }
+  preventDefault() { this.defaultPrevented = true; }
+  stopPropagation() { this.propagationStopped = true; }
+  stopImmediatePropagation() { this.propagationStopped = true; }
+  isDefaultPrevented() { return this.defaultPrevented; }
+  isPropagationStopped() { return this.propagationStopped; }
+  persist() {}
+}
+
+function fire(node, event, capture) {
+  event.currentTarget = node;
+  for (const { type, listener, capture: own } of [...(node.listeners ?? [])]) {
+    if (type === event.type && own === capture) listener.call(node, event);
+  }
+  if (node instanceof HostElement) {
+    const prop = PROP[event.type];
+    const handler = prop && node.props[capture ? `${prop}Capture` : prop];
+    if (typeof handler === "function") handler(event);
+  }
+}
+
+/**
+ * Mounts `Component` for the `perch` host and returns the engine's handle. `options.container` is the inline style
+ * of the box the engine gives the screen (the card it sits on); `options.props` the component's props.
+ */
+export function mount(perch, Component, options = {}) {
+  const { document, window, globals } = installGlobals(perch);
+  const container = new HostElement("div", { id: "root", style: options.container ?? {} }, document);
+  document.body.appendChild(container);
+  const errors = [];
+  let description = null;
+  const listening = () => [document, window].map((target) => target.listeners.map((l) => `${l.type}:${l.capture}`).sort().join(",")).join("|");
+  let described = "";
+  const kept = {};
+  // Layout readback (`HostDocument.measure`): a measured element's box is kept under this tree's prefix and its id.
+  // The boxes are as fresh as the tree when the last description handed to the engine (`drawing`) is the latest.
+  const prefix = `m${Math.random().toString(36).slice(2, 10)}:`;
+  let version = 0;
+  let drawn = -1;
+  document.measureKey = (element) => prefix + element.id;
+  document.stale = () => drawn !== version;
+  // `getComputedStyle`: the cascade the last description used, from the body down to `element`.
+  document.computed = (element) => {
+    if (!kept.cascade || !kept.top) return null;
+    const chain = [];
+    for (let node = element; node instanceof HostElement && node !== document.body; node = node.parentNode) chain.unshift(node);
+    let style = kept.top;
+    for (const node of chain) style = kept.cascade.compute(node, style);
+    return style.values;
+  };
+  const render = () => {
+    version += 1;
+    description = describe(document, perch, styleSheet(), kept, options.names);
+    described = listening();
+    perch.render?.(description);
+    return description;
+  };
+  /** Runs pending effects; describes again when they changed what the source listens for on document/window
+   * (a menu's outside-press listener), which the description tells the engine. */
+  fresh();
+  const born = generation;
+  /** Whether this tree's React is the current one (`fresh`); a dead tree takes no more calls. */
+  const alive = () => { fresh(); return born === generation; };
+  const settle = () => {
+    if (!alive()) return;
+    reconciler.flushPassiveEffects();
+    reconciler.flushSyncWork();
+    if (listening() !== described) render();
+  };
+  document.afterCommit = render;
+  const report = (error) => { errors.push(error); perch.error?.(error); };
+  const root = reconciler.createContainer(container, ConcurrentRoot, null, false, null, "", report, report, report, null);
+  reconciler.updateContainerSync(createElement(Component, options.props ?? {}), root, null, null);
+  reconciler.flushSyncWork();
+  settle();
+
+  const byId = (id) => {
+    const walk = (node) => {
+      if (node.id === id) return node;
+      for (const child of node.children) { const hit = walk(child); if (hit) return hit; }
+      return null;
+    };
+    return walk(document.documentElement);
+  };
+  const discrete = (fn) => {
+    if (!alive()) return undefined;
+    const previous = currentPriority;
+    currentPriority = DiscreteEventPriority;
+    try { return fn(); } finally {
+      currentPriority = previous;
+      reconciler.flushSyncWork();
+      settle();
+    }
+  };
+  const handle = {
+    document,
+    window,
+    /** What `window`, `document` and `localStorage` read while this screen runs (`dom.mjs`'s `GLOBALS`). */
+    globals,
+    container,
+    errors,
+    /** The latest description (after the last commit or state change). */
+    get description() { return description; },
+    describe: render,
+    /** Runs a DOM event of `type` at node `id`; false when the node is gone. */
+    dispatch(id, type, init = {}) {
+      const target = typeof id === "string" ? byId(id) : id;
+      if (!target) return false;
+      // A browser sends no click or mouse button event to a disabled control, or to what is inside one.
+      if (MOUSE_BUTTON_EVENTS.has(type) && insideDisabled(target)) return false;
+      const event = new HostEvent(type, init, target);
+      const chain = [];
+      // A scroll event is the scrolled element's alone: it does not bubble (React's `onScroll` neither).
+      for (let node = target; node; node = type === "scroll" ? null : node.parentNode) chain.push(node);
+      const path = [...chain, document, window];
+      discrete(() => {
+        for (let i = path.length - 1; i > 0 && !event.propagationStopped; i--) fire(path[i], event, true);
+        if (!event.propagationStopped) { fire(target, event, true); if (!event.propagationStopped) fire(target, event, false); }
+        for (let i = 1; i < path.length && !event.propagationStopped; i++) fire(path[i], event, false);
+      });
+      // A browser's default action: a click on a form's submit button submits the form.
+      const form = type === "click" && !event.defaultPrevented ? submits(target) : null;
+      if (form) handle.dispatch(form, "submit", {});
+      // ... and a click on a link (or in one) to an https address opens it outside, as the web's `_blank` does.
+      if (type === "click" && !event.defaultPrevented) {
+        for (let node = target; node; node = node.parentNode) {
+          if (node.tagName !== "a") continue;
+          const href = node.props?.href;
+          if (typeof href === "string" && /^https:\/\/\S+$/.test(href)) perch.openLink?.(href);
+          break;
+        }
+      }
+      return !event.defaultPrevented;
+    },
+    /** Whether the source listens for `type` on `window` or `document` (a page recording a key press does). */
+    listensFor: (type) => [document, window].some((target) => target.listeners.some((l) => l.type === type)),
+    /** A key pressed while the screen has the keyboard (`init`: the DOM's `key`, modifiers, `repeat`), at the
+     * focused element. When nothing prevented it and that element is a text field, the key edits the field as a
+     * browser would: a character is typed at the end (or replaces the text when all of it is selected), Backspace
+     * deletes the last one, and the field gets `input` and `change` events with its new `value`. Returns whether the
+     * source took the key (prevented it, or a field changed). */
+    key(init) {
+      const target = document.activeElement && document.activeElement !== document.body ? document.activeElement : document.body;
+      const typed = handle.dispatch(target, "keydown", init);
+      if (!typed) return true;
+      const form = init.key === "Enter" && !init.isComposing ? submits(target, true) : null;
+      if (form) { handle.dispatch(form, "submit", {}); return true; }
+      if (!isTextField(target) || target.props.disabled || target.props.readOnly) return false;
+      // Cmd/Ctrl+A selects the whole field: the next character replaces it, Backspace or Delete clears it.
+      if ((init.ctrlKey || init.metaKey) && !init.altKey && !init.shiftKey && init.key.toLowerCase() === "a") {
+        target.selectedAll = true;
+        return true;
+      }
+      if (init.ctrlKey || init.metaKey) return false;
+      // ponytail: the caret is always at the end and the only selection is all of it, not drawn; a field that edits
+      // in the middle or shows a selection needs the engine's input element.
+      const all = target.selectedAll;
+      target.selectedAll = false;
+      const before = target.value;
+      const erase = init.key === "Backspace" || (all && init.key === "Delete");
+      const after = erase ? (all ? "" : before.slice(0, -1)) : [...init.key].length === 1 ? (all ? "" : before) + init.key : before;
+      if (after === before) return false;
+      target.value = after;
+      handle.dispatch(target, "input", { data: init.key });
+      handle.dispatch(target, "change", {});
+      // A controlled field shows its props' value from now on; an uncontrolled one keeps what was typed.
+      if (target.props.value !== undefined) delete target.edit;
+      target.touch();
+      render();
+      return true;
+    },
+    /** The engine's box for node `id` (window coordinates, logical px), for `getBoundingClientRect`. */
+    setBounds(id, box) {
+      const node = byId(id);
+      if (node) node.bounds = { x: box.x, y: box.y, width: box.width, height: box.height };
+    },
+    /** A click on a check box or radio button (`id`): the `click` event, then, unless the source prevented it, the
+     * box ticked as a browser ticks it (a radio button only on), with `input` and `change` events. */
+    toggle(id) {
+      const target = byId(id);
+      if (!target || target.props.disabled || !handle.dispatch(id, "click", { button: 0, detail: 1 })) return;
+      const radio = target.props.type === "radio";
+      if (radio && target.checked) return;
+      target.checked = radio ? true : !target.checked;
+      handle.dispatch(id, "input", {});
+      handle.dispatch(id, "change", {});
+      // A controlled box shows its props' state from now on; an uncontrolled one keeps the tick.
+      if (target.props.checked !== undefined) delete target.ticked;
+      target.touch();
+      render();
+    },
+    /** A left click as the engine reports one: press then release on the same node. */
+    click(id, init = {}) {
+      const at = { button: 0, buttons: 1, pointerType: "mouse", ...init };
+      for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) handle.dispatch(id, type, at);
+    },
+    /** The pointer entered (`on`) or left node `id` (one the description marks `track_hover`): its `:hover` state,
+     * which a descendant's group variant reads. The element's own `hover:` styles are the engine's hover style. */
+    /** Whether the pointer is over node `id`, as `hover` last said. */
+    hovered: (id) => !!byId(id)?.state.hover,
+    hover(id, on) {
+      const node = byId(id);
+      if (!node || node.state.hover === on) return;
+      node.state.hover = on;
+      node.touch();
+      render();
+    },
+    focus(id) {
+      const node = byId(id);
+      if (!node) return;
+      discrete(() => {
+        const previous = document.activeElement;
+        if (previous && previous !== node && previous !== document.body) handle.dispatch(previous, "blur");
+        document.focus(node);
+        handle.dispatch(node, "focus");
+      });
+      render();
+    },
+    /** A press at node `id` that nothing prevented: the browser's default focuses the element pressed. Only an element
+     * that listens for keys (`onKeyDown`) is focused, so a press elsewhere leaves the keyboard where it was; the focus
+     * is not `:focus-visible`, as after a pointer press in a browser. */
+    // ponytail: a browser focuses every focusable element pressed; here only one with its own key handler, so a
+    // screen's ordinary buttons do not take the keyboard from a terminal.
+    pressFocus(id) {
+      const pressed = typeof id === "string" ? byId(id) : id;
+      let node = pressed;
+      while (node && !(node instanceof HostElement && typeof node.props.onKeyDown === "function" && focusable(node))) node = node.parentNode;
+      if (!node || node === document.activeElement) return;
+      handle.focus(node.id);
+      node.state.pointerFocus = true;
+      node.touch();
+      render();
+    },
+    /** The engine is drawing the latest description: the boxes measured in this frame's layout are the tree's.
+     * Returns whether effects wait for that layout (`measured`); run them with `retry` once the frame is drawn. */
+    drawing() {
+      drawn = version;
+      return document.retries.length > 0;
+    },
+    /** Runs the effects that waited for a fresh layout. */
+    retry() {
+      const waiting = document.retries.splice(0);
+      for (const run of waiting) run();
+    },
+    /** Runs effects React has scheduled (the engine calls it after a frame). */
+    flush: settle,
+    /** React was replaced since this tree was mounted (`fresh`): the tree is to be mounted again. */
+    dead: () => !alive(),
+    update(props) {
+      if (!alive()) return;
+      reconciler.updateContainerSync(createElement(Component, props ?? {}), root, null, null);
+      reconciler.flushSyncWork();
+      settle();
+    },
+    unmount() {
+      if (alive()) {
+        reconciler.updateContainerSync(null, root, null, null);
+        reconciler.flushSyncWork();
+        reconciler.flushPassiveEffects();
+      }
+      document.afterCommit = null;
+      document.retries.length = 0;
+      perch.forgetBounds?.(prefix);
+    },
+  };
+  return handle;
+}

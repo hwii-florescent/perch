@@ -1,0 +1,33 @@
+{
+  "props": {
+    "scope": "project",
+    "id": "p-perch",
+    "name": "perch",
+    "loaded": {
+      "scope": "project",
+      "id": "p-perch",
+      "text": "Answer in short sentences.\nRun cargo test -p perch-core before saying a change is done.\nNever push; commit each verified slice locally.",
+      "folders": [
+        "docs/not-absolute"
+      ],
+      "revision": 3,
+      "maxChars": 16000
+    },
+    "saved": {
+      "scope": "project",
+      "id": "p-perch",
+      "text": "Answer in short sentences.\nRun cargo test -p perch-core before saying a change is done.\nNever push; commit each verified slice locally.",
+      "folders": [
+        "docs/not-absolute"
+      ],
+      "revision": 3,
+      "maxChars": 16000,
+      "error": "Reference folders must be absolute paths: docs/not-absolute"
+    }
+  },
+  "steps": [
+    {
+      "click": "[data-testid=\"instructions-save\"]"
+    }
+  ]
+}

@@ -33,7 +33,7 @@ export default function PhoneSize({ generation, pending, onThisTab, onAllTabs }:
           <span className="font-semibold text-fg">Your phone is sizing this terminal</span>
           <span>It shows at phone size so it fits. You can still type here. Take it back to return to this window&apos;s size.</span>
         </div>
-        <button type="button" className={cn(iconButton, "text-[1rem]")} aria-label="Keep phone size and hide this" onClick={() => setFoldedGeneration(generation)}>×</button>
+        <button type="button" className={cn(iconButton, "text-[1rem]")} aria-label="Keep phone size and hide this" title="Keep phone size and hide this" onClick={() => setFoldedGeneration(generation)}>×</button>
       </div>
       <div className="flex flex-wrap gap-2">
         <button type="button" className={buttonClass({ variant: "primary", size: "md" })} disabled={pending} onClick={onThisTab}>Take back this tab</button>

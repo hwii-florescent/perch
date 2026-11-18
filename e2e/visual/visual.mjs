@@ -133,8 +133,8 @@ const nativeMoreMessage = (id) => ({ id, role: "assistant", text: "A new message
 // Refresh only reloads status and notes; flipping a diff option reloads the diff.
 const reloadGitDiff = async (page) => {
   await page.getByTestId("git-refresh").click();
-  await page.getByLabel("Ignore whitespace").check();
-  await page.getByLabel("Ignore whitespace").uncheck();
+  await page.getByRole("button", { name: "Ignore whitespace" }).click();
+  await page.getByRole("button", { name: "Ignore whitespace" }).click();
 };
 let conflictBefore = null;
 // True when the element's computed colour is the current value of the :root token (e.g. "--red").

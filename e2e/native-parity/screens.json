@@ -1,0 +1,32 @@
+{
+  "//": "Every screen with a web reference: web-reference.spec.ts renders them, and compare.mjs --web-dir fails a state of theirs that has no reference.",
+  "screens": [
+    "sidebar",
+    "tabs",
+    "status",
+    "navigator",
+    "pane-header",
+    "pane-menu",
+    "confirm",
+    "dialog",
+    "toast",
+    "new-session",
+    "tab-menu",
+    "select",
+    "keybind-help",
+    "launcher",
+    "session-menu",
+    "tab-drag",
+    "start",
+    "folder-browser",
+    "instructions",
+    "memory",
+    "worktree",
+    "terminal-search",
+    "agent-control",
+    "phone-size",
+    "settings",
+    "files",
+    "review"
+  ]
+}

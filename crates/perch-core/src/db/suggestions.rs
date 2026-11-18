@@ -11,6 +11,7 @@ pub struct SuggestionRow {
     pub card_id: String,
     pub position: i64,
     pub task: String,
+    pub name: Option<String>,
     pub agent: String,
     pub model: Option<String>,
     pub worktree: bool,
@@ -32,7 +33,7 @@ pub enum Added {
 }
 
 const COLUMNS: &str = "id, lead_session_id, card_id, position, task, agent, model, worktree,
-    state, child_session_id, reason, created_at";
+    state, child_session_id, reason, created_at, name";
 
 fn row_from(row: &rusqlite::Row<'_>) -> rusqlite::Result<SuggestionRow> {
     let state: String = row.get(8)?;
@@ -50,6 +51,7 @@ fn row_from(row: &rusqlite::Row<'_>) -> rusqlite::Result<SuggestionRow> {
         child_session_id: row.get(9)?,
         reason: row.get(10)?,
         created_at: row.get(11)?,
+        name: row.get(12)?,
     })
 }
 
@@ -95,8 +97,8 @@ impl HistoryDb {
             tx.execute(
                 "INSERT INTO suggestions
                     (id, lead_session_id, card_id, card_key, position, task, agent, model,
-                     worktree, state, reason, created_at, updated_at, run_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', '', ?10, ?10, ?11)",
+                     worktree, state, reason, created_at, updated_at, run_id, name)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'pending', '', ?10, ?10, ?11, ?12)",
                 params![
                     uuid::Uuid::new_v4().to_string(),
                     lead_session_id,
@@ -108,7 +110,8 @@ impl HistoryDb {
                     item.model,
                     item.worktree as i64,
                     now,
-                    run
+                    run,
+                    item.name
                 ],
             )?;
         }
@@ -250,6 +253,7 @@ mod tests {
     fn item(task: &str) -> Suggested {
         Suggested {
             task: task.into(),
+            name: None,
             agent: "codex".into(),
             model: None,
             worktree: false,
@@ -266,12 +270,19 @@ mod tests {
     #[test]
     fn a_card_is_stored_in_order_and_its_key_returns_it_again() {
         let db = db();
+        let named = Suggested {
+            name: Some("Second task".into()),
+            ..item("two")
+        };
         let Added::New(rows) = db
-            .add_suggestions("lead", "k1", &[item("one"), item("two")])
+            .add_suggestions("lead", "k1", &[item("one"), named])
             .unwrap()
         else {
             panic!("a new card");
         };
+        // The name a started sub-session will get is kept with its task.
+        assert_eq!(rows[0].name, None);
+        assert_eq!(rows[1].name.as_deref(), Some("Second task"));
         assert_eq!(
             rows.iter().map(|row| row.task.as_str()).collect::<Vec<_>>(),
             ["one", "two"]

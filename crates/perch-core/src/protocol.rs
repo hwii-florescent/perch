@@ -159,9 +159,10 @@ pub struct SettingsData {
     #[serde(default)]
     pub reporter_omp_model: String,
     /// The per-run limits (Settings > Sub-sessions); absent from an older core, which means today's
-    /// defaults (4 live, 8 total, 50 messages, 3 interrupts, 10 waiting cards).
+    /// defaults (4 live, 50 messages, 3 interrupts, 10 waiting cards).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_live_sub_sessions: Option<u32>,
+    /// Legacy field, no longer emitted or enforced; a run has no total limit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_sub_sessions: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -298,6 +299,7 @@ pub struct SettingsPatch {
     pub reporter_omp_model: Option<String>,
     #[serde(default)]
     pub max_live_sub_sessions: Option<u32>,
+    /// Legacy field accepted for compatibility and ignored; a run has no total limit.
     #[serde(default)]
     pub max_sub_sessions: Option<u32>,
     #[serde(default)]
@@ -2940,6 +2942,17 @@ pub enum ServerMessage {
         /// API-equivalent spend from local agent logs; absent from older peers.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         spend: Option<crate::usage::spend::SpendSummary>,
+    },
+
+    /// The terminal host (perchd) stopped answering, or reports locks held
+    /// too long; then again once it recovers. Sent to a client that connects
+    /// while it lasts. The core never restarts the host over it: terminals
+    /// keep running. Capability `daemon.health.v1`.
+    #[serde(rename = "daemon.health", rename_all = "camelCase")]
+    DaemonHealth {
+        healthy: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        problem: Option<String>,
     },
 
     /// A usage threshold event (`usage/alerts.rs`), broadcast once to every

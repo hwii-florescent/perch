@@ -17,6 +17,7 @@ import { TabSplitMenu } from "./components/TabSplitMenu";
 import { segment } from "./components/ui/segment";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { DirectoryBrowser } from "./components/DirectoryBrowser";
+import { DiffView } from "./components/GitDiffView";
 import { HostStateDot } from "./components/HostStateDot";
 import { InstructionsDialog } from "./components/InstructionsDialog";
 import { MemoryDialog } from "./components/MemoryDialog";
@@ -381,6 +382,7 @@ export function useGitReview(workspaceId: string): Sdk.GitReview {
 }
 
 export { FileIcon, GitMarker, newId, useResourceState };
+export { DiffView };
 
 // ---------------------------------------------------------------------------------------------------------------
 // 1.5: files (`stock:files`). Listings, drafts, versions, saves and conflicts are `filesystemStore`'s; CodeMirror,
@@ -454,6 +456,10 @@ export function FileEntryMenu(props: Sdk.FileEntryMenuProps): ReactElement {
   return createElement(HostFileEntryMenu, props);
 }
 export const shortcutLabel = (command: string) => hostShortcutLabel(command);
+export const tip = (label: string, command: string) => {
+  const key = shortcutLabel(command);
+  return key ? `${label} (${key})` : label;
+};
 export { assetKind, Chevron };
 
 // 1.5: the native chat (`stock:chat`). Its state and actions are `chatSession.ts`'s; agent text goes only through
@@ -566,6 +572,8 @@ export function shortcutFor(event: KeyboardEvent, scope?: Sdk.ShortcutScope): Sd
   return found ? { id: found.id, scope: found.scope ?? "global" } : null;
 }
 export { menuDivider as menuDividerClass } from "./components/ui/menu";
+import { Submenu } from "./components/ui/submenu";
+export { Submenu };
 
 // 1.5: layout content inside a package's own view, with the window layout's nodes. Its terminals are Perch's engines
 // (`PersistentTerminal`, `PersistentAgentTerminal`), borrowed: one already on screen moves in and back, so a package
@@ -613,11 +621,11 @@ export function sdkSurface(): typeof Sdk {
   usePaneLook, agentStateColor, tabStateClass: TAB_PANE_CLASS, segmentClass, AgentIcon, PageIcon, TabDragLayer,
   useHosts, useNavigation, nestSessions, useSessionFolders, useAddProject, useAddProjectRequest, pickFolder,
   SessionDot, HostStateDot, SessionMenu, WorktreeMenu, InstructionsDialog, MemoryDialog, FolderBrowser: DirectoryBrowser, Dialog, ConfirmDialog, Select,
-  menuItemClass, rowActionClass, buttonClass: button, beginReorderDrag,
-  useResourceState, newId, FileIcon, GitMarker, useGitReview,
+  menuItemClass, Submenu, rowActionClass, buttonClass: button, beginReorderDrag,
+  useResourceState, newId, FileIcon, GitMarker, useGitReview, DiffView,
   terminals: terminalRecords, useTerminals, readTerminal, fetchTerminal, sendToTerminal, layoutTree, focus: focusInfo, useModData,
   useNotifications, iconButton: ICON_BUTTON, useAgentChoices, shortcutFor, menuDividerClass: menuDivider,
-  useWorkspaceFiles, CodeEditor, FileAsset: WorkspaceFileAsset, MarkdownPreview: WorkspaceMarkdownPreview, FileEntryMenu, Chevron, assetKind, shortcutLabel,
+  useWorkspaceFiles, CodeEditor, FileAsset: WorkspaceFileAsset, MarkdownPreview: WorkspaceMarkdownPreview, FileEntryMenu, Chevron, assetKind, shortcutLabel, tip,
   useNativeChat, Markdown: ChatMarkdown, CopyButton, Layout, useBrowserPages, BrowserPage, SlashPopover,
   glassClass: glass, tapButtonClass: TAP_BUTTON, GearIcon, PlusIcon, EllipsisIcon,
   // 1.8 settings: BEGIN

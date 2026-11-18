@@ -1,19 +1,28 @@
 //! The window: the [`Sidebar`] beside the main area, which holds the tab strip, the terminals of
-//! the tabs and their splits, the command palette and the terminal settings.
+//! the tabs and their splits and the terminal settings; the Navigator and the other floating
+//! screens are mods'.
 //!
-//! What a tab, a split and a key mean is decided elsewhere (`tabs`, `keymap`, `palette`,
+//! What a tab, a split and a key mean is decided elsewhere (`tabs`, `keymap`,
 //! `settings`); this draws it and runs the commands. A tab is a session shown as a
 //! [`TerminalView`]. Only the tabs on screen are drawn: a terminal that is not drawn is not laid
 //! out, so it never asks the core for a size, and it keeps the size it last had and keeps
 //! following its shell, ready for when its tab is shown again.
 //!
 //! The layout is this window's alone, as the web's is per viewer: it is not sent to the core.
+//! Each workspace has its own strip. Its sessions come from the core's list, as the web derives
+//! them (`workspaceTabs`): every session of the workspace has a tab, in the core's order, and a
+//! terminal is attached only when its tab is shown. Its other tabs (files, review, pages), their
+//! places among the sessions, its splits and its active tab are kept on this device in the
+//! window's state file and come back after a relaunch. The drawer's Files and Git follow the
+//! focused terminal's folder once its shell leaves the workspace's (`terminal_scope_id`).
 //! Splitting starts a new terminal session on this computer and shows it beside the focused one.
 //! Closing a tab ends its session, as the web does (`closeGuard.ts`): the core is asked to delete
 //! it over the terminal's own connection, and the tab goes only when the core says it is deleted.
 //! An agent's tab asks first when Settings > Warn before closing an agent is on: the first close
-//! arms, the second ends. A tab that only watches a session another view controls, and one this
-//! window is not attached to, just close: the session keeps running.
+//! arms, the second ends. A tab that only watches a session another view controls just closes:
+//! the session keeps running. One this window is not attached to (a session left over after the
+//! terminal daemon restarted, or whose shell exited) asks the core to delete it over the main
+//! connection, as the web does, and goes when the core says it is deleted.
 //!
 //! `terminal.takeBack` and `terminal.takeBackAll` take the size back from a phone for the terminal on
 //! screen or for every terminal this window is attached to whose size a phone holds; none is
@@ -21,56 +30,81 @@
 //!
 //! A tab for a blank session (listed, nothing ever launched in it) lists the launch choices of its
 //! computer; the one picked attaches that session, after the row is checked to be still blank.
+//!
+//! A mod may draw a screen in place of its Rust view (`mods::screens`): when one exists for a
+//! screen's id, the window places it there, hands it its props and runs what its result asks.
+//! With no screen mods, every Rust view is drawn as before.
 
 use crate::client::{Command, Core};
 use crate::handoff::{open_in_perch, perch_url, Place};
 use crate::keymap::{Context as KeyContext, Hit, Keymap};
-use crate::palette::{self, Entry, Kind, Outcome, Palette, SessionRef};
-use crate::settings::{
-    next_choice, scrollback_from_text, stepped, Change, CONTRAST, MAX_SCROLLBACK, MIN_SCROLLBACK,
-    OPACITY, OPTION_AS_ALT, PADDING, TOAST_DELIVERY,
-};
-use crate::sidebar::{Attention, Heard, Provider, LOCAL};
-use crate::tabs::{Dir, Node, Side, Tabs};
+use crate::mods::screens::{self, OnResult, Screens, PANE_HEADER_HEIGHT};
+use crate::mods::theme;
+use crate::mods::WindowMods;
+use crate::settings::Change;
+use crate::shell::{self, Chrome, Tokens, GUTTER, TOGGLE_AFTER, TOGGLE_INSET, TOGGLE_INSET_MAC};
+use crate::sidebar::{navigation, Alert, Heard, Provider, LOCAL};
+use crate::tab_drag::{self, Drop, TabDrag};
+use crate::tabs::{Dir, History, Node, Side, Tabs};
 use crate::terminal::actions::{Action, Scroll};
 use crate::terminal::attach::FromCore;
 use crate::terminal::clipboard::{Clipboard, SystemClipboard};
+use crate::terminal::links::{open_in_system, Target};
 use crate::terminal::{Status, TerminalEvent, TerminalView};
 use crate::ui::{
-    hint, label, tint, LaunchFailed, OpenSession, Sidebar, DIM_COLOR, MAIN_BG, SELECTED_BG,
-    SIDEBAR_BG, TITLE_COLOR,
+    hint, LaunchFailed, OpenSession, Sidebar, DIM_COLOR, MAIN_BG, SIDEBAR_BG, TITLE_COLOR,
 };
 use crate::zoom::Zoom;
 use futures::channel::mpsc::UnboundedSender;
 use gpui::{
-    canvas, div, prelude::*, px, relative, rgb, size, AnyElement, App, Context, Entity, Focusable,
-    KeyDownEvent, Keystroke, MouseButton, Pixels, Point, SharedString, Size, Subscription, Task,
-    Window,
+    canvas, div, point, prelude::*, px, relative, rgb, size, AnyElement, App, Bounds, Context,
+    DispatchPhase, Entity, Focusable, KeyDownEvent, Keystroke, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, Size, Subscription, Task, Window,
 };
-use serde_json::Value;
-use std::cell::Cell;
-use std::collections::HashMap;
+use serde_json::{json, Value};
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+mod browsing;
+mod context_bridge;
+mod review;
+pub use browsing::is_browser_tab;
+pub use context_bridge::bridge_available;
+pub use review::{review_tab, review_tab_id};
+
 /// How long a follow-up key after the leader chord is awaited.
 const LEADER_TIMEOUT: Duration = Duration::from_millis(1500);
+/// Pixels one resize key grows or shrinks the focused pane by, as the web's.
+const RESIZE_STEP: f32 = 60.;
+/// The pause in typing after which the files screen is shown what was typed in a file's editor
+/// (its caret, its text for a preview): the editor shows the keys at once and the store has them
+/// at once, and redrawing the screen on every key would cost each key a frame.
+const TYPING_SHOWN: Duration = Duration::from_millis(300);
 /// How many tabs out of sight keep their terminal attached. A tab beyond them is parked: its
 /// terminal lets go of the shell (which keeps running) and attaches again, with the core's
 /// repaint, when the tab is shown.
 const MAX_PARKED: usize = 12;
-/// How long a toast stays before it goes by itself.
-const TOAST_FOR: Duration = Duration::from_secs(8);
 /// How long the core has to confirm that a session ended before the tab says it is still running.
 const END_WAIT: Duration = Duration::from_secs(5);
-/// How long a first close of an agent's tab waits for the second that confirms it. The notice
-/// that asks starts with [`CLOSE_ASKS`].
-const CLOSE_CONFIRM_WITHIN: Duration = Duration::from_secs(8);
-const CLOSE_ASKS: &str = "Closing ends";
 /// How long to wait before attaching a dropped terminal to the core again: it doubles from the
 /// first wait to the last, and stays there for as long as the core is away.
 const REATTACH_FIRST: Duration = Duration::from_millis(250);
 const REATTACH_LAST: Duration = Duration::from_secs(5);
+
+/// Where an older build kept each workspace's last shown session, beside `native-mods/`: read once,
+/// when the window's state has no strips yet, as their active tabs.
+fn old_last_tabs(state_file: &std::path::Path) -> HashMap<String, String> {
+    let file = state_file
+        .parent()
+        .unwrap_or(state_file)
+        .with_file_name("native-last-tabs.json");
+    std::fs::read(file)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
 
 /// Whether a tab is a plain terminal: its session was launched as one (or, for a blank session,
 /// was started as one from the tab's choices). A session whose launch provider is not known is
@@ -88,11 +122,9 @@ fn reattach_delay(attempt: u32) -> Duration {
 /// How long a started split waits for its new session.
 const SPLIT_WAIT: Duration = Duration::from_secs(20);
 pub const TAB_BAR_HEIGHT: f32 = 30.;
-const TAB_BAR_BG: u32 = 0x19191c;
 const OVERLAY_BORDER: u32 = 0x3a3a42;
 const PANE_FOCUS: u32 = 0x4a4a55;
 const PANE_GAP: f32 = 6.;
-const PALETTE_ROWS: usize = 10;
 
 /// Finds the core to attach a terminal to, each time one is opened: the core may have
 /// restarted, and a restart changes its address and credential.
@@ -150,64 +182,163 @@ impl<T: Clone + PartialEq> Settle<T> {
     }
 }
 
-#[derive(Default)]
-struct SettingsPanel {
-    /// The scrollback being typed.
-    editing: Option<String>,
+/// The session id the terminal host's health notification carries (the web's `daemon:health`).
+const DAEMON_HEALTH: &str = "daemon:health";
+
+/// The most notifications kept for a screen to show; the oldest go first.
+const MAX_NOTIFICATIONS: usize = 20;
+
+/// A session finished or needs the person, a usage alert, or a mod's `notify`: what the
+/// notifications screen lists until it is dismissed or opened (`useNotifications`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Notification {
+    pub id: String,
+    pub heard: Heard,
+    /// What a mod's `notify` adds, as the web's toast: none for the window's own.
+    pub notice: Option<Notice>,
 }
 
-/// A message in the window about a session that finished or needs the person.
-struct Toast {
-    session_id: String,
-    text: String,
-    /// Takes the toast away after [`TOAST_FOR`].
-    _timer: Task<()>,
-}
-
-/// The pane menu's entry that stops the terminal's process, and what it reads once it asks to be
-/// confirmed.
-const STOP: &str = "Stop the terminal";
-const STOP_CONFIRM: &str = "Stop \u{2014} confirm";
-
-/// The menu a right-click in a pane opens: its entries are commands, run on that pane.
-struct PaneMenu {
-    at: Point<Pixels>,
-    /// The label and the command each runs.
-    items: Vec<(&'static str, &'static str)>,
+/// A mod's notification beyond its title and body (`perch.notify`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Notice {
+    /// `info`, `warning` or `error`: the ring's colour.
+    pub level: Option<String>,
+    /// A short mark drawn in place of the ring.
+    pub icon: Option<String>,
+    /// The command opening it runs, with its arguments.
+    pub action: Option<(String, Option<Value>)>,
+    /// How long it stays, in milliseconds.
+    pub timeout: Option<u64>,
 }
 
 pub struct Workspace {
     sidebar: Entity<Sidebar>,
     locate: Option<Locate>,
+    /// The strip of the workspace on screen (`tabs_of`): the tabs, splits and active tab of that
+    /// workspace only, as the web's strip lists a workspace's own sessions and files.
     tabs: Tabs,
+    /// The workspace `tabs` and `history` belong to; empty before any is shown.
+    tabs_of: String,
+    /// The strips and histories of the other workspaces, each as it was left.
+    parked: HashMap<String, (Tabs, History)>,
     panes: HashMap<String, Pane>,
     /// A split that was asked for and waits for its new terminal to be opened.
     pending_split: Option<(Side, Instant)>,
-    palette: Option<Palette>,
-    settings: Option<SettingsPanel>,
+    /// Sessions whose tab the person closed here without ending them: not opened again with their
+    /// lead until they are picked.
+    put_away: HashSet<String>,
+    /// Sessions the core said ended whose tab went: not opened again while the core's list still
+    /// holds them (it drops them a moment later, or keeps one whose shell exited).
+    ended: HashSet<String>,
     /// The zoom every terminal in the window is at.
     zoom: Zoom,
     /// Counts the changes of what is on screen, for [`Pane::seen`].
     tick: u64,
-    menu: Option<PaneMenu>,
-    toast: Option<Toast>,
     /// The window's height as last drawn, which keeps an overlay inside it.
     viewport_height: f32,
     /// The session whose terminal is over the window for a moment (`terminal.peek`), with no tab
     /// of its own unless it is kept.
     peek: Option<String>,
+    /// The peeked tab's terminal was attached before the peek (a warm tab out of sight), so
+    /// putting the peek away keeps it.
+    peek_was_warm: bool,
     /// The leader chord was pressed; dropped when its time is up.
     leader: Option<Task<()>>,
+    /// Resize mode is armed (the leader's `r`); each of its keys arms it afresh, and it is
+    /// dropped when its time is up.
+    resizing: Option<Task<()>>,
+    /// Back and Forward over the tabs shown.
+    history: History,
     /// What the last command could not do, or did instead.
     notice: Option<String>,
-    /// The tab whose first close asked to end its agent, and the timer that takes the ask back.
-    armed_close: Option<(String, Task<()>)>,
+    /// The tab whose close the close guard confirmed: the next close of it ends it.
+    armed_close: Option<String>,
     /// The room a lone pane has in the main area, as of the last draw: what a hidden pane is
     /// sized for.
     room: Rc<Cell<Option<Size<Pixels>>>>,
     /// Where the terminals copy to and paste from: the system's, unless a test says otherwise.
     clipboard: Rc<dyn Clipboard>,
+    /// What runs when a link is clicked: the system's handler, unless a test says otherwise.
+    opener: Rc<dyn Fn(&Target)>,
+    /// The screens mods draw in place of Rust views.
+    screens: Screens,
+    /// What has the keyboard while a modal screen is up, unless the mod gives it to a field of its
+    /// own: its layer, so keys pass the window on their way to the mod.
+    screen_focus: gpui::FocusHandle,
+    /// The window's own keyboard focus, held while nothing in it has the keyboard (nothing open),
+    /// so its keys still reach the window, as a page's reach the document.
+    root_focus: gpui::FocusHandle,
+    /// The terminal the window last gave the keyboard to. When it is no longer on screen (its tab
+    /// closed, the last one too) and still has the keyboard, the window takes it back.
+    given_keyboard: Option<gpui::WeakFocusHandle>,
+    notifications: Vec<Notification>,
+    next_notification: u64,
+    /// Cmd+T asks the tab strip mod for a new tab this many times (`perch.requests()`).
+    new_tab_asks: u64,
+    /// The place the start page's picker chose, for the workspace it was chosen in.
+    start_place: Option<(String, String)>,
+    /// New quickchat was asked for before the core made the Quickchat project: the start page is
+    /// Quickchat's, starting in the home folder (which makes the project), until anything else is
+    /// shown.
+    quickchat_start: bool,
+    /// The last Add project request (`useAddProject`): `{status, error?, hostId?}`.
+    add_project: Value,
+    /// How many times the sidebar was asked to open its Add project form, and when last.
+    add_project_asks: (u64, Option<Instant>),
+    /// The last request for a project's worktree menu (the web's `worktreeMenuRequest`):
+    /// `{projectKey, nonce, remove?, create?}`, null once the menu took it.
+    worktree_request: Value,
+    /// How many worktree menu requests were made, each one's `nonce`.
+    worktree_requests: u64,
+    /// The in-flow mod whose own field has the keyboard (the sidebar's Add project form): the
+    /// window leaves the keyboard there and types into it rather than running plain keys.
+    keyboard_held: Option<(String, u64)>,
+    /// A press on a tab of the strip, which may become a drag (`tab.beginDrag`).
+    drag: Option<TabDrag>,
+    /// A press a mod follows (`pointer.follow`): its token while the press lasts, and the
+    /// pointer last forwarded for it (`pointerFollow()`), which stays after the press ends.
+    follow: Option<String>,
+    pointer: Value,
+    /// Where the strip and each pane on screen were last drawn, for where a drag would drop.
+    drop_boxes: Rc<RefCell<DropBoxes>>,
+    /// Tells the core whether this window is the one being looked at.
+    activation: Option<Subscription>,
+    /// The window's frame: the drawer's tab and the two column widths.
+    chrome: Chrome,
+    /// A column's resize handle is held.
+    column_drag: Option<ColumnDrag>,
+    /// The window's width as last drawn.
+    viewport_width: f32,
+    /// Browser pages: browser tabs and the drawer's (`browsing`).
+    browsing: browsing::Browsing,
+    /// The workspace files this window has open: listings, documents and their drafts.
+    files: crate::files::Files,
+    /// The workspace the drawer's Files or Git tab was opened on, for when no tab on screen names one.
+    explorer_workspace: Option<String>,
+    /// Context Bridge: the terminal's Ask agent menu, the capture being asked about and its send.
+    bridge: context_bridge::Bridge,
     _subscriptions: Vec<Subscription>,
+}
+
+/// Which column a resize handle moves.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Column {
+    Sidebar,
+    Drawer,
+}
+
+/// A resize handle held: where the pointer was and how wide the column was.
+struct ColumnDrag {
+    column: Column,
+    from: f32,
+    start: f32,
+}
+
+/// The strip's box and each shown pane's, as last drawn.
+#[derive(Default)]
+struct DropBoxes {
+    strip: Option<Bounds<Pixels>>,
+    panes: HashMap<String, Bounds<Pixels>>,
 }
 
 impl Workspace {
@@ -225,28 +356,78 @@ impl Workspace {
             cx.notify();
         });
         // The sidebar's own changes (hiding it, a count, a session's state) redraw the window.
-        let observed = cx.observe(&sidebar, |_, _, cx| cx.notify());
+        let observed = cx.observe(&sidebar, |this, sidebar, cx| {
+            this.close_deleted(cx);
+            // A strip change that moves the keyboard (the core listed the active session under
+            // another workspace) shows the next tab as a click would: its terminal attaches.
+            let was = this.tabs.active().map(str::to_string);
+            this.sync_strips(cx);
+            if was.is_some() && this.tabs.active() != was.as_deref() {
+                this.after_change(cx);
+            }
+            let connected = sidebar.read(cx).model().connected;
+            this.files_connected(connected, cx);
+            this.refresh_bridge(cx);
+            cx.notify()
+        });
+        // A window opened on a live connection: the store starts connected.
+        let files_live = sidebar.read(cx).model().connected;
         Self {
             sidebar,
             locate: None,
             tabs: Tabs::default(),
+            tabs_of: String::new(),
+            parked: HashMap::new(),
             panes: HashMap::new(),
             pending_split: None,
-            palette: None,
-            settings: None,
+            put_away: HashSet::new(),
+            ended: HashSet::new(),
             zoom: Zoom::default(),
             tick: 0,
-            menu: None,
-            toast: None,
             viewport_height: 0.0,
             peek: None,
+            peek_was_warm: false,
             leader: None,
+            resizing: None,
+            history: History::default(),
             notice: None,
             armed_close: None,
             room: Rc::new(Cell::new(None)),
             clipboard: Rc::new(SystemClipboard),
+            opener: Rc::new(open_in_system),
+            screens: Screens::default(),
+            screen_focus: cx.focus_handle(),
+            root_focus: cx.focus_handle(),
+            given_keyboard: None,
+            notifications: Vec::new(),
+            next_notification: 0,
+            new_tab_asks: 0,
+            start_place: None,
+            quickchat_start: false,
+            add_project: json!({ "status": "idle" }),
+            add_project_asks: (0, None),
+            worktree_request: Value::Null,
+            worktree_requests: 0,
+            keyboard_held: None,
+            drag: None,
+            follow: None,
+            pointer: Value::Null,
+            drop_boxes: Rc::default(),
+            activation: None,
+            chrome: Chrome::default(),
+            column_drag: None,
+            viewport_width: 0.0,
+            browsing: Default::default(),
+            files: crate::files::Files::new(files_live),
+            explorer_workspace: None,
+            bridge: Default::default(),
             _subscriptions: vec![opened, failed, observed],
         }
+    }
+
+    /// The core `locate` finds now, if it can.
+    pub fn core(&self) -> Option<Core> {
+        self.locate.as_ref()?().ok()
     }
 
     /// Attach the terminals of opened sessions to the core `locate` finds. Without it the main
@@ -256,10 +437,136 @@ impl Workspace {
         self
     }
 
+    /// Keeps the drawer's tab, the column widths and every workspace's strip in `file`, on this
+    /// device. A file from before strips were kept gives its regular file tabs and each
+    /// workspace's last shown session instead.
+    pub fn with_window_state(mut self, file: std::path::PathBuf) -> Self {
+        self.chrome = Chrome::kept_in(file.clone());
+        let kept = self.chrome.tabs().clone();
+        if let Some(strips) = kept["strips"].as_object() {
+            for (workspace, tabs) in strips {
+                let Ok(tabs) = serde_json::from_value::<Tabs>(tabs.clone()) else {
+                    continue;
+                };
+                if !workspace.is_empty() {
+                    self.parked
+                        .insert(workspace.clone(), (tabs.restored(), History::default()));
+                }
+            }
+            self.put_away = kept["putAway"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|id| id.as_str().map(str::to_string))
+                .collect();
+            return self;
+        }
+        for id in self.chrome.files().to_vec() {
+            let workspace = id.split_once('\n').map_or("", |(w, _)| w).to_string();
+            self.parked.entry(workspace).or_default().0.append(&id);
+        }
+        for (workspace, id) in old_last_tabs(&file) {
+            let tabs = &mut self.parked.entry(workspace).or_default().0;
+            tabs.append(&id);
+            tabs.show(&id);
+        }
+        self
+    }
+
+    /// Show workspace `key`'s strip and history: the one on screen is put aside as it is (its
+    /// active tab too) and the workspace's own comes back, with every session the core lists for
+    /// it.
+    fn enter_workspace(&mut self, key: &str, cx: &mut Context<Self>) {
+        if self.tabs_of == key {
+            return;
+        }
+        let left = (
+            std::mem::take(&mut self.tabs),
+            std::mem::take(&mut self.history),
+        );
+        let away = std::mem::replace(&mut self.tabs_of, key.to_string());
+        if left.0 != Tabs::default() {
+            self.parked.insert(away, left);
+        }
+        (self.tabs, self.history) = self.parked.remove(key).unwrap_or_default();
+        self.sync_strips(cx);
+    }
+
+    /// The workspace tab `id` belongs to: the strip it is in, or the strip holding another tab of
+    /// its scope; else a file, review or browser tab names its workspace, or a Files scope filed
+    /// under one (a terminal's folder), in its id. A terminal's folder whose terminal has ended
+    /// and has no tab left stays on the strip on screen: a scope is never a strip of its own. A
+    /// session is in the one the core records (an older record, the one at its folder). Empty when
+    /// the session is unknown.
+    fn tab_workspace(&self, id: &str, cx: &App) -> String {
+        let store = &self.sidebar.read(cx).model().store;
+        if let Some((scope, _)) = id.split_once('\n') {
+            let prefix = format!("{scope}\n");
+            let holds = |tabs: &Tabs, exact: bool| {
+                tabs.contains(id) || !exact && tabs.strip().iter().any(|t| t.starts_with(&prefix))
+            };
+            for exact in [true, false] {
+                if holds(&self.tabs, exact) && !self.tabs_of.is_empty() {
+                    return self.tabs_of.clone();
+                }
+                if let Some((home, _)) = self.parked.iter().find(|(_, (t, _))| holds(t, exact)) {
+                    return home.clone();
+                }
+            }
+            return navigation::scope_workspace(store, scope).unwrap_or_else(|| {
+                if scope.starts_with("term:") {
+                    self.tabs_of.clone()
+                } else {
+                    scope.to_string()
+                }
+            });
+        }
+        store
+            .sessions
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| navigation::workspace_key(store, s))
+            .unwrap_or_default()
+    }
+
+    /// Put the strip of tab `id`'s workspace on screen before the tab is opened or shown.
+    fn enter_for(&mut self, id: &str, cx: &mut Context<Self>) {
+        let workspace = self.tab_workspace(id, cx);
+        if !workspace.is_empty() {
+            self.enter_workspace(&workspace, cx);
+        }
+    }
+
+    /// Every workspace's strip, the one on screen first.
+    fn every_tabs(&self) -> impl Iterator<Item = &Tabs> {
+        std::iter::once(&self.tabs).chain(self.parked.values().map(|(tabs, _)| tabs))
+    }
+
+    /// Take tab `id` out of every workspace's strip: a session the core deleted goes from
+    /// wherever it was open.
+    fn close_everywhere(&mut self, id: &str) {
+        self.ended.insert(id.to_string());
+        self.tabs.close(id);
+        for (tabs, _) in self.parked.values_mut() {
+            tabs.close(id);
+        }
+    }
+
     /// Copy and paste through `clipboard` instead of the system's.
     pub fn with_clipboard(mut self, clipboard: Rc<dyn Clipboard>) -> Self {
         self.clipboard = clipboard;
         self
+    }
+
+    /// Open clicked links with `opener` instead of the system's handler.
+    pub fn with_opener(mut self, opener: Rc<dyn Fn(&Target)>) -> Self {
+        self.opener = opener;
+        self
+    }
+
+    /// The drawer's tab, or `None` while it is closed.
+    pub fn drawer(&self) -> Option<crate::shell::Tools> {
+        self.chrome.tools()
     }
 
     pub fn sidebar(&self) -> &Entity<Sidebar> {
@@ -268,6 +575,29 @@ impl Workspace {
 
     pub fn tabs(&self) -> &Tabs {
         &self.tabs
+    }
+
+    /// The strip's tabs as drawn, the web's rule (`workspaceTabs`): a file of a terminal's folder
+    /// (its tab keyed by that terminal's `term:` scope) is left out while another session of the
+    /// workspace is on screen and its terminal is still open.
+    pub fn drawn_strip(&self, cx: &App) -> Vec<String> {
+        let store = &self.sidebar.read(cx).model().store;
+        let active = self.tabs.active().filter(|id| Tabs::is_session(id));
+        let hidden = |id: &str| {
+            let Some(terminal) = id
+                .strip_prefix("term:")
+                .and_then(|rest| rest.split(':').next())
+            else {
+                return false;
+            };
+            active.is_some_and(|a| a != terminal) && store.sessions.iter().any(|s| s.id == terminal)
+        };
+        self.tabs
+            .strip()
+            .iter()
+            .filter(|id| !hidden(id))
+            .cloned()
+            .collect()
     }
 
     /// The terminal of the tab with the keyboard, if one was attached.
@@ -292,21 +622,26 @@ impl Workspace {
             .collect()
     }
 
+    /// What is known of each open tab's terminal (`perch.terminals()`' `state`): `running` while
+    /// it is attached, `exited` once the core said its shell ended. A tab missing here is unknown:
+    /// attaching, reattaching, parked or never attached.
+    pub fn terminal_states(&self, cx: &App) -> HashMap<String, &'static str> {
+        self.panes
+            .iter()
+            .filter_map(|(id, pane)| {
+                let state = match pane.view.as_ref()?.read(cx).status() {
+                    Status::Live => "running",
+                    Status::Exited(_) => "exited",
+                    _ => return None,
+                };
+                Some((id.clone(), state))
+            })
+            .collect()
+    }
+
     /// The session of the tab with the keyboard.
     pub fn open(&self) -> Option<&OpenSession> {
         Some(&self.panes.get(self.tabs.active()?)?.open)
-    }
-
-    /// The labels of the pane menu, when it is open.
-    pub fn menu_labels(&self) -> Option<Vec<&'static str>> {
-        Some(
-            self.menu
-                .as_ref()?
-                .items
-                .iter()
-                .map(|(label, _)| *label)
-                .collect(),
-        )
     }
 
     /// The session peeked at, when there is one.
@@ -314,16 +649,12 @@ impl Workspace {
         self.peek.as_deref()
     }
 
-    pub fn palette_open(&self) -> bool {
-        self.palette.is_some()
-    }
-
-    pub fn settings_open(&self) -> bool {
-        self.settings.is_some()
-    }
-
     pub fn leader_armed(&self) -> bool {
         self.leader.is_some()
+    }
+
+    pub fn resize_armed(&self) -> bool {
+        self.resizing.is_some()
     }
 
     /// What the last command could not do, or did instead.
@@ -331,32 +662,1538 @@ impl Workspace {
         self.notice.as_deref()
     }
 
+    /// The terminals' zoom factor (1 is 100%).
+    pub fn zoom_factor(&self) -> f32 {
+        self.zoom.factor()
+    }
+
+    /// How many times the tab strip was asked for a new tab.
+    pub fn new_tab_asks(&self) -> u64 {
+        self.new_tab_asks
+    }
+
+    /// How many times the sidebar was asked for its Add project form, and when last.
+    pub fn add_project_asks(&self) -> (u64, Option<Instant>) {
+        self.add_project_asks
+    }
+
+    /// The last Add project request, as `useAddProject` reads it.
+    pub fn add_project_state(&self) -> &Value {
+        &self.add_project
+    }
+
+    /// Asks the sidebar to open its Add project form (the web's `ADD_PROJECT_EVENT`), showing a
+    /// hidden sidebar first. With no sidebar mod there is no form to open.
+    fn ask_add_project(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
+        if !self.screens.has("sidebar", cx) {
+            return Err("No mod draws the sidebar, whose form adds a project.".into());
+        }
+        if !self.sidebar.read(cx).visible() {
+            self.sidebar
+                .update(cx, |sidebar, cx| sidebar.run_action("global.sidebar", cx));
+        }
+        self.add_project_asks = (self.add_project_asks.0 + 1, Some(Instant::now()));
+        cx.notify();
+        Ok(())
+    }
+
+    /// The last request for a project's worktree menu, null once taken.
+    pub fn worktree_request(&self) -> &Value {
+        &self.worktree_request
+    }
+
+    /// The worktree menu took its request.
+    pub fn take_worktree_request(&mut self, cx: &mut Context<Self>) {
+        if !self.worktree_request.is_null() {
+            self.worktree_request = Value::Null;
+            cx.notify();
+        }
+    }
+
+    /// Asks the worktree menu of `project_key` (`host:repoPath`) to open (on its create form with
+    /// `create`), or to ask before removing `remove`, showing a hidden sidebar first.
+    fn request_worktree_menu(
+        &mut self,
+        project_key: String,
+        remove: Option<Value>,
+        create: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.sidebar.read(cx).visible() {
+            self.sidebar
+                .update(cx, |sidebar, cx| sidebar.run_action("global.sidebar", cx));
+        }
+        self.worktree_requests += 1;
+        let mut request = json!({ "projectKey": project_key, "nonce": self.worktree_requests });
+        if let Some(remove) = remove {
+            request["remove"] = remove;
+        }
+        if create {
+            request["create"] = json!(true);
+        }
+        self.worktree_request = request;
+        cx.notify();
+    }
+
+    /// The git checkout on screen as its worktree menu is keyed (`host:repoPath`): the shown
+    /// workspace's project, else the shown session's folder (the web's `activeRepoKey`).
+    fn active_repo_key(&self, cx: &App) -> Option<String> {
+        let model = self.sidebar.read(cx).model();
+        let store = &model.store;
+        let session = self
+            .tabs
+            .active()
+            .and_then(|id| store.sessions.iter().find(|s| s.id == id));
+        let workspace = screens::mods(cx)
+            .and_then(|(_, perch)| perch.shown_place().1)
+            .or_else(|| session.and_then(|s| s.workspace_id.clone()))
+            .and_then(|id| store.workspaces.iter().find(|w| w.id == id));
+        let owner = workspace.and_then(|w| store.projects.iter().find(|p| p.id == w.project_id));
+        if let Some(project) = owner {
+            if let Some(repo) = project.repo_path.as_deref().filter(|r| !r.is_empty()) {
+                return Some(format!("{}:{repo}", project.host_id));
+            }
+        }
+        session
+            .filter(|s| !s.cwd.is_empty())
+            .map(|s| format!("{}:{}", s.host_id, s.cwd))
+    }
+
+    /// Puts a screen's question `frame` ([`crate::client::ask_frame`]) to the core: a folder
+    /// listing, Instructions, Project memory. The receiver is dropped unanswered when no core is
+    /// followed.
+    pub fn ask(
+        &self,
+        frame: Value,
+        cx: &App,
+    ) -> futures::channel::oneshot::Receiver<Result<Value, String>> {
+        let (reply, answer) = futures::channel::oneshot::channel();
+        self.sidebar.read(cx).send(Command::Ask { frame, reply });
+        answer
+    }
+
+    /// Sends the core a change a screen made (`client::send_frame`'s kinds): a setting or a
+    /// computer. The sidebar follows the core's broadcast, not this request.
+    pub fn send_to_core(&self, frame: Value, cx: &App) {
+        self.sidebar.read(cx).send(Command::Send(frame));
+    }
+
+    /// The window's file store.
+    pub fn files(&self) -> &crate::files::store::FileStore {
+        &self.files.store
+    }
+
+    /// Runs `change` on the file store, then sends what it asked of the core and redraws.
+    pub fn with_files<R>(
+        &mut self,
+        change: impl FnOnce(&mut crate::files::store::FileStore, Instant) -> R,
+        cx: &mut Context<Self>,
+    ) -> R {
+        let result = change(&mut self.files.store, Instant::now());
+        self.pump_files(cx);
+        result
+    }
+
+    /// Opens `path` of workspace `workspace_id` in a file tab: as the workspace's preview tab
+    /// (replacing its previous preview in place) when `preview`, else as a regular tab.
+    pub fn open_file(
+        &mut self,
+        workspace_id: &str,
+        path: &str,
+        preview: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let id = format!("{workspace_id}\n{path}");
+        let home = self.tab_workspace(&id, cx);
+        self.enter_workspace(&home, cx);
+        if preview {
+            self.tabs.open_preview(&id, |other| {
+                file_tab(other).is_some_and(|(w, _)| w == workspace_id)
+            });
+        } else {
+            self.tabs.open(&id);
+            self.tabs.pin(&id);
+        }
+        self.after_change(cx);
+    }
+
+    /// Opens the drawer's Files tab on workspace `workspace_id` (while no tab on screen names
+    /// one).
+    pub fn show_files(&mut self, workspace_id: &str, cx: &mut Context<Self>) {
+        self.explorer_workspace = Some(workspace_id.to_string());
+        self.chrome.set_tools(Some(shell::Tools::Files));
+        cx.notify();
+    }
+
+    /// The files screens the window places: the explorer in the drawer's Files tab, a file's
+    /// editor in each file tab on screen.
+    fn files_wanted(&self, want: &mut impl FnMut(&'static str, String, Value), cx: &App) {
+        if self.chrome.tools() == Some(shell::Tools::Files) {
+            let shown = self.drawer_scope(cx);
+            if let Some(workspace_id) = shown.or_else(|| self.explorer_workspace.clone()) {
+                want(
+                    "files",
+                    "files#drawer".into(),
+                    json!({ "workspaceId": workspace_id, "layout": "explorer" }),
+                );
+            }
+        }
+        for id in self.tabs.shown() {
+            if let Some((workspace_id, path)) = file_tab(&id) {
+                want(
+                    "files",
+                    format!("files#{id}"),
+                    json!({ "workspaceId": workspace_id, "initialPath": path, "layout": "editor" }),
+                );
+            }
+        }
+    }
+
+    /// An edited preview becomes a regular tab, as the web's.
+    fn keep_edited_previews(&mut self) -> bool {
+        let edited: Vec<String> = self
+            .tabs
+            .previews()
+            .iter()
+            .filter(|id| {
+                file_tab(id).is_some_and(|(w, p)| {
+                    self.files.store.document(w, p).is_some_and(|d| d.dirty())
+                })
+            })
+            .cloned()
+            .collect();
+        for id in &edited {
+            self.tabs.pin(id);
+        }
+        !edited.is_empty()
+    }
+
+    /// The drawer's body with no project in focus: Files, Git and Browser belong to a project.
+    fn empty_tools_body(&self, tokens: Tokens) -> AnyElement {
+        div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .px_6()
+            .text_size(px(12.))
+            .text_color(tokens.subtext)
+            .text_center()
+            .child("Open a project to see its files, changes and browser.")
+            .into_any_element()
+    }
+
+    /// One of the core's `fs.*` messages.
+    pub fn on_files_message(
+        &mut self,
+        message: &perch_core::protocol::ServerMessage,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_files(|store, now| store.handle(message, now), cx);
+    }
+
+    fn files_connected(&mut self, connected: bool, cx: &mut Context<Self>) {
+        if self.files.store.is_connected() != connected {
+            self.with_files(|store, _| store.set_connected(connected), cx);
+        }
+    }
+
+    /// Sends the store's frames, wakes for its next draft deadline, and redraws when a
+    /// workspace's files moved.
+    /// An entry was created, moved, copied or deleted (or the core refused): a refusal is the
+    /// window's notice; a new file opens in a tab; the tabs of a deleted entry close and those of a
+    /// moved one follow it, as the web's file operations do.
+    fn follow_mutation(&mut self, done: crate::files::store::Mutation, cx: &mut Context<Self>) {
+        use perch_core::protocol::FsMutateOp as Op;
+        if let Some(error) = done.error {
+            self.notice = Some(error);
+            cx.notify();
+            return;
+        }
+        let w = done.workspace_id.as_str();
+        if done.op == Op::CreateFile {
+            self.open_file(w, &done.path, false, cx);
+            return;
+        }
+        if !matches!(done.op, Op::Rename | Op::Delete) {
+            return;
+        }
+        let within = |path: &str| {
+            path == done.path
+                || path
+                    .strip_prefix(done.path.as_str())
+                    .is_some_and(|r| r.starts_with('/'))
+        };
+        let affected: Vec<(String, String)> = self
+            .tabs
+            .strip()
+            .iter()
+            .filter_map(|id| {
+                file_tab(id)
+                    .map(|(tw, path)| (id.clone(), tw == w && within(path), path.to_string()))
+            })
+            .filter(|(_, hit, _)| *hit)
+            .map(|(id, _, path)| (id, path))
+            .collect();
+        let active = self.tabs.active().map(str::to_string);
+        for (id, _) in &affected {
+            self.tabs.close(id);
+        }
+        // A renamed file that was on screen stays on screen under its new name.
+        if let (Op::Rename, Some(to)) = (done.op, done.to.as_deref()) {
+            if let Some((_, path)) = affected.iter().find(|(id, _)| Some(id) == active.as_ref()) {
+                let moved = format!("{to}{}", &path[done.path.len()..]);
+                self.open_file(w, &moved, false, cx);
+                return;
+            }
+        }
+        if !affected.is_empty() {
+            self.after_change(cx);
+        }
+    }
+
+    /// Sends the core every draft its buffer may lack (the window is closing or the app quitting),
+    /// so no edit made in the last moments is lost.
+    pub fn flush_drafts(&mut self, cx: &mut Context<Self>) {
+        self.files.store.flush_pending_buffers();
+        self.pump_files(cx);
+    }
+
+    fn pump_files(&mut self, cx: &mut Context<Self>) {
+        self.pump(false, cx);
+    }
+
+    /// Sends the store's frames and arms its timers; with `quiet` (typing in an editor, which
+    /// already shows it) the screen is shown the change once typing pauses ([`TYPING_SHOWN`]).
+    fn pump(&mut self, quiet: bool, cx: &mut Context<Self>) {
+        self.bind_editors(cx);
+        let (sent, changed, arm) = self.files.drain();
+        for frame in sent {
+            self.send_to_core(frame, cx);
+        }
+        for mutation in self.files.store.take_mutated() {
+            self.follow_mutation(mutation, cx);
+        }
+        if let Some(at) = arm {
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(at.saturating_duration_since(Instant::now()))
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    this.files.fired(Instant::now());
+                    this.pump_files(cx);
+                });
+            })
+            .detach();
+        }
+        self.files.held.extend(changed);
+        if quiet {
+            if !self.files.held.is_empty() {
+                self.files.typed += 1;
+                let typed = self.files.typed;
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(TYPING_SHOWN).await;
+                    let _ = this.update(cx, |this, cx| {
+                        if this.files.typed == typed {
+                            this.pump_files(cx);
+                        }
+                    });
+                })
+                .detach();
+            }
+            return;
+        }
+        let changed = std::mem::take(&mut self.files.held);
+        if !changed.is_empty() {
+            self.keep_edited_previews();
+            self.files.resync = true;
+            if let Some((_, perch)) = screens::mods(cx) {
+                for workspace_id in &changed {
+                    perch.set_files(workspace_id, self.files.snapshot(workspace_id));
+                }
+                perch.flush(cx);
+            }
+            cx.notify();
+        }
+    }
+
+    /// Has the window's editors hand this store the edits and caret moves of file documents.
+    fn bind_editors(&mut self, cx: &mut Context<Self>) {
+        if self.files.bound {
+            return;
+        }
+        let Some(editors) = cx.try_global::<WindowMods>().map(|m| m.editors.clone()) else {
+            return;
+        };
+        self.files.bound = true;
+        let this = cx.weak_entity();
+        editors.bind(move |key, kind, cx| {
+            if crate::files::doc_key(key).is_none() {
+                return false;
+            }
+            let (this, key, kind) = (this.clone(), key.to_string(), kind.to_string());
+            cx.defer(move |cx| {
+                let _ = this.update(cx, |this, cx| this.editor_heard(&key, &kind, cx));
+            });
+            true
+        });
+    }
+
+    /// A file editor's text or caret moved: the draft goes to the store at once (the core's
+    /// buffer after the store's pause), the screen hears of it shortly.
+    fn editor_heard(&mut self, key: &str, kind: &str, cx: &mut Context<Self>) {
+        let Some((workspace_id, path, epoch)) = crate::files::doc_key(key) else {
+            return;
+        };
+        let Some(editors) = cx.try_global::<WindowMods>().map(|m| m.editors.clone()) else {
+            return;
+        };
+        match kind {
+            "change" => {
+                let current = self
+                    .files
+                    .store
+                    .document(workspace_id, path)
+                    .is_some_and(|d| d.reload_epoch.unwrap_or(0) == epoch);
+                let Some(state) = editors.state(key).filter(|_| current) else {
+                    return;
+                };
+                let text = state.read(cx).value().to_string();
+                let store = &mut self.files.store;
+                let was_dirty = store
+                    .document(workspace_id, path)
+                    .is_some_and(|d| d.dirty());
+                store.update_draft(workspace_id, path, text, Instant::now());
+                // The first edit shows at once: the tab's dirty mark, the preview kept.
+                if !was_dirty {
+                    return self.pump(false, cx);
+                }
+            }
+            _ => {
+                let Some(caret) = editors.caret(key) else {
+                    return;
+                };
+                self.files.carets.insert(key.to_string(), caret);
+                self.files.held.insert(workspace_id.to_string());
+            }
+        }
+        self.pump(true, cx);
+    }
+
+    /// Gives each open file editor the store's text where it differs (a load, a reload, a draft
+    /// restored or overwritten): as an external change, with no undo entry.
+    fn sync_editors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !std::mem::take(&mut self.files.resync) {
+            return;
+        }
+        let Some(editors) = cx.try_global::<WindowMods>().map(|m| m.editors.clone()) else {
+            return;
+        };
+        for key in editors.keys() {
+            let Some((workspace_id, path, epoch)) = crate::files::doc_key(&key) else {
+                continue;
+            };
+            let Some(document) = self
+                .files
+                .store
+                .document(workspace_id, path)
+                .filter(|d| d.reload_epoch.unwrap_or(0) == epoch)
+            else {
+                continue;
+            };
+            let differs = editors
+                .state(&key)
+                .is_some_and(|state| state.read(cx).value() != document.content.as_str());
+            if differs {
+                let text = document.content.clone();
+                editors.set_value(&key, &text, true, window, cx);
+            }
+        }
+    }
+
+    /// Registers `path` on `host_id` as a project, as the sidebar's Add project form does
+    /// (`useAddProject().add`): pending until the core answers, then success or its error. Ignored
+    /// while one is pending.
+    pub fn add_project(
+        &mut self,
+        host_id: &str,
+        path: &str,
+        name: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let path = path.trim().to_string();
+        if path.is_empty() || self.add_project["status"] == "pending" {
+            return;
+        }
+        let host_id = host_id.to_string();
+        self.add_project = json!({ "status": "pending", "hostId": host_id });
+        let (reply, answer) = futures::channel::oneshot::channel();
+        self.sidebar.read(cx).send(Command::AddProject {
+            host_id: host_id.clone(),
+            path,
+            name: name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()),
+            reply,
+        });
+        cx.spawn(async move |this, cx| {
+            let state = match answer.await {
+                Ok(Ok(_)) => json!({ "status": "success", "hostId": host_id }),
+                Ok(Err(error)) => json!({ "status": "error", "hostId": host_id, "error": error }),
+                Err(_) => json!({ "status": "error", "hostId": host_id,
+                    "error": "Connection lost. Check the server and retry." }),
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.add_project = state;
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Forgets the last Add project answer (`useAddProject().clear`).
+    pub fn clear_add_project(&mut self, cx: &mut Context<Self>) {
+        self.add_project = json!({ "status": "idle" });
+        cx.notify();
+    }
+
+    /// The copy of an in-flow mod under key `id`, in its `load`th load, says whether one of its
+    /// own fields has the keyboard. The hold goes with that copy: when it is no longer drawn or
+    /// loads again, the window lets go of it (see [`Self::let_go_of_stale_hold`]).
+    pub fn hold_keyboard(&mut self, id: &str, load: u64, held: bool, cx: &mut Context<Self>) {
+        let now = if held {
+            Some((id.to_string(), load))
+        } else if self
+            .keyboard_held
+            .as_ref()
+            .is_some_and(|(key, _)| key == id)
+        {
+            None
+        } else {
+            return;
+        };
+        if self.keyboard_held != now {
+            self.keyboard_held = now;
+            cx.notify();
+        }
+    }
+
+    /// Whether a field of an in-flow mod holds the keyboard.
+    pub fn keyboard_held(&self) -> bool {
+        self.keyboard_held.is_some()
+    }
+
+    /// A hold whose copy is no longer drawn (`wanted`), or has loaded again, holds nothing: the
+    /// copy that asked for it cannot let go any more.
+    fn let_go_of_stale_hold(&mut self, wanted: &[(&'static str, String, Value)], cx: &App) {
+        let stale = self.keyboard_held.as_ref().is_some_and(|(key, load)| {
+            !wanted.iter().any(|(_, k, _)| k == key)
+                || screens::mods(cx).is_some_and(|(_, perch)| perch.loads(key) != *load)
+        });
+        if stale {
+            self.keyboard_held = None;
+        }
+    }
+
+    /// The notifications not yet dismissed, oldest first.
+    pub fn notifications(&self) -> &[Notification] {
+        &self.notifications
+    }
+
+    /// The floating screens open, bottom first.
+    pub fn screens_open(&self) -> Vec<&'static str> {
+        self.screens.floating.iter().map(|f| f.id).collect()
+    }
+
+    /// The in-flow screen `key` on screen (`sidebar`, `tabs`, `pane-header#<id>`), when a mod draws it.
+    pub fn screen_view(&self, key: &str) -> Option<Entity<crate::mods::ModView>> {
+        self.screens.inflow(key)
+    }
+
+    /// The props an open floating screen was given.
+    pub fn screen_props(&self, id: &str) -> Option<&Value> {
+        self.screens.props(id)
+    }
+
+    /// Opens floating screen `id` (`dialog`, `confirm`, ...) with `props`, at `at` for a menu;
+    /// `on_result` gets what it closes with (`null` when dismissed). False when no mod draws it.
+    pub fn open_screen(
+        &mut self,
+        id: &str,
+        props: Value,
+        at: Option<Point<Pixels>>,
+        on_result: Option<OnResult>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let opened = self.screens.open(id, props, at, on_result, cx);
+        if opened {
+            cx.notify();
+        }
+        opened
+    }
+
+    /// Why open screen `id` is not drawn as its mod means (it would not load, or its render threw).
+    pub fn screen_error(&self, id: &str, cx: &App) -> Option<String> {
+        self.screens.error(id, cx)
+    }
+
+    /// Screen `id` keeps Escape for itself while `held`, or gives it back to the window.
+    pub fn hold_escape(&mut self, id: &str, held: bool) {
+        self.screens.set_takes_escape(id, held);
+    }
+
+    /// Gives an open floating screen new props; it re-renders. False when it is not open.
+    pub fn update_screen(&mut self, id: &str, props: Value, cx: &mut Context<Self>) -> bool {
+        self.screens.update(id, props, cx)
+    }
+
+    /// A floating screen closed itself with `result`, or was dismissed (`null`): the keyboard
+    /// goes back to what had it, then what it was opened for runs.
+    pub fn screen_closed(
+        &mut self,
+        id: &str,
+        result: Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(open) = self.screens.take(id, cx) else {
+            // The start page is in flow: what it closes with is an action, and it stays.
+            if id == "start" {
+                let outcome = self.start_result(&result, window, cx);
+                self.finish(outcome, cx);
+            }
+            return;
+        };
+        if let Some(handle) = open.focus_back {
+            handle.focus(window, cx);
+        }
+        if let Some(then) = open.on_result {
+            then(self, result, window, cx);
+        }
+        cx.notify();
+    }
+
+    // Screens a mod draws: their props, and what their results do.
+
+    /// `NavigatorScreenProps`, as far as this window has its data.
+    fn navigator_props(&self, cx: &App) -> Value {
+        let model = self.sidebar.read(cx).model();
+        let store = &model.store;
+        let current = self.tabs.active().map(str::to_string);
+        let session = current
+            .as_ref()
+            .and_then(|id| store.sessions.iter().find(|s| s.id == *id));
+        let workspace = session
+            .and_then(|s| s.workspace_id.as_ref())
+            .and_then(|id| store.workspaces.iter().find(|w| w.id == *id))
+            .map(|w| json!({ "id": w.id, "path": w.path }));
+        let cwd = session.map(|s| s.current_cwd.clone().unwrap_or_else(|| s.cwd.clone()));
+        let sessions: Vec<Value> = store
+            .sessions
+            .iter()
+            .map(|s| {
+                json!({
+                    "id": s.id, "title": s.title, "cwd": s.cwd, "hostId": s.host_id,
+                    "createdAt": s.created_at, "state": crate::mods::perch::session_state(s),
+                })
+            })
+            .collect();
+        let agents: Vec<Value> = self
+            .launch_choices(LOCAL, cx)
+            .iter()
+            .map(|p| json!({ "id": p.id, "label": p.name }))
+            .collect();
+        json!({
+            "open": true,
+            "sessions": sessions,
+            "currentSessionId": current,
+            "connected": model.connected,
+            "workspace": workspace,
+            "supportsSearch": false,
+            "supportsRun": false,
+            "agents": agents,
+            "agentCwd": cwd,
+            "terminalCwd": cwd,
+        })
+    }
+
+    /// What the Navigator closed with: one of its `actions`, or a command.
+    fn navigator_result(
+        &mut self,
+        result: &Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let (action, args) = action_of(result);
+        match action.as_deref() {
+            None => match result.get("command").and_then(Value::as_str) {
+                Some(command) => {
+                    let args = result.get("args").cloned();
+                    self.run_command(command, args.as_ref(), window, cx)
+                }
+                None => Ok(()),
+            },
+            Some("switchTo") => {
+                let id = word(&args, 0).ok_or("switchTo needs a session id.")?;
+                self.show_session(&id, cx)
+            }
+            Some("newTerminal") => self.split(Side::Right, cx),
+            Some("startAgent") => {
+                let agent = word(&args, 0).ok_or("startAgent needs an agent id.")?;
+                self.sidebar
+                    .update(cx, |sidebar, cx| sidebar.launch(&agent, cx))
+            }
+            Some(other) => Err(format!("The native window cannot {other} yet.")),
+        }
+    }
+
+    /// `PaneMenuScreenProps` for pane `id`.
+    fn open_pane_menu(
+        &mut self,
+        id: &str,
+        at: Point<Pixels>,
+        can_stop: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let props = json!({
+            "panelId": id,
+            "title": self.title_of(id, cx),
+            "x": f32::from(at.x),
+            "y": f32::from(at.y),
+            // Every native pane shows a session, so "Show beside an open tab" is offered.
+            "sessionId": id,
+            "canClose": true,
+            "maximized": self.tabs.zoomed(),
+            "canStopAgent": can_stop,
+        });
+        let target = id.to_string();
+        self.open_screen(
+            "pane-menu",
+            props,
+            Some(at),
+            Some(Box::new(move |this, result, window, cx| {
+                let outcome = this.menu_result(&target, at, &result, window, cx);
+                this.finish(outcome, cx);
+            })),
+            cx,
+        );
+    }
+
+    /// Tab `id`'s menu at `at`, the `tab-menu` screen (`TabSplitMenu`'s props): what may be done
+    /// with the tab, and the open tabs a split can take.
+    fn open_tab_menu(&mut self, id: &str, at: Point<Pixels>, cx: &mut Context<Self>) {
+        if !self.screens.has("tab-menu", cx) {
+            self.notice = Some(
+                "No mod draws the tab menu. The stock one is restored when the app starts.".into(),
+            );
+            cx.notify();
+            return;
+        }
+        let extra = crate::mods::perch::inbound_items(&self.sidebar.read(cx).model().store, id);
+        let strip = self.tabs.strip().to_vec();
+        let props = self.tab_menu_props(id, &strip, at, extra, cx);
+        let target = id.to_string();
+        self.open_screen(
+            "tab-menu",
+            props,
+            Some(at),
+            Some(Box::new(move |this, result, window, cx| {
+                let outcome = this.menu_result(&target, at, &result, window, cx);
+                this.finish(outcome, cx);
+            })),
+            cx,
+        );
+    }
+
+    /// A sidebar row's menu (`SessionMenu`: `{id, x, y, extraItems}`), the tab menu for that
+    /// session whether or not it has a tab here. The window runs the tab's actions and the
+    /// session's inbound choices; `on_result` then gets the result, so a row of the caller's own
+    /// (`{item}`) is the caller's. `false` when no mod draws it or the session is unknown.
+    pub fn open_session_menu(
+        &mut self,
+        menu: &Value,
+        on_result: OnResult,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(id) = menu["id"].as_str().map(str::to_string) else {
+            return false;
+        };
+        let store = self.sidebar.read(cx).model().store.clone();
+        if !store.sessions.iter().any(|s| s.id == id) {
+            return false;
+        }
+        let coordinate = |key: &str| px(menu[key].as_f64().unwrap_or(0.) as f32);
+        let at = point(coordinate("x"), coordinate("y"));
+        let mut extra = menu["extraItems"].as_array().cloned().unwrap_or_default();
+        extra.extend(crate::mods::perch::inbound_items(&store, &id));
+        let mates = crate::mods::perch::workspace_mates(&store, self.tabs.strip(), &id);
+        let props = self.tab_menu_props(&id, &mates, at, extra, cx);
+        self.open_screen(
+            "tab-menu",
+            props,
+            Some(at),
+            Some(Box::new(move |this, result, window, cx| {
+                let outcome = this.menu_result(&id, at, &result, window, cx);
+                this.finish(outcome, cx);
+                on_result(this, result, window, cx);
+            })),
+            cx,
+        )
+    }
+
+    /// The tab menu's props for tab (or session) `id` at `at`, offering `among`, with `extra`
+    /// rows.
+    fn tab_menu_props(
+        &self,
+        id: &str,
+        among: &[String],
+        at: Point<Pixels>,
+        extra: Vec<Value>,
+        cx: &App,
+    ) -> Value {
+        let can_stop = self
+            .panes
+            .get(id)
+            .and_then(|p| p.view.as_ref())
+            .is_some_and(|view| view.read(cx).can_stop());
+        crate::mods::perch::tab_menu_props(
+            &self.tabs,
+            among,
+            id,
+            (f32::from(at.x), f32::from(at.y)),
+            &|tab| self.title_of(tab, cx),
+            can_stop,
+            extra,
+        )
+    }
+
+    /// The Split with session picker (`SessionSplitProps`) at `at`, opened from pane `target`'s
+    /// menu: every other session, those with a tab marked open. The one picked shows beside
+    /// `target`, on its right.
+    fn open_session_split(&mut self, target: &str, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let sessions: Vec<Value> = self
+            .sidebar
+            .read(cx)
+            .model()
+            .store
+            .sessions
+            .iter()
+            .filter(|s| s.id != target)
+            .map(|s| {
+                json!({
+                    "id": s.id,
+                    "title": s.title,
+                    "cwd": s.current_cwd.clone().unwrap_or_else(|| s.cwd.clone()),
+                    "open": self.tabs.contains(&s.id),
+                })
+            })
+            .collect();
+        let props = json!({ "sessions": sessions, "x": f32::from(at.x), "y": f32::from(at.y) });
+        let target = target.to_string();
+        let opened = self.open_screen(
+            "session-split",
+            props,
+            Some(at),
+            Some(Box::new(move |this, result, _, cx| {
+                let Some(pick) = result.get("pick").and_then(Value::as_str) else {
+                    return;
+                };
+                let outcome = this.show_beside(&target, pick, Side::Right, cx);
+                this.finish(outcome, cx);
+            })),
+            cx,
+        );
+        if !opened {
+            self.notice = Some("No mod draws the Split with session picker.".into());
+            cx.notify();
+        }
+    }
+
+    /// Opens session `id`'s tab now, shown and active (`show_session` asks the sidebar, which
+    /// opens it a turn later): for an action that goes on to arrange it.
+    fn open_tab(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        let open = self
+            .sidebar
+            .read(cx)
+            .session_to_open(id)
+            .ok_or("That session is gone.")?;
+        self.ensure_pane(&open, cx);
+        self.enter_for(id, cx);
+        self.tabs.open(id);
+        Ok(())
+    }
+
+    /// The session `id` names, when the core has it.
+    fn known_session(&self, id: Option<&str>, cx: &App) -> Result<String, String> {
+        let id = id.ok_or("This command needs {id}.")?;
+        let model = self.sidebar.read(cx).model();
+        model
+            .store
+            .sessions
+            .iter()
+            .any(|s| s.id == id)
+            .then(|| id.to_string())
+            .ok_or_else(|| format!("There is no session {id}."))
+    }
+
+    fn known_project(&self, id: &str, cx: &App) -> Result<(), String> {
+        let model = self.sidebar.read(cx).model();
+        model
+            .store
+            .projects
+            .iter()
+            .any(|p| p.id == id)
+            .then_some(())
+            .ok_or_else(|| format!("There is no project {id}."))
+    }
+
+    fn known_workspace(&self, id: Option<&str>, cx: &App) -> Result<String, String> {
+        let id = id.ok_or("This command needs {id}.")?;
+        let model = self.sidebar.read(cx).model();
+        model
+            .store
+            .workspaces
+            .iter()
+            .any(|w| w.id == id)
+            .then(|| id.to_string())
+            .ok_or_else(|| format!("There is no workspace {id}."))
+    }
+
+    /// The pointer moved during a press on a tab: once it is a drag, where a drop would land,
+    /// drawn by the `tab-drag` screen.
+    /// The tab drag in flight as the strip slides its tabs for it (`TabDrag::slide`).
+    pub fn tab_slide(&self) -> Value {
+        self.drag.as_ref().map_or(Value::Null, TabDrag::slide)
+    }
+
+    /// The pointer as last forwarded for a press a mod follows (`pointerFollow()`).
+    pub fn pointer_follow(&self) -> &Value {
+        &self.pointer
+    }
+
+    /// Forwards the pointer to the mod following the press: `move` while it lasts, then `up`
+    /// where it was let go or `cancel`, after which nothing more is forwarded. False when no
+    /// press is followed.
+    fn forward_pointer(&mut self, phase: &str, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
+        let Some(token) = self.follow.clone() else {
+            return false;
+        };
+        if phase != "move" {
+            self.follow = None;
+        }
+        let seq = self.pointer["seq"].as_u64().map_or(0, |n| n + 1);
+        self.pointer = json!({
+            "token": token,
+            "seq": seq,
+            "phase": phase,
+            "x": f32::from(at.x),
+            "y": f32::from(at.y),
+        });
+        // A move reaches only the mod following the press; its end also ends the window's
+        // follow of the pointer, which it draws.
+        if let Some((_, perch)) = screens::mods(cx) {
+            perch.set_drag(self.tab_slide(), self.pointer.clone());
+            perch.flush(cx);
+        }
+        if phase != "move" {
+            cx.notify();
+        }
+        true
+    }
+
+    /// A followed press ends with nothing changed (Escape, the window losing focus), where the
+    /// pointer last was.
+    fn cancel_follow(&mut self, cx: &mut Context<Self>) -> bool {
+        let at = point(
+            px(self.pointer["x"].as_f64().unwrap_or(0.) as f32),
+            px(self.pointer["y"].as_f64().unwrap_or(0.) as f32),
+        );
+        self.forward_pointer("cancel", at, cx)
+    }
+
+    fn drag_moved(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(drag) = self.drag.as_mut() else {
+            return;
+        };
+        if !drag.moved(at) {
+            return;
+        }
+        let was_on_strip = matches!(drag.drop, Drop::Strip(_));
+        let boxes = self.drop_boxes.borrow();
+        let on_strip = boxes.strip.is_some_and(|b| b.contains(&at))
+            && drag.spans.iter().any(|s| s.id == drag.id);
+        drag.drop = if on_strip {
+            Drop::Strip(drag.slot(f32::from(at.x)))
+        } else {
+            let pane = boxes
+                .panes
+                .iter()
+                .find(|(id, b)| **id != drag.id && b.contains(&at));
+            match pane {
+                Some((target, pane)) => match tab_drag::resolve_zone(*pane, at) {
+                    Some(side) => Drop::Pane {
+                        target: target.clone(),
+                        pane: *pane,
+                        side: self.tabs.can_drop(&drag.id, target).then_some(side),
+                    },
+                    None => Drop::None,
+                },
+                None => Drop::None,
+            }
+        };
+        let props = drag.props();
+        let crossed = was_on_strip != matches!(drag.drop, Drop::Strip(_));
+        drop(boxes);
+        // Each move re-renders only the strip (`tabSlide`) and the ghost (its props), in one
+        // flush: the window's own part, which most screens read, moves only when the tab leaves
+        // or comes back to the strip (`draggingId`), and the window itself draws nothing new.
+        if let Some((_, perch)) = screens::mods(cx) {
+            perch.set_drag(self.tab_slide(), self.pointer.clone());
+        }
+        if !self.screens.update("tab-drag", props.clone(), cx) {
+            self.screens.open("tab-drag", props, None, None, cx);
+            cx.notify();
+        } else if crossed {
+            cx.notify();
+        }
+    }
+
+    /// The press on a tab ends: let go (`apply`), the drop it was over is made; Escape, the
+    /// window losing focus or a lost release (`!apply`) changes nothing. A press that never
+    /// became a drag is a click, which the strip handles.
+    fn drag_ended(&mut self, apply: bool, cx: &mut Context<Self>) -> bool {
+        let Some(drag) = self.drag.take() else {
+            return false;
+        };
+        self.screens.take("tab-drag", cx);
+        cx.notify();
+        // The tab (or the pane it was over) may have closed during the drag.
+        if !drag.started || !apply || !self.tabs.contains(&drag.id) {
+            return drag.started;
+        }
+        match drag.drop {
+            Drop::Strip(Some(slot)) => {
+                // The neighbour the slot was beside is gone: nothing is moved, as `slot` counts
+                // only the tabs the strip drew.
+                if let Some(index) = drag.landing(slot, self.tabs.strip()) {
+                    let before = self.strip_sessions(cx);
+                    self.tabs.move_tab(&drag.id, index);
+                    self.save_strip(before, cx);
+                }
+            }
+            Drop::Pane {
+                target,
+                side: Some(side),
+                ..
+            } if self.tabs.contains(&target) && self.tabs.drop_beside(&drag.id, &target, side) => {
+                self.after_change(cx);
+            }
+            _ => {}
+        }
+        true
+    }
+
+    /// Show session `id` on the `side` of tab `target`, its tab opened first when it has none;
+    /// it leaves any other split. The keyboard goes to it.
+    fn show_beside(
+        &mut self,
+        target: &str,
+        id: &str,
+        side: Side,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        if !self.tabs.contains(target) {
+            return Err(format!("Tab {target} is gone."));
+        }
+        let full = || Err("A split holds at most four panes.".to_string());
+        if self.tabs.contains(id) {
+            if !self.tabs.drop_beside(id, target, side) {
+                return full();
+            }
+        } else {
+            if !self.tabs.room_beside(target) {
+                return full();
+            }
+            self.open_tab(id, cx)?;
+            self.tabs.drop_beside(id, target, side);
+        }
+        self.after_change(cx);
+        Ok(())
+    }
+
+    /// What a pane or tab menu closed with, run on tab `id`: one of the web's `actions`
+    /// (`{action, args}`), or a row of the tab menu's `extraItems` (`{item}`).
+    fn menu_result(
+        &mut self,
+        id: &str,
+        at: Point<Pixels>,
+        result: &Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let (action, args) = action_of(result);
+        // A row of the session's inbound choices (`extraItems`).
+        if let Some(item) = result.get("item").and_then(Value::as_str) {
+            let store = self.sidebar.read(cx).model().store.clone();
+            if let Some(mode) = crate::mods::perch::inbound_choice(&store, id, item) {
+                self.sidebar.read(cx).send(Command::InboundMode {
+                    session_id: id.to_string(),
+                    mode: mode.to_string(),
+                });
+            }
+            return Ok(());
+        }
+        let Some(action) = action else {
+            return Ok(());
+        };
+        // A session menu's session may have no tab: renaming and closing need none, a split opens
+        // its tab first (the web shows it, then splits); the rest are only offered for a tab.
+        if !self.tabs.contains(id) {
+            match action.as_str() {
+                "rename" | "close" => {}
+                "splitNew" | "showBeside" => self.open_tab(id, cx)?,
+                _ => return Err(format!("Tab {id} is gone.")),
+            }
+        }
+        // As the web's menus: an action that works on the focused tab gives it the keyboard first;
+        // the others (rename, close, the pickers) leave the keyboard where it is.
+        let focused = matches!(action.as_str(), "splitNew" | "toggleZoom" | "stopAgent");
+        if focused {
+            self.focus_pane(id, cx);
+        }
+        let tab = json!({ "id": id });
+        match action.as_str() {
+            "splitNew" => match word(&args, 0).as_deref() {
+                Some("right") => self.split(Side::Right, cx),
+                Some("below") => self.split(Side::Down, cx),
+                _ => Err(r#"splitNew takes "right" or "below"."#.into()),
+            },
+            "toggleZoom" => self.run_command("panes.zoom", None, window, cx),
+            "rename" => {
+                let name = word(&args, 0).ok_or("rename needs a name.")?;
+                self.run_command(
+                    "tab.rename",
+                    Some(&json!({ "id": id, "name": name })),
+                    window,
+                    cx,
+                )
+            }
+            // The menu's own tab, whichever has the keyboard by now.
+            "stopAgent" => self.run_command("terminal.kill", Some(&tab), window, cx),
+            "showFull" => self.run_command("pane.unsplit", Some(&tab), window, cx),
+            "splitSession" => {
+                self.open_session_split(id, at, cx);
+                Ok(())
+            }
+            "showBesideTab" => {
+                let coordinate =
+                    |i: usize| args.get(i).and_then(Value::as_f64).map(|v| px(v as f32));
+                let at = coordinate(0)
+                    .zip(coordinate(1))
+                    .map_or(at, |(x, y)| point(x, y));
+                self.open_tab_menu(id, at, cx);
+                Ok(())
+            }
+            "showBeside" => {
+                let other = word(&args, 0).ok_or("showBeside needs a tab id.")?;
+                // A session menu offers its workspace's sessions, with a tab or not.
+                if !self.tabs.contains(&other) {
+                    self.open_tab(&other, cx)?;
+                }
+                if !self.tabs.join(id, &other) {
+                    return Err("Those tabs cannot be shown together.".into());
+                }
+                self.tabs.show(id);
+                self.after_change(cx);
+                Ok(())
+            }
+            "separateAll" => {
+                self.tabs.untile(id);
+                self.tabs.show(id);
+                self.after_change(cx);
+                Ok(())
+            }
+            "close" if self.tabs.contains(id) => {
+                self.run_command("tabs.close", Some(&tab), window, cx)
+            }
+            "close" => self.run_command("session.request_close", Some(&tab), window, cx),
+            other => Err(format!("The native window cannot {other} yet.")),
+        }
+    }
+
+    /// `StartScreenProps`, as the web's `StartScreen` works them out: `connecting` while the core
+    /// is away, the focused workspace's start picker when one is focused with no session of it on
+    /// screen, else `home`. The place chosen in the picker is the window's (`start_place`).
+    fn start_props(&self, cx: &App) -> Value {
+        let model = self.sidebar.read(cx).model();
+        let store = &model.store;
+        let (host_id, focused) = screens::mods(cx)
+            .map(|(_, perch)| perch.shown_place())
+            .unwrap_or_else(|| (LOCAL.to_string(), None));
+        let host = model.hosts.iter().find(|h| h.id == host_id);
+        let choices: Vec<Value> = host
+            .map(|h| {
+                h.providers
+                    .iter()
+                    .map(|p| json!({ "id": p.id, "label": p.name }))
+                    .collect()
+            })
+            .unwrap_or_default();
+        // The app's logo, from the start mod's folder (written out with it).
+        let logo = screens::mods(cx)
+            .and_then(|(host, _)| host.file("start", "perch-logo.webp"))
+            .map_or(String::new(), |p| p.to_string_lossy().into_owned());
+        let base = |kind: &str| {
+            json!({
+                "kind": kind, "hostId": host_id, "logo": logo, "projectCwds": [],
+                "targets": [], "targetKey": "", "choices": [], "discovery": null,
+                "disabled": kind == "connecting", "canManageAgents": false,
+            })
+        };
+        if !store.connected {
+            return base("connecting");
+        }
+        let focused = focused.and_then(|id| store.workspaces.iter().find(|w| w.id == id));
+        if focused.is_none() && self.quickchat_start {
+            // Quickchat before its project exists: its start page, starting in the home folder.
+            let mut props = base("workspace");
+            props["targets"] = json!([{
+                "key": "~", "label": "Quickchat (current folder)", "name": "Quickchat", "path": "~",
+            }]);
+            props["targetKey"] = json!("~");
+            props["choices"] = json!(choices);
+            return props;
+        }
+        let Some(workspace) = focused else {
+            // New session offers the project a session would start in (the sidebar's target).
+            let mut props = base("home");
+            let project = host.and_then(|host| {
+                host.projects
+                    .iter()
+                    .find(|p| crate::actions::startable(host, p) && !p.quickchat)
+            });
+            props["projectCwds"] = json!(project.map(|p| vec![p.path.clone()]).unwrap_or_default());
+            return props;
+        };
+        let basename = |path: &str| {
+            path.rsplit('/')
+                .find(|part| !part.is_empty())
+                .unwrap_or(path)
+                .to_string()
+        };
+        let projects: Vec<_> = store
+            .projects
+            .iter()
+            .filter(|p| p.host_id == workspace.host_id)
+            .collect();
+        let own = projects
+            .iter()
+            .find(|p| p.id == workspace.project_id && p.path == workspace.path)
+            .map(|p| p.name.clone());
+        // Quickchat sessions run in the home folder, so that is what it shows.
+        let quickchat = workspace.path.ends_with("/.perch/scratch");
+        let name = if quickchat {
+            "Quickchat".to_string()
+        } else {
+            Some(workspace.name.clone())
+                .filter(|n| !n.is_empty())
+                .or(own.filter(|n| !n.is_empty()))
+                .unwrap_or_else(|| basename(&workspace.path))
+        };
+        let path = if quickchat {
+            "~"
+        } else {
+            workspace.path.as_str()
+        };
+        let mut targets = vec![json!({
+            "key": workspace.path, "label": format!("{name} (current folder)"), "name": name, "path": path,
+        })];
+        for p in projects.iter().filter(|p| p.path != workspace.path) {
+            let label = Some(p.name.clone())
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| basename(&p.path));
+            targets.push(json!({ "key": p.path, "label": label, "name": label, "path": p.path }));
+        }
+        if !quickchat {
+            targets.push(json!({
+                "key": "~", "label": "No project (Quickchat)", "name": "Quickchat", "path": "~",
+            }));
+        }
+        let key = self
+            .start_place
+            .as_ref()
+            .filter(|(id, key)| *id == workspace.id && targets.iter().any(|t| t["key"] == *key))
+            .map_or_else(|| workspace.path.clone(), |(_, key)| key.clone());
+        let mut props = base("workspace");
+        props["hostId"] = json!(workspace.host_id);
+        props["targets"] = json!(targets);
+        props["targetKey"] = json!(key);
+        props["choices"] = json!(choices);
+        props
+    }
+
+    /// What the start page did (one of its `actions`).
+    fn start_result(
+        &mut self,
+        result: &Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let (action, args) = action_of(result);
+        let props = self.start_props(cx);
+        let host = props["hostId"].as_str().unwrap_or(LOCAL).to_string();
+        match action.as_deref() {
+            None | Some("retry") => Ok(()),
+            Some("choose") => {
+                let key = word(&args, 0).ok_or("choose needs a place.")?;
+                let workspace = screens::mods(cx).and_then(|(_, perch)| perch.shown_place().1);
+                self.start_place = workspace.map(|id| (id, key));
+                cx.notify();
+                Ok(())
+            }
+            Some("start") => {
+                let agent = word(&args, 0).ok_or("start needs an agent.")?;
+                let cwd = props["targetKey"].as_str().map(str::to_string);
+                self.start_session(&host, cwd, &agent, cx)
+            }
+            Some("startIn") => {
+                let agent = word(&args, 1).ok_or("startIn needs an agent.")?;
+                self.start_session(&host, word(&args, 0), &agent, cx)
+            }
+            Some("openSettings") => self.run_command("global.settings", None, window, cx),
+            Some("manageAgents") => self.run_command("agents.manage", None, window, cx),
+            Some("addProject") => self.ask_add_project(cx),
+            Some(other) => Err(format!("The native window cannot {other} yet.")),
+        }
+    }
+
+    /// The launcher (`LauncherProps`, as the web's `NewSessionDialog` builds them): `target`'s
+    /// computer's projects but its Quickchat, each with the workspace a new tab lands in (the one on
+    /// screen when it is the project's, else its first), the project of what is shown marked.
+    fn open_launcher(&mut self, target: &crate::actions::NewSession, cx: &mut Context<Self>) {
+        if self.screens.is_open("launcher") {
+            return;
+        }
+        let shown = self.tabs.active().map(str::to_string);
+        let model = self.sidebar.read(cx).model();
+        let host = model.hosts.iter().find(|h| h.id == target.host_id);
+        let projects: Vec<Value> = host
+            .map(|host| {
+                host.projects
+                    .iter()
+                    .filter(|p| !p.quickchat)
+                    .map(|p| {
+                        let workspace = crate::sidebar::navigation::landing_workspace(
+                            &model.store,
+                            &p.id,
+                            shown.as_deref(),
+                        )
+                        .map(|(id, path)| json!({ "id": id, "path": path }));
+                        json!({ "id": p.id, "name": p.name, "path": p.path, "workspace": workspace })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let active = target
+            .project_id
+            .as_ref()
+            .filter(|id| projects.iter().any(|p| p["id"] == json!(id)));
+        let host_id = target.host_id.clone();
+        self.open_screen(
+            "launcher",
+            json!({ "hostId": host_id, "projects": projects, "activeProjectId": active }),
+            None,
+            Some(Box::new(move |this, result, window, cx| {
+                let outcome = this.launcher_result(&host_id, &result, window, cx);
+                this.finish(outcome, cx);
+            })),
+            cx,
+        );
+    }
+
+    /// What the launcher closed with (one of its `actions`), on computer `host_id`.
+    fn launcher_result(
+        &mut self,
+        host_id: &str,
+        result: &Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let (action, args) = action_of(result);
+        match action.as_deref() {
+            None => Ok(()),
+            Some("start") => {
+                let agent = word(&args, 1).ok_or("start needs an agent.")?;
+                self.start_session(host_id, word(&args, 0), &agent, cx)
+            }
+            Some("openBrowser") => {
+                let args = word(&args, 0).map(|id| json!({ "workspaceId": id }));
+                self.run_command("browser.open", args.as_ref(), window, cx)
+            }
+            // The launcher's New file draws its own name prompt (`NewFilePrompt`); the workspace
+            // it names is the one the file is made in.
+            Some("focusWorkspace") => Ok(()),
+            Some("addProject") => self.ask_add_project(cx),
+            Some(other) => Err(format!("The native window cannot {other} yet.")),
+        }
+    }
+
+    /// The web's `startSession`: `agent` in `cwd` on `host_id` (no folder: a Quickchat), over the
+    /// launch the New session panel sends.
+    fn start_session(
+        &mut self,
+        host_id: &str,
+        cwd: Option<String>,
+        agent: &str,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let sidebar = self.sidebar.read(cx);
+        let host = sidebar
+            .model()
+            .hosts
+            .iter()
+            .find(|h| h.id == host_id)
+            .ok_or_else(|| format!("No host {host_id}."))?;
+        if !host.reachable {
+            return Err(format!("{} cannot be reached now.", host.name));
+        }
+        if !host.providers.iter().any(|p| p.id == agent) {
+            return Err(format!("{} cannot start {agent}.", host.name));
+        }
+        sidebar.send(Command::Launch {
+            host_id: host_id.to_string(),
+            cwd: cwd.filter(|c| !c.is_empty() && c != "~"),
+            provider: agent.to_string(),
+        });
+        Ok(())
+    }
+
+    /// The in-flow copies a mod draws now: `(screen id, key, props)`.
+    fn inflow_wanted(&self, cx: &App) -> Vec<(&'static str, String, Value)> {
+        let mut wanted = Vec::new();
+        let mut want = |id: &'static str, key: String, props: Value| {
+            if self.screens.has(id, cx) {
+                wanted.push((id, key, props));
+            }
+        };
+        for (id, key, props) in self.browser_wanted(cx) {
+            want(id, key, props);
+        }
+        if self.sidebar.read(cx).visible() {
+            want("sidebar", "sidebar".into(), json!({}));
+        }
+        // The strip heads the main card, with a session open or not.
+        want("tabs", "tabs".into(), json!({}));
+        want("status", "status".into(), json!({}));
+        if self.tabs.visible().is_none() {
+            want("start", "start".into(), self.start_props(cx));
+        }
+        self.files_wanted(&mut want, cx);
+        self.review_wanted(&mut want, cx);
+        let shown = self.tabs.shown();
+        if shown.len() > 1 {
+            for id in &shown {
+                want(
+                    "pane-header",
+                    format!("pane-header#{id}"),
+                    json!({ "id": id, "corner": false }),
+                );
+            }
+        }
+        // Over each terminal on screen: the agent's chip, error line and ended banner while it
+        // has one, its find bar while find is open, and the phone-size notice while a phone
+        // holds its size and this window may take it back.
+        for id in shown {
+            let Some(view) = self.panes.get(&id).and_then(|p| p.view.as_ref()) else {
+                continue;
+            };
+            let view = view.read(cx);
+            let mut control = view.agent_control();
+            if ["label", "error", "ended"]
+                .iter()
+                .any(|key| !control[key].is_null())
+            {
+                control["id"] = json!(id);
+                want("agent-control", format!("agent-control#{id}"), control);
+            }
+            if view.find_open() {
+                want(
+                    "terminal-search",
+                    format!("terminal-search#{id}"),
+                    json!({ "id": id, "query": view.find_query() }),
+                );
+            }
+            if view.offers_take_back() {
+                want(
+                    "phone-size",
+                    format!("phone-size#{id}"),
+                    json!({ "id": id, "generation": view.phone_holds(), "pending": view.taking() }),
+                );
+            }
+        }
+        wanted
+    }
+
+    /// A floating screen over the whole window. A modal one is on a layer that keeps the mouse
+    /// from what is beneath and holds the keyboard; the mod draws its own backdrop and closes
+    /// itself on a press outside its panel. The toast's layer takes nothing: only what the mod
+    /// draws, and stops, does.
+    fn floating_view(&self, open: &screens::Floating) -> Option<AnyElement> {
+        let view = open.view.clone()?;
+        let layer = div().absolute().inset_0().child(view);
+        if !open.modal() {
+            return Some(layer.into_any_element());
+        }
+        Some(
+            layer
+                .id(SharedString::from(format!("screen-layer-{}", open.id)))
+                .track_focus(&self.screen_focus)
+                .occlude()
+                .into_any_element(),
+        )
+    }
+
+    /// The pane for session `event` names, made (its terminal attached) when there is none.
+    fn ensure_pane(&mut self, event: &OpenSession, cx: &mut Context<Self>) {
+        if let Some(pane) = self.panes.get_mut(&event.session_id) {
+            // A pane the strip made before the session was opened takes how it is opened now.
+            if pane.parked && pane.view.is_none() {
+                pane.open = event.clone();
+            }
+            return;
+        }
+        let view = self.attach(event, cx);
+        self.panes.insert(
+            event.session_id.clone(),
+            Pane {
+                open: event.clone(),
+                view,
+                settle: Settle::default(),
+                retry: None,
+                attempts: 0,
+                closing: None,
+                seen: 0,
+                parked: false,
+            },
+        );
+    }
+
     /// A session was picked in the sidebar, launched, or a tab was chosen: show it.
     fn on_open(&mut self, event: &OpenSession, cx: &mut Context<Self>) {
         let id = event.session_id.clone();
+        self.put_away.remove(&id);
+        self.ended.remove(&id);
+        self.enter_for(&id, cx);
         let side = self
             .pending_split
             .take()
             .filter(|(_, at)| at.elapsed() < SPLIT_WAIT)
             .filter(|_| self.sidebar.read(cx).launched() == Some(id.as_str()))
-            .filter(|_| !self.tabs.contains(&id))
+            // The new session may already have its tab (the core listed it first): it is placed by
+            // the split all the same, once.
+            .filter(|_| !self.tabs.in_split(&id))
             .map(|(side, _)| side);
-        if !self.panes.contains_key(&id) {
-            let view = self.attach(event, cx);
-            self.panes.insert(
-                id.clone(),
-                Pane {
-                    open: event.clone(),
-                    view,
-                    settle: Settle::default(),
-                    retry: None,
-                    attempts: 0,
-                    closing: None,
-                    seen: 0,
-                    parked: false,
-                },
-            );
-        }
+        self.ensure_pane(event, cx);
         match side {
             Some(side) if self.tabs.split(&id, side) => {}
             Some(_) => {
@@ -365,7 +2202,9 @@ impl Workspace {
             }
             None => self.tabs.open(&id),
         }
+        self.sync_strips(cx);
         self.keep_in_bounds(cx);
+        self.note_shown();
         cx.notify();
     }
 
@@ -400,8 +2239,8 @@ impl Workspace {
         Some(view)
     }
 
-    /// The providers a session on `host_id` can start with: the list the palette and the New
-    /// session panel offer for that computer.
+    /// The providers a session on `host_id` can start with: the list the Navigator and the New
+    /// session menu offer for that computer.
     fn launch_choices(&self, host_id: &str, cx: &App) -> Vec<Provider> {
         self.sidebar
             .read(cx)
@@ -448,15 +2287,14 @@ impl Workspace {
     fn on_terminal(&mut self, id: &str, event: &TerminalEvent, cx: &mut Context<Self>) {
         match event {
             // A click on a link is a person's: the window runs the system's handler for it.
-            TerminalEvent::OpenLink(target) => crate::terminal::links::open_in_system(target),
+            TerminalEvent::OpenLink(target) => (self.opener)(target),
+            TerminalEvent::AskAgentOffered(at) => self.offer_ask_agent(id, *at, cx),
+            // The bridge's menu took this right-click (the web's stops it there).
+            TerminalEvent::MenuAsked(_) if self.bridge.took_click() => {}
             TerminalEvent::MenuAsked(at) => self.open_menu(id, *at, cx),
             TerminalEvent::Chose(provider) => self.start_chosen(id, provider, cx),
-            TerminalEvent::TakeBackAll => {
-                if let Err(error) = self.take_back_all(cx) {
-                    self.notice = Some(error);
-                    cx.notify();
-                }
-            }
+            // Its find bar or phone-size notice comes or goes (`inflow_wanted`).
+            TerminalEvent::Chrome => cx.notify(),
             TerminalEvent::Status(Status::Live) => {
                 if let Some(pane) = self.panes.get_mut(id) {
                     pane.attempts = 0;
@@ -477,7 +2315,7 @@ impl Workspace {
             // asked too long ago to be waiting still.
             TerminalEvent::Ended => {
                 if self.panes.contains_key(id) {
-                    self.tabs.close(id);
+                    self.close_everywhere(id);
                     self.panes.remove(id);
                     self.notice = None;
                     self.after_change(cx);
@@ -488,6 +2326,155 @@ impl Workspace {
             }
             _ => {}
         }
+        // `perch.terminals()` reports each terminal's state, read from the window on a change.
+        if matches!(event, TerminalEvent::Status(_)) {
+            cx.notify();
+        }
+    }
+
+    /// Close the tabs of sessions the core deleted. A tab out of sight may have no terminal attached
+    /// to hear it, so the sidebar's word is what closes it.
+    fn close_deleted(&mut self, cx: &mut Context<Self>) {
+        let store = &self.sidebar.read(cx).model().store;
+        let gone: Vec<String> = self
+            .panes
+            .keys()
+            .filter(|id| store.deleted.contains(id))
+            .cloned()
+            .collect();
+        if gone.is_empty() {
+            return;
+        }
+        for id in &gone {
+            self.close_everywhere(id);
+            self.panes.remove(id);
+        }
+        self.notice = None;
+        self.after_change(cx);
+    }
+
+    /// Every strip holds its workspace's sessions as the core lists them (`workspaceTabs`):
+    /// oldest first, then the core's chat order, in their own slots; files keep theirs. A session
+    /// closed here without ending it stays out, and one the core no longer lists leaves once its
+    /// list has been read. A session gets a parked pane, which attaches only when its tab is shown.
+    fn sync_strips(&mut self, cx: &mut Context<Self>) {
+        let store = self.sidebar.read(cx).model().store.clone();
+        let known = store.connected && store.listed;
+        if known {
+            let listed = |id: &String| store.sessions.iter().any(|s| s.id == *id);
+            self.put_away.retain(listed);
+            self.ended.retain(listed);
+        }
+        let (put_away, ended) = (&self.put_away, &self.ended);
+        let away = |id: &str| {
+            store.deleted.iter().any(|d| d == id) || put_away.contains(id) || ended.contains(id)
+        };
+        // A session the core lists elsewhere moved; one it does not list is gone, unless it has a
+        // terminal here: a session just launched is opened before the core's list holds it.
+        let panes = &self.panes;
+        let left = |id: &str| {
+            known && (store.sessions.iter().any(|s| s.id == id) || !panes.contains_key(id))
+        };
+        let mut gone = Vec::new();
+        let strips = std::iter::once((&self.tabs_of, &mut self.tabs))
+            .chain(self.parked.iter_mut().map(|(key, (tabs, _))| (key, tabs)));
+        for (key, tabs) in strips {
+            if key.is_empty() {
+                continue;
+            }
+            let live = navigation::sessions_of_workspace(&store, key);
+            gone.extend(tabs.sync_sessions(&live, left, away));
+        }
+        for id in gone {
+            if !self.every_tabs().any(|tabs| tabs.contains(&id)) {
+                self.panes.remove(&id);
+            }
+        }
+        let missing: Vec<String> = self
+            .every_tabs()
+            .flat_map(|tabs| tabs.strip())
+            .filter(|id| Tabs::is_session(id) && !self.panes.contains_key(*id))
+            .cloned()
+            .collect();
+        for id in missing {
+            if let Some(open) = self.open_for(&id, cx) {
+                self.panes.insert(
+                    id,
+                    Pane {
+                        open,
+                        view: None,
+                        settle: Settle::default(),
+                        retry: None,
+                        attempts: 0,
+                        closing: None,
+                        seen: 0,
+                        parked: true,
+                    },
+                );
+            }
+        }
+    }
+
+    /// How session `id` opens: as the sidebar would open it, else (a session it does not list: a
+    /// plain terminal, a hidden worktree's) as the core lists it.
+    fn open_for(&self, id: &str, cx: &App) -> Option<OpenSession> {
+        let sidebar = self.sidebar.read(cx);
+        if let Some(open) = sidebar.session_to_open(id) {
+            return Some(open);
+        }
+        let session = sidebar.model().store.sessions.iter().find(|s| s.id == id)?;
+        Some(OpenSession {
+            host_id: session.host_id.clone(),
+            session_id: session.id.clone(),
+            title: session.title.clone(),
+            provider_id: session.cli_provider_id.clone(),
+            blank: session.cli_provider_id.is_none() && !session.cli_started,
+            core_url: sidebar.model().core_url.clone(),
+        })
+    }
+
+    /// The strip's sessions, in its order.
+    fn strip_sessions(&self, cx: &App) -> Vec<String> {
+        let store = &self.sidebar.read(cx).model().store;
+        self.tabs
+            .strip()
+            .iter()
+            .filter(|id| store.sessions.iter().any(|s| s.id == **id))
+            .cloned()
+            .collect()
+    }
+
+    /// A drag in the strip moved a tab (`saveTabStrip`): when the sessions' order changed, that is
+    /// the core's chat order too, so the sidebar and every other screen follow. Only this strip's
+    /// sessions are written; the rest of the core's list keeps its place.
+    fn save_strip(&mut self, before: Vec<String>, cx: &mut Context<Self>) {
+        let after = self.strip_sessions(cx);
+        if before == after || after.is_empty() {
+            return;
+        }
+        self.sidebar.update(cx, |sidebar, cx| {
+            let store = &sidebar.model().store;
+            let host = store
+                .sessions
+                .iter()
+                .find(|s| s.id == after[0])
+                .map(|s| s.host_id.clone())
+                .unwrap_or_else(|| LOCAL.into());
+            let live: HashSet<String> = store
+                .sessions
+                .iter()
+                .filter(|s| s.host_id == host)
+                .map(|s| s.id.clone())
+                .collect();
+            let after: Vec<String> = after.into_iter().filter(|id| live.contains(id)).collect();
+            let core = store
+                .order
+                .get(&host)
+                .map(|o| o.1.clone())
+                .unwrap_or_default();
+            let sessions = navigation::write_scope(&core, &after, Some(&live));
+            sidebar.set_order(host, None, Some(sessions), cx);
+        });
     }
 
     /// The connection of a terminal dropped. The shell is not known to have ended, so the screen
@@ -541,9 +2528,9 @@ impl Workspace {
 
     /// Tell the sidebar which tab is shown, so it is marked read and highlighted.
     fn after_change(&mut self, cx: &mut Context<Self>) {
-        // A pane menu acts on the active pane, so it must not outlive a change of what is active.
-        self.menu = None;
+        self.quickchat_start = false;
         self.keep_in_bounds(cx);
+        self.note_shown();
         let target = self.tabs.active().and_then(|id| {
             let open = &self.panes.get(id)?.open;
             Some((
@@ -559,6 +2546,13 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The shown tab is a visit for Back and Forward.
+    fn note_shown(&mut self) {
+        if let Some(id) = self.tabs.active() {
+            self.history.record(id);
+        }
+    }
+
     /// Give the keyboard to the pane the person clicked.
     fn focus_pane(&mut self, id: &str, cx: &mut Context<Self>) {
         if self.tabs.active() != Some(id) && self.tabs.show(id) {
@@ -568,17 +2562,37 @@ impl Workspace {
 
     /// One key press, before the focused terminal sees it. True when it was handled here.
     fn key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let keymap = self.keymap(cx);
-        if self.palette.is_some() {
-            self.palette_key(keystroke, &keymap, window, cx);
+        // Escape ends a tab drag, or a press a mod follows, with nothing changed.
+        if keystroke.key == "escape" && self.drag.as_ref().is_some_and(|d| d.started) {
+            self.drag_ended(false, cx);
             return true;
         }
-        // A menu closes on any key; Escape is only that.
-        if self.menu.take().is_some() {
-            cx.notify();
-            if keystroke.key == "escape" {
+        if keystroke.key == "escape" && self.cancel_follow(cx) {
+            return true;
+        }
+        let keymap = self.keymap(cx);
+        // A modal screen has the keyboard. Escape dismisses it, here and not in each mod, and so
+        // does the Navigator's own key while the Navigator is up; every other key is the mod's.
+        if let Some(top) = self.screens.top_modal() {
+            let toggles = top == "navigator"
+                && matches!(
+                    keymap.resolve(keystroke, KeyContext { typing: true, ..Default::default() }),
+                    Some(Hit::Run { name, .. })
+                        if matches!(name.as_str(), "global.navigator" | "global.navigatorAlt")
+                );
+            // A screen that keeps Escape for itself gets it as a key (the settings search clears first).
+            if keystroke.key == "escape" && self.screens.takes_escape(top) {
+                return false;
+            }
+            let busy = keystroke.key == "escape" && !self.screens.dismissable(top);
+            if (keystroke.key == "escape" && !busy) || toggles {
+                self.screen_closed(top, Value::Null, window, cx);
                 return true;
             }
+            if busy {
+                return true;
+            }
+            return false;
         }
         // Escape puts a peek away, unless its terminal has the keyboard: then it is the program's.
         if keystroke.key == "escape" && self.peek.is_some() {
@@ -593,30 +2607,11 @@ impl Workspace {
                 return true;
             }
         }
-        if let Some(text) = self.settings.as_mut().and_then(|p| p.editing.as_mut()) {
-            match palette::edit(text, keystroke) {
-                palette::Edit::Ignored => {}
-                palette::Edit::Changed => {
-                    cx.notify();
-                    return true;
-                }
-                palette::Edit::Escape => {
-                    if let Some(panel) = self.settings.as_mut() {
-                        panel.editing = None;
-                    }
-                    cx.notify();
-                    return true;
-                }
-                palette::Edit::Enter => {
-                    self.commit_scrollback(cx);
-                    return true;
-                }
-            }
-        }
         let context = KeyContext {
             in_terminal: self.focused_terminal(window, cx).is_some(),
-            typing: false,
+            typing: self.keyboard_held.is_some(),
             leader: self.leader.is_some(),
+            resize: self.resizing.is_some(),
         };
         let Some(hit) = keymap.resolve(keystroke, context) else {
             return false;
@@ -641,9 +2636,17 @@ impl Workspace {
                     return true;
                 }
                 self.leader = None;
+                // A key of resize mode arms it afresh, for the next.
+                let resizing = name.starts_with("resize.");
+                if !resizing {
+                    self.resizing = None;
+                }
                 if let Err(error) = self.run_command(&name, args.as_ref(), window, cx) {
                     self.notice = Some(error);
                     cx.notify();
+                }
+                if resizing {
+                    self.arm_resize(cx);
                 }
                 true
             }
@@ -666,11 +2669,133 @@ impl Workspace {
             }
             Hit::LeaderEnded => {
                 self.leader = None;
+                self.resizing = None;
                 cx.notify();
                 // Escape ends it quietly; any other key still reaches the program.
                 keystroke.key == "escape"
             }
         }
+    }
+
+    /// Arm resize mode, or keep it armed for another [`LEADER_TIMEOUT`] (the web's, as its
+    /// leader's).
+    fn arm_resize(&mut self, cx: &mut Context<Self>) {
+        self.resizing = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(LEADER_TIMEOUT).await;
+            let _ = this.update(cx, |this, cx| {
+                this.resizing = None;
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    /// Grow (a positive `delta`) or shrink the focused pane by `delta` pixels, in the split as it
+    /// was last drawn. Nothing happens before it is drawn, or with no split.
+    fn resize_pane(&mut self, delta: f32, cx: &mut Context<Self>) {
+        let area = {
+            let boxes = self.drop_boxes.borrow();
+            self.tabs
+                .shown()
+                .iter()
+                .filter_map(|id| boxes.panes.get(id).copied())
+                .reduce(|a, b| a.union(&b))
+        };
+        if let Some(area) = area {
+            let (width, height) = (f32::from(area.size.width), f32::from(area.size.height));
+            if self.tabs.resize(delta, width, height) {
+                cx.notify();
+            }
+        }
+    }
+
+    /// The absolute path of `path` (relative, `""` for the root) in a workspace on this computer;
+    /// refused for a remote workspace or a path that leaves the workspace.
+    fn local_entry(
+        &self,
+        workspace: &str,
+        path: &str,
+        cx: &App,
+    ) -> Result<std::path::PathBuf, String> {
+        use std::path::Component;
+        let store = &self.sidebar.read(cx).model().store;
+        let ws = store
+            .workspaces
+            .iter()
+            .find(|w| w.id == workspace)
+            .ok_or_else(|| format!("No workspace {workspace}."))?;
+        if ws.host_id != "local" {
+            return Err("Only a workspace on this computer can be opened here.".into());
+        }
+        let relative = std::path::Path::new(path);
+        if !relative
+            .components()
+            .all(|c| matches!(c, Component::Normal(_)))
+        {
+            return Err("The path must stay inside the workspace.".into());
+        }
+        Ok(std::path::Path::new(&ws.path).join(relative))
+    }
+
+    /// Back (`-1`) or Forward (`1`) to a tab shown before: a session, or a tab still in the strip
+    /// (a file, review, page or browser); tabs closed and sessions gone since are passed over.
+    fn step_history(&mut self, by: isize, cx: &mut Context<Self>) -> Result<(), String> {
+        let sidebar = self.sidebar.read(cx);
+        let (panes, tabs) = (&self.panes, &self.tabs);
+        let place = self.history.step(by, |id| {
+            panes.contains_key(id) || tabs.contains(id) || sidebar.session_to_open(id).is_some()
+        });
+        match place {
+            Some(id) if !self.panes.contains_key(&id) && self.tabs.contains(&id) => {
+                if self.tabs.show(&id) {
+                    self.after_change(cx);
+                }
+                Ok(())
+            }
+            Some(id) => self.show_session(&id, cx),
+            None => Ok(()),
+        }
+    }
+
+    /// The web's leader `w`: the newest session of the next folder, folders (computer and
+    /// folder) ordered by their newest session, after the shown session's folder. Nothing with
+    /// fewer than two folders.
+    fn next_project(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
+        let store = &self.sidebar.read(cx).model().store;
+        let mut folders: Vec<((&str, &str), &perch_core::protocol::SessionSummary)> = Vec::new();
+        for session in &store.sessions {
+            let key = (session.host_id.as_str(), session.cwd.as_str());
+            match folders.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, newest)) if newest.created_at >= session.created_at => {}
+                Some((_, newest)) => *newest = session,
+                None => folders.push((key, session)),
+            }
+        }
+        if folders.len() < 2 {
+            return Ok(());
+        }
+        folders.sort_by_key(|(_, newest)| std::cmp::Reverse(newest.created_at));
+        let shown = self
+            .tabs
+            .active()
+            .and_then(|id| store.sessions.iter().find(|s| s.id == id));
+        let at = shown.and_then(|s| {
+            folders
+                .iter()
+                .position(|(k, _)| *k == (s.host_id.as_str(), s.cwd.as_str()))
+        });
+        let target = folders[at.map_or(0, |at| (at + 1) % folders.len())].1;
+        if shown.is_some_and(|s| s.id == target.id) {
+            return Ok(());
+        }
+        let (host, id, provider) = (
+            target.host_id.clone(),
+            target.id.clone(),
+            target.cli_provider_id.clone(),
+        );
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.open(host, id, provider, cx));
+        Ok(())
     }
 
     fn arm_leader(&mut self, cx: &mut Context<Self>) {
@@ -698,101 +2823,11 @@ impl Workspace {
         view.update(cx, |view, cx| view.send_text(text, cx))
     }
 
-    fn palette_key(
-        &mut self,
-        keystroke: &Keystroke,
-        keymap: &Keymap,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let m = keystroke.modifiers;
-        let navigates = m.control && matches!(keystroke.key.as_str(), "n" | "p" | "j" | "k");
-        let toggles = !navigates
-            && matches!(
-                keymap.resolve(
-                    keystroke,
-                    KeyContext {
-                        typing: true,
-                        ..Default::default()
-                    }
-                ),
-                Some(Hit::Run { name, .. }) if matches!(name.as_str(), "global.navigator" | "global.navigatorAlt")
-            );
-        let Some(palette) = self.palette.as_mut() else {
-            return;
-        };
-        let outcome = if toggles {
-            Outcome::Close
-        } else {
-            palette.key(keystroke)
-        };
-        match outcome {
-            Outcome::Nothing => {}
-            Outcome::Close => self.palette = None,
-            Outcome::Submit { command, text } => {
-                self.palette = None;
-                let args = serde_json::json!({ "name": text });
-                let result = self.run_command(&command, Some(&args), window, cx);
-                self.finish(result, cx);
-            }
-            Outcome::Run(entry) if entry.kind == Kind::Prompt => {
-                let current = self.active_title(cx);
-                if let Some(palette) = self.palette.as_mut() {
-                    palette.ask(&entry.id, "Rename tab", &current);
-                }
-            }
-            Outcome::Run(entry) => {
-                self.palette = None;
-                let result = self.run_entry(&entry, window, cx);
-                self.finish(result, cx);
-            }
-        }
-        cx.notify();
-    }
-
     fn finish(&mut self, result: Result<(), String>, cx: &mut Context<Self>) {
         if let Err(error) = result {
             self.notice = Some(error);
         }
         cx.notify();
-    }
-
-    fn run_entry(
-        &mut self,
-        entry: &Entry,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Result<(), String> {
-        match entry.kind {
-            Kind::Command | Kind::Prompt => self.run_command(&entry.id, None, window, cx),
-            Kind::Session => {
-                let id = entry.id.trim_start_matches("session:").to_string();
-                let (host, provider) = self
-                    .sidebar
-                    .read(cx)
-                    .find_session(&id)
-                    .map(|s| (s.host_id.clone(), s.provider_id.clone()))
-                    .ok_or("That session is gone.")?;
-                self.sidebar
-                    .update(cx, |sidebar, cx| sidebar.open(host, id, provider, cx));
-                Ok(())
-            }
-            Kind::Launch => {
-                let provider = entry.id.trim_start_matches("launch:").to_string();
-                self.sidebar
-                    .update(cx, |sidebar, cx| sidebar.launch(&provider, cx))
-            }
-            Kind::HandOff => {
-                let place = match entry.id.trim_start_matches("handoff:") {
-                    "files" => Place::Files,
-                    "changes" => Place::Changes,
-                    "browser" => Place::Browser,
-                    "chat" => Place::Chat,
-                    _ => Place::Settings,
-                };
-                self.hand_off(place)
-            }
-        }
     }
 
     /// Only a person's choice calls this: it brings the Perch app forward.
@@ -801,16 +2836,18 @@ impl Workspace {
         open_in_perch(&perch_url(session, place)).map_err(|e| e.to_string())
     }
 
-    fn active_title(&self, cx: &App) -> String {
-        self.tabs
-            .active()
-            .map(|id| self.title_of(id, cx))
-            .unwrap_or_default()
-    }
-
     /// A tab's name: the session's title now (a plain terminal is not listed), else the title its
     /// program set, else what it was opened as.
     fn title_of(&self, id: &str, cx: &App) -> String {
+        if let Some(title) = self.browser_title(id) {
+            return title;
+        }
+        if let Some((_, path)) = file_tab(id) {
+            return path.rsplit('/').next().unwrap_or(path).to_string();
+        }
+        if review_tab(id).is_some() {
+            return "Changes".into();
+        }
         let named = |title: String| Some(title).filter(|t| !t.trim().is_empty());
         let listed = self
             .sidebar
@@ -850,14 +2887,668 @@ impl Workspace {
                 r#"This command needs {direction: "left" | "right" | "up" | "down"}."#.to_string()
             })
         };
+        self.sidebar.read(cx).take_refused();
+        if let Some(result) = self.browser_command(name, args, window, cx) {
+            return result;
+        }
         match name {
-            "global.navigator" | "global.navigatorAlt" | "app.palette" => self.toggle_palette(cx),
-            "global.settings" | "app.settings" => {
-                self.settings = match self.settings {
-                    Some(_) => None,
-                    None => Some(SettingsPanel::default()),
-                };
+            "global.navigator" | "global.navigatorAlt" | "app.palette" => {
+                self.toggle_palette(window, cx)
+            }
+            "global.help" | "global.helpPlain" | "app.help" => self.open_keybind_help(cx),
+            "global.drawer" => {
+                self.chrome.toggle_drawer();
                 cx.notify();
+            }
+            // As the web's Cmd+Shift+T and the sidebar's New session: the launcher, for the
+            // sidebar's target.
+            // As the web's: set a command's key (`keys` null: back to its default, "": none), kept
+            // in the core's settings, which every window follows.
+            "key.bind" => {
+                let command = text("command").filter(|c| !c.is_empty());
+                let keys = args.and_then(|a| a.get("keys")).unwrap_or(&Value::Null);
+                let (Some(command), true) = (command, keys.is_null() || keys.is_string()) else {
+                    return Err(
+                        "key.bind needs {command: <id>, keys: \"cmd+shift+y\" | \"\" | null}."
+                            .into(),
+                    );
+                };
+                let keys = keys.as_str();
+                if let Some(combo) = keys.filter(|k| !k.is_empty()) {
+                    if !crate::keymap::bindable(combo, cfg!(target_os = "macos")) {
+                        return Err(format!(
+                            "\"{combo}\" cannot be bound: it is reserved or has no modifier."
+                        ));
+                    }
+                }
+                let sidebar = self.sidebar.read(cx);
+                let mut next = sidebar.model().keybindings.clone();
+                match keys {
+                    None => next.remove(command),
+                    Some(combo) => next.insert(command.to_string(), combo.to_string()),
+                };
+                sidebar.send(Command::UpdateSettings(json!({ "keybindings": next })));
+            }
+            // The 9th tab, or the last when there are fewer, as the web's leader 9 (Cmd+9 is
+            // always the last).
+            "leader.jump9" => self.select(Some(9), cx)?,
+            // As the web's leader c: a terminal in the project on screen, with no picker.
+            "leader.newSession" => self.sidebar.update(cx, |sidebar, cx| {
+                sidebar.launch(perch_core::agent_fleet::TERMINAL_PROVIDER, cx)
+            })?,
+            "sessions.new" => {
+                if !self.screens.has("launcher", cx) {
+                    return Err("No mod draws the launcher.".into());
+                }
+                let target = self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.run_action("sessions.new", cx);
+                    sidebar.take_new_session()
+                });
+                if let Some(target) = target {
+                    self.open_launcher(&target, cx);
+                }
+            }
+            "session.start" => {
+                let host = text("hostId").unwrap_or(LOCAL).to_string();
+                let agent = text("agent")
+                    .ok_or("This command needs {agent}.")?
+                    .to_string();
+                self.start_session(&host, text("cwd").map(str::to_string), &agent, cx)?;
+            }
+            "session.rename" => {
+                let id = text("id").ok_or("This command needs {id}.")?;
+                let title = text("name").ok_or(r#"This command needs {name: "…"}."#)?;
+                self.sidebar.update(cx, |sidebar, _| {
+                    sidebar.send(Command::Rename {
+                        session_id: id.to_string(),
+                        title: title.trim().to_string(),
+                    })
+                });
+            }
+            "session.request_close" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                if self.tabs.contains(&id) {
+                    self.close(&id, cx);
+                } else {
+                    self.close_untabbed(&id, cx)?;
+                }
+            }
+            // The sidebar's actions on what the core keeps: each names its target, and one the
+            // core does not know is refused, so a command never acts on another.
+            "session.close" => {
+                let id = self.known_session(text("id"), cx)?;
+                // The tab goes when the core says the session is deleted.
+                self.sidebar
+                    .read(cx)
+                    .send(Command::DeleteSession { session_id: id });
+            }
+            "session.move" => {
+                let id = self.known_session(text("id"), cx)?;
+                let siblings: Vec<String> = args
+                    .and_then(|a| a.get("siblings"))
+                    .and_then(Value::as_array)
+                    .and_then(|list| {
+                        list.iter()
+                            .map(|v| v.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .ok_or("This command needs {siblings: [ids…]}.")?;
+                let after = args.and_then(|a| a.get("after")) == Some(&Value::Bool(true));
+                let store = self.sidebar.read(cx).model().store.clone();
+                let host = store
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == id)
+                    .map(|s| s.host_id.clone())
+                    .unwrap_or_else(|| LOCAL.into());
+                let live: HashSet<String> = store
+                    .sessions
+                    .iter()
+                    .filter(|s| s.host_id == host)
+                    .map(|s| s.id.clone())
+                    .collect();
+                let target = self.known_session(text("target"), cx)?;
+                if !live.contains(&target) {
+                    return Err(format!(
+                        "{target} is on another computer, so {id} was not moved."
+                    ));
+                }
+                // The siblings are the sidebar's rows, which are the strip's order: the strip
+                // follows the core's order ([`Self::follow_order`]), so no refill is needed.
+                // Only this computer's sessions go into its order: an unknown id is left out.
+                let mut group: Vec<String> =
+                    siblings.into_iter().filter(|s| live.contains(s)).collect();
+                for extra in [&id, &target] {
+                    if !group.contains(extra) {
+                        group.push(extra.clone());
+                    }
+                }
+                let core = store
+                    .order
+                    .get(&host)
+                    .map(|o| o.1.clone())
+                    .unwrap_or_default();
+                let moved = navigation::move_beside(&group, &id, &target, after);
+                let sessions = navigation::write_scope(&core, &moved, Some(&live));
+                self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.set_order(host, None, Some(sessions), cx)
+                });
+            }
+            "project.move" => {
+                let store = self.sidebar.read(cx).model().store.clone();
+                let project = |key: &str| {
+                    let id = text(key).ok_or(format!("This command needs {{{key}}}."))?;
+                    store
+                        .projects
+                        .iter()
+                        .find(|p| p.id == id)
+                        .cloned()
+                        .ok_or(format!("There is no project {id}."))
+                };
+                let (moved, target) = (project("id")?, project("target")?);
+                let after = args.and_then(|a| a.get("after")) == Some(&Value::Bool(true));
+                let view = navigation::View {
+                    host_id: moved.host_id.clone(),
+                    ..Default::default()
+                };
+                let shown: Vec<String> = navigation::navigation(&store, &view)
+                    .projects
+                    .into_iter()
+                    .map(|p| p.id)
+                    .collect();
+                let core = store
+                    .order
+                    .get(&moved.host_id)
+                    .map(|o| o.0.clone())
+                    .unwrap_or_default();
+                let order = navigation::move_beside(&shown, &moved.id, &target.id, after);
+                let projects = navigation::write_scope(&core, &order, None);
+                self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.set_order(moved.host_id, Some(projects), None, cx)
+                });
+            }
+            "project.close" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                // As the web's: the sidebar asks first, so the command itself needs the answer.
+                if args.and_then(|a| a.get("confirmed")) != Some(&Value::Bool(true)) {
+                    return Err("This ends the project's agents and shells: pass {confirmed: true} to go ahead.".into());
+                }
+                self.known_project(&id, cx)?;
+                self.sidebar
+                    .read(cx)
+                    .send(Command::RemoveProject { project_id: id });
+            }
+            "project.rename" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                self.known_project(&id, cx)?;
+                let name = text("name").unwrap_or_default().trim().to_string();
+                self.sidebar.read(cx).send(Command::RenameProject {
+                    project_id: id,
+                    name,
+                });
+            }
+            "project.new" => {
+                let folder = text("folder")
+                    .ok_or(r#"This command needs {folder: "/path"}."#)?
+                    .to_string();
+                let host = text("hostId").unwrap_or(LOCAL).to_string();
+                let name = text("name").map(str::to_string);
+                match args.and_then(|a| a.get("argv")) {
+                    None => self.sidebar.read(cx).send(Command::CreateProject {
+                        host_id: host,
+                        path: folder,
+                        name,
+                    }),
+                    Some(argv) => {
+                        let command = program_in(argv, text("task"))?;
+                        self.new_project_running(host, folder, name, command, cx)?;
+                    }
+                }
+            }
+            "workspace.open" => {
+                let id = self.known_workspace(text("id"), cx)?;
+                // Its strip comes back as it was left. What it showed last is shown again, else
+                // its newest session, else the workspace's start page.
+                let on_screen = self.tabs_of == id;
+                self.enter_workspace(&id, cx);
+                let store = self.sidebar.read(cx).model().store.clone();
+                let is_session = |tab: &String| store.sessions.iter().any(|s| s.id == *tab);
+                // The strip holds every session of the workspace; its last one the sidebar can
+                // open stands in, as the web's `navigateToWorkspace` does.
+                let sidebar = self.sidebar.read(cx);
+                let newest = || {
+                    self.tabs
+                        .strip()
+                        .iter()
+                        .rev()
+                        .find(|tab| is_session(tab) && sidebar.session_to_open(tab).is_some())
+                        .cloned()
+                };
+                // A workspace already on screen shows its newest session; one switched to shows
+                // what it showed when it was left.
+                let last = if on_screen {
+                    newest()
+                } else {
+                    // (A session the core no longer lists is not a place to go back to.)
+                    self.tabs
+                        .active()
+                        .filter(|tab| tab.contains('\n') || is_session(&tab.to_string()))
+                        .map(str::to_string)
+                        .or_else(newest)
+                };
+                match last {
+                    Some(tab) if is_session(&tab) => self.show_session(&tab, cx)?,
+                    Some(tab) => {
+                        self.tabs.show(&tab);
+                        self.after_change(cx);
+                    }
+                    None => {
+                        self.run_command(
+                            "workspace.focus",
+                            Some(&json!({ "id": id })),
+                            window,
+                            cx,
+                        )?;
+                        // Its start page: no tab of another workspace stays on screen, and the
+                        // window takes the keyboard from the terminal that goes.
+                        self.tabs.hide();
+                        self.root_focus.focus(window, cx);
+                        self.after_change(cx);
+                    }
+                }
+            }
+            "workspace.hide" => {
+                let id = self.known_workspace(text("id"), cx)?;
+                let hidden = args.and_then(|a| a.get("hidden")) != Some(&Value::Bool(false));
+                self.sidebar.read(cx).send(Command::HideWorkspace {
+                    workspace_id: id,
+                    hidden,
+                });
+            }
+            "workspace.restore" => {
+                let id = self.known_workspace(text("id"), cx)?;
+                self.sidebar
+                    .read(cx)
+                    .send(Command::RestoreWorkspace { workspace_id: id });
+            }
+            "workspace.rename" => {
+                let id = self.known_workspace(text("id"), cx)?;
+                let name = text("name").unwrap_or_default().trim().to_string();
+                self.sidebar.read(cx).send(Command::RenameWorkspace {
+                    workspace_id: id,
+                    name,
+                });
+            }
+            "host.refresh" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                let store = &self.sidebar.read(cx).model().store;
+                if id != LOCAL && !store.host_entries.iter().any(|h| h.id == id) {
+                    return Err(format!("No host {id}."));
+                }
+                self.sidebar.read(cx).send(Command::RefreshHost(id));
+            }
+            "agent.focus" => {
+                let id = text("id")
+                    .or_else(|| text("terminal"))
+                    .ok_or("This command needs {id}.")?
+                    .to_string();
+                self.show_session(&id, cx)?;
+            }
+            "pane.unsplit" => {
+                let id = text("id")
+                    .map(str::to_string)
+                    .or_else(|| self.tabs.active().map(str::to_string))
+                    .ok_or("There is no tab to take out of a split.")?;
+                if !self.tabs.contains(&id) {
+                    return Err(format!("No tab {id}."));
+                }
+                self.tabs.unsplit(&id);
+                self.after_change(cx);
+            }
+            // The SDK's `beginTabDrag`: a press on tab `id`, with where the strip's tabs are.
+            "tab.beginDrag" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                if !self.tabs.contains(&id) {
+                    return Err(format!("No tab {id}."));
+                }
+                let coordinate = |key: &str| {
+                    args.and_then(|a| a.get(key))
+                        .and_then(Value::as_f64)
+                        .map(|v| px(v as f32))
+                };
+                let start = coordinate("x")
+                    .zip(coordinate("y"))
+                    .map(|(x, y)| point(x, y))
+                    .ok_or("This command needs {x, y}.")?;
+                // One drag at a time, as the web's.
+                if self.drag.is_none() {
+                    let spans =
+                        tab_drag::spans_from(&args.map_or(Value::Null, |a| a["entries"].clone()));
+                    let label = text("label").unwrap_or_default().to_string();
+                    let mut drag = TabDrag::new(id, label, start, spans);
+                    drag.look = tab_drag::look_from(args.map_or(&Value::Null, |a| &a["look"]));
+                    self.drag = Some(drag);
+                    cx.notify();
+                }
+            }
+            // The SDK's `beginReorderDrag`: a press a mod's own code drags with, which needs the
+            // pointer wherever it goes until the press ends. One at a time, and not beside a tab
+            // drag.
+            "pointer.follow" => {
+                let token = text("token")
+                    .ok_or("This command needs {token}.")?
+                    .to_string();
+                let coordinate = |key: &str| args.and_then(|a| a.get(key)).and_then(Value::as_f64);
+                let (x, y) = coordinate("x")
+                    .zip(coordinate("y"))
+                    .ok_or("This command needs {x, y}.")?;
+                if self.follow.is_some() || self.drag.is_some() {
+                    return Err("The pointer is already followed for another press.".into());
+                }
+                self.follow = Some(token);
+                self.forward_pointer("move", point(px(x as f32), px(y as f32)), cx);
+                // The window follows the pointer from its next draw.
+                cx.notify();
+            }
+            "tab.menu" => {
+                let id = text("id")
+                    .map(str::to_string)
+                    .or_else(|| self.tabs.active().map(str::to_string))
+                    .ok_or("There is no tab to open a menu for.")?;
+                if !self.tabs.contains(&id) {
+                    return Err(format!("No tab {id}."));
+                }
+                let coordinate = |key: &str| {
+                    args.and_then(|a| a.get(key))
+                        .and_then(Value::as_f64)
+                        .unwrap_or(0.) as f32
+                };
+                let at = gpui::point(px(coordinate("x")), px(coordinate("y")));
+                self.open_tab_menu(&id, at, cx);
+            }
+            "host.enable" => {
+                let id = text("id").ok_or("This command needs {id}.")?;
+                let enabled = args
+                    .and_then(|a| a.get("enabled"))
+                    .and_then(Value::as_bool)
+                    .ok_or("This command needs {enabled: true | false}.")?;
+                if id == LOCAL {
+                    return Err("This computer is always on.".into());
+                }
+                self.sidebar.update(cx, |sidebar, _| {
+                    sidebar.send(Command::SetHostEnabled {
+                        host_id: id.to_string(),
+                        enabled,
+                    })
+                });
+            }
+            // As the web's `newScratchpad`: the Quickchat project's start page, which picks the agent.
+            "quickchat.new" | "nests.scratchpad" => {
+                let target = self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.run_action("nests.scratchpad", cx);
+                    sidebar.take_new_session()
+                });
+                let Some(chats) = target.and_then(|t| t.project_id) else {
+                    // No Quickchat project yet: its start page all the same, as the web's.
+                    if let Some((_, perch)) = screens::mods(cx) {
+                        perch.unfocus_workspace();
+                        perch.flush(cx);
+                    }
+                    self.enter_workspace("", cx);
+                    self.tabs.hide();
+                    self.root_focus.focus(window, cx);
+                    self.after_change(cx);
+                    self.quickchat_start = true;
+                    return Ok(());
+                };
+                let focused = screens::mods(cx)
+                    .and_then(|(_, perch)| {
+                        let result = perch.run_own("project.focus", &json!({ "id": chats }))?;
+                        perch.flush(cx);
+                        Some(result)
+                    })
+                    .ok_or("No mod shows the navigation.")?;
+                focused?;
+                if let Some(workspace) =
+                    screens::mods(cx).and_then(|(_, perch)| perch.shown_place().1)
+                {
+                    self.enter_workspace(&workspace, cx);
+                }
+                self.tabs.hide();
+                // The terminal that had the keyboard is off screen: the window takes it, so keys
+                // (Cmd+T) still reach the commands.
+                self.root_focus.focus(window, cx);
+                self.after_change(cx);
+            }
+            // The project's start page (its home): the project is shown and no tab stays on
+            // screen, as `workspace.open` does for a workspace without a session.
+            "project.home" => {
+                let project = text("projectId").ok_or("This command needs {projectId, name}.")?;
+                let focused = screens::mods(cx)
+                    .and_then(|(_, perch)| {
+                        let result = perch.run_own("project.focus", &json!({ "id": project }))?;
+                        perch.flush(cx);
+                        Some(result)
+                    })
+                    .ok_or("No mod shows the navigation.")?;
+                focused?;
+                self.tabs.hide();
+                self.root_focus.focus(window, cx);
+                self.after_change(cx);
+            }
+            // As the web's: a previewed file's tab is kept (a tab that is not a preview stays as
+            // it is), whichever tab is named.
+            "tab.pin" => {
+                let id = text("id").ok_or("This command needs {id}.")?;
+                if !self.tabs.contains(id) {
+                    return Err(format!("No tab {id}."));
+                }
+                if self.tabs.pin(id) {
+                    cx.notify();
+                }
+            }
+            "workspace.files" => {
+                let id = self.known_workspace(text("id"), cx)?;
+                self.show_files(&id, cx);
+            }
+            // The drawer's Git tab on that workspace (while no tab on screen names one).
+            "workspace.git" => {
+                let id = self.known_workspace(text("id"), cx)?;
+                self.explorer_workspace = Some(id);
+                self.chrome.set_tools(Some(shell::Tools::Git));
+                cx.notify();
+            }
+            // What this client cannot do is the desktop app's, or the browser's, on a click.
+            "handoff.open" => {
+                let place = match text("place") {
+                    Some("files") => Place::Files,
+                    Some("changes") => Place::Changes,
+                    Some("browser") => Place::Browser,
+                    Some("chat") => Place::Chat,
+                    Some("settings") => Place::Settings,
+                    _ => return Err(
+                        "This command needs {place: files, changes, browser, chat or settings}."
+                            .into(),
+                    ),
+                };
+                self.hand_off(place)?;
+            }
+            // New browser is `browsing`'s.
+            "file.open" => {
+                let workspace =
+                    text("workspaceId").ok_or("This command needs {workspaceId, path}.")?;
+                let path = text("path").ok_or("This command needs {workspaceId, path}.")?;
+                let preview = args.and_then(|a| a["preview"].as_bool()).unwrap_or(false);
+                self.open_file(workspace, path, preview, cx);
+            }
+            "review.open" => {
+                let workspace = text("workspaceId").ok_or("This command needs {workspaceId}.")?;
+                let workspace = workspace.to_string();
+                self.open_review(&workspace, cx);
+            }
+            "files.extract" => {
+                let (Some(workspace), Some(path)) = (text("workspaceId"), text("path")) else {
+                    return Err("This command needs {workspaceId, path}.".into());
+                };
+                let (workspace, path) = (workspace.to_string(), path.to_string());
+                self.with_files(|store, _| store.extract_archive(&workspace, &path), cx);
+            }
+            "files.openDefault" | "files.reveal" => {
+                let (Some(workspace), Some(path)) = (text("workspaceId"), text("path")) else {
+                    return Err("This command needs {workspaceId, path}.".into());
+                };
+                let full = self.local_entry(workspace, path, cx)?;
+                crate::handoff::open_path(&full, name == "files.reveal")
+                    .map_err(|e| e.to_string())?;
+            }
+            "tabs.keepOpen" => {
+                if let Some(id) = self.tabs.active().map(str::to_string) {
+                    if self.tabs.pin(&id) {
+                        cx.notify();
+                    }
+                }
+            }
+            "link.open" => {
+                let url = text("url").ok_or("This command needs {url}.")?;
+                crate::handoff::open_link(url).map_err(|e| e.to_string())?;
+            }
+            "overlay.close" => {
+                if let Some(top) = self.screens.top_modal() {
+                    self.screen_closed(top, Value::Null, window, cx);
+                } else {
+                    return Err("Nothing is open to close.".into());
+                }
+            }
+            "session.open" => {
+                let session = text("id").ok_or("This command needs {id}.")?.to_string();
+                let (host, provider) = self
+                    .sidebar
+                    .read(cx)
+                    .model()
+                    .store
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == session)
+                    .map(|s| (s.host_id.clone(), s.cli_provider_id.clone()))
+                    .ok_or_else(|| format!("No session {session}."))?;
+                self.sidebar
+                    .update(cx, |sidebar, cx| sidebar.open(host, session, provider, cx));
+            }
+            // The web's leader W and New workspace: the shown project's worktree menu. A folder
+            // that is not a git repo has no menu, so the request is left for none to take.
+            "leader.resize" => self.arm_resize(cx),
+            "resize.left" | "resize.down" | "leader.shrink" => self.resize_pane(-RESIZE_STEP, cx),
+            "resize.up" | "resize.right" | "leader.grow" => self.resize_pane(RESIZE_STEP, cx),
+            "nav.back" => self.step_history(-1, cx)?,
+            "nav.forward" => self.step_history(1, cx)?,
+            "leader.nextProject" => self.next_project(cx)?,
+            // The web's Cmd+O: the sidebar's Add project form, which picks the folder.
+            "nests.addBirdhouse" => self.ask_add_project(cx)?,
+            "leader.worktree" | "nests.new" => {
+                if let Some(key) = self.active_repo_key(cx) {
+                    self.request_worktree_menu(key, None, name == "nests.new", cx);
+                }
+            }
+            // Only asks: the menu confirms and guards the removal, as the web's does.
+            "worktree.remove" => {
+                let id = text("id").ok_or("This command needs {id}.")?;
+                let model = self.sidebar.read(cx).model();
+                let store = &model.store;
+                let workspace = store
+                    .workspaces
+                    .iter()
+                    .find(|w| w.id == id)
+                    .ok_or_else(|| format!("No workspace {id}."))?;
+                let key = store
+                    .projects
+                    .iter()
+                    .find(|p| p.id == workspace.project_id)
+                    .and_then(|p| Some((p.host_id.clone(), p.repo_path.clone()?)))
+                    .filter(|(_, repo)| !repo.is_empty() && workspace.parent_workspace_id.is_some())
+                    .map(|(host, repo)| format!("{host}:{repo}"))
+                    .ok_or("Only a linked worktree of a git project can be deleted.")?;
+                let mut remove = json!({ "path": workspace.path });
+                if let Some(branch) = workspace.branch.as_deref().filter(|b| !b.is_empty()) {
+                    remove["branch"] = json!(branch);
+                }
+                self.request_worktree_menu(key, Some(remove), false, cx);
+            }
+            "worktree.cancel" | "worktree.retry" | "worktree.dismiss" => {
+                let id = text("id").ok_or("This command needs {id}.")?.to_string();
+                let sidebar = self.sidebar.read(cx);
+                if !sidebar
+                    .model()
+                    .store
+                    .worktree_jobs
+                    .iter()
+                    .any(|j| j.job_id == id)
+                {
+                    return Err(format!("There is no worktree job {id}."));
+                }
+                let verb = match name {
+                    "worktree.cancel" => "cancel",
+                    "worktree.retry" => "retry",
+                    _ => "dismiss",
+                };
+                sidebar.send(Command::WorktreeJob { verb, job_id: id });
+            }
+            // The web pins the folder as the active project and leaves the shown session; here
+            // the active folder is the shown session's, so the folder's newest session is shown.
+            "folder.select" => {
+                let cwd = text("cwd")
+                    .filter(|c| !c.is_empty())
+                    .ok_or(r#"This command needs {cwd: "/path"}."#)?
+                    .to_string();
+                let host = match text("host") {
+                    Some(host) => host.to_string(),
+                    None => screens::mods(cx)
+                        .map_or_else(|| LOCAL.to_string(), |(_, perch)| perch.shown_place().0),
+                };
+                let session = self
+                    .sidebar
+                    .read(cx)
+                    .model()
+                    .store
+                    .sessions
+                    .iter()
+                    .filter(|s| s.host_id == host && s.cwd == cwd)
+                    .max_by_key(|s| s.created_at)
+                    .map(|s| (s.id.clone(), s.cli_provider_id.clone()))
+                    .ok_or_else(|| format!("No sessions in {cwd} on {host}."))?;
+                self.sidebar.update(cx, |sidebar, cx| {
+                    sidebar.open(host, session.0, session.1, cx)
+                });
+            }
+            "notification.open" | "notification.dismiss" => {
+                let id = text("id").ok_or("This command needs {id}.")?;
+                let at = self
+                    .notifications
+                    .iter()
+                    .position(|n| n.id == id)
+                    .ok_or_else(|| format!("No notification {id}."))?;
+                let note = self.notifications.remove(at);
+                cx.notify();
+                // As the web: its action if it has one, else the session it is about.
+                if name == "notification.open" {
+                    match note.notice.and_then(|n| n.action) {
+                        Some((command, args)) => {
+                            self.run_command(&command, args.as_ref(), window, cx)?
+                        }
+                        None if note.heard.alert != Alert::Usage => {
+                            self.show_session(&note.heard.session_id, cx)?
+                        }
+                        None => {}
+                    }
+                }
+            }
+            // The web's Settings page (`page` lands on a section); the same key closes it.
+            "global.settings" | "app.settings" => {
+                if self.screens.is_open("settings") {
+                    self.screen_closed("settings", Value::Null, window, cx);
+                } else {
+                    let page = text("page").map(str::to_string);
+                    self.open_screen("settings", json!({ "page": page }), None, None, cx);
+                }
             }
             "workspace.pin" => {
                 // Bare, it flips the current workspace; with arguments it is the web's, which
@@ -891,16 +3582,36 @@ impl Workspace {
             "view.zoomIn" | "view.zoomInShift" | "app.zoom_in" => self.zoom_to(self.zoom.in_(), cx),
             "view.zoomOut" | "app.zoom_out" => self.zoom_to(self.zoom.out(), cx),
             "view.zoomReset" | "app.zoom_reset" => self.zoom_to(self.zoom.reset(), cx),
-            "tabs.new" | "tab.new" => {
+            "usage.get" => {
+                let force = args.and_then(|a| a.get("force")).and_then(Value::as_bool);
+                let force = force.unwrap_or(false);
                 self.sidebar
-                    .update(cx, |sidebar, cx| sidebar.run_action("sessions.new", cx));
+                    .update(cx, |sidebar, _| sidebar.send(Command::UsageGet { force }));
+            }
+            "usage.redeemReset" => {
+                let account_id = text("accountId").ok_or("This command needs {accountId}.")?;
+                let account_id = account_id.to_string();
+                self.sidebar.update(cx, |sidebar, _| {
+                    sidebar.send(Command::UsageRedeemReset { account_id })
+                });
+            }
+            // As the web's Cmd+T: the tab strip opens its New session menu at its "+", for the
+            // shown workspace, with a session open or not.
+            "tabs.new" | "tab.new" => {
+                if !self.screens.has("tabs", cx) {
+                    return Err("No mod draws the tab strip.".into());
+                }
+                self.new_tab_asks += 1;
+                cx.notify();
             }
             "tabs.next" | "tab.next" => {
-                self.tabs.step(1);
+                let shown = self.drawn_strip(cx);
+                self.tabs.step(1, &shown);
                 self.after_change(cx);
             }
             "tabs.prev" | "tab.prev" => {
-                self.tabs.step(-1);
+                let shown = self.drawn_strip(cx);
+                self.tabs.step(-1, &shown);
                 self.after_change(cx);
             }
             "tabs.last" => self.select(None, cx)?,
@@ -943,12 +3654,14 @@ impl Workspace {
                     .map(str::to_string)
                     .or_else(|| self.tabs.active().map(str::to_string))
                     .ok_or("There is no tab to move.")?;
+                let before = self.strip_sessions(cx);
                 if !self.tabs.move_tab(&id, index) {
                     return Err(format!(
                         "This command needs {{index: 1-{}}}.",
                         self.tabs.strip().len()
                     ));
                 }
+                self.save_strip(before, cx);
             }
             "panes.splitRight" => self.split(Side::Right, cx)?,
             "panes.splitDown" => self.split(Side::Down, cx)?,
@@ -989,65 +3702,144 @@ impl Workspace {
                 cx.notify();
             }
             "terminal.takeBackAll" => self.take_back_all(cx)?,
+            // The agent-control screen's Retry CLI, Restart CLI and Resume agent: the agent of
+            // tab `id` starts again, only after the core said its attach failed or its shell
+            // ended. A drop is never started over (the window reattaches it instead).
+            "terminal.restart" => {
+                let view = self.terminal_named(text("id"))?;
+                let core = self
+                    .locate
+                    .as_ref()
+                    .ok_or("There is no core to start the agent on.")?()
+                .map_err(|error| format!("The core is not reachable: {error:#}"))?;
+                if !view.update(cx, |view, cx| view.restart(core, cx)) {
+                    return Err("That terminal's agent has not ended or failed to start.".into());
+                }
+            }
+            // The find bar's own (`terminal-search`): the query it holds, find again, close.
+            "terminal.findQuery"
+            | "terminal.findNext"
+            | "terminal.findPrevious"
+            | "terminal.findClose" => {
+                let view = self.terminal_named(text("id"))?;
+                view.update(cx, |view, cx| match name {
+                    "terminal.findQuery" => {
+                        view.set_find_query(text("query").unwrap_or_default(), cx);
+                    }
+                    "terminal.findNext" => {
+                        view.find_next(cx);
+                    }
+                    "terminal.findPrevious" => {
+                        view.find_previous(cx);
+                    }
+                    _ => view.close_find(cx),
+                });
+            }
             _ if name.starts_with("terminal.") => self.terminal_command(name, args, cx)?,
             _ if name.starts_with("tabs.jump") => {
                 let n = name["tabs.jump".len()..].parse().ok();
                 self.select(Some(n.ok_or_else(|| format!("No command {name}."))?), cx)?;
             }
             _ => {
-                let handled = self
-                    .sidebar
-                    .update(cx, |sidebar, cx| sidebar.run_action(name, cx));
-                if !handled {
-                    return Err(format!("No command {name}."));
+                // The sidebar's view settings (`sidebar.organize`, `project.fold`, ...) are the
+                // `perch` module's, which the sidebar mod reads.
+                let own = screens::mods(cx).and_then(|(_, perch)| {
+                    let result = perch.run_own(name, args.unwrap_or(&Value::Null))?;
+                    perch.flush(cx);
+                    Some(result)
+                });
+                match own {
+                    Some(result) => {
+                        result?;
+                        // The core keeps the theme, for every screen.
+                        if name == "app.theme" {
+                            let theme = json!({ "theme": text("name") });
+                            self.sidebar.read(cx).send(Command::UpdateSettings(theme));
+                        }
+                    }
+                    None => {
+                        let (handled, empty) = self.sidebar.update(cx, |sidebar, cx| {
+                            (sidebar.run_action(name, cx), sidebar.take_workspace())
+                        });
+                        if !handled {
+                            return Err(format!("No command {name}."));
+                        }
+                        // A workspace with no session: its start page, as the web's
+                        // `openEmptyWorkspace`. A project shown as one place names its checkout.
+                        if let Some(place) = empty {
+                            let store = self.sidebar.read(cx).model().store.clone();
+                            let id = if store.workspaces.iter().any(|w| w.id == place) {
+                                Some(place)
+                            } else {
+                                crate::sidebar::navigation::landing_workspace(&store, &place, None)
+                                    .map(|(id, _)| id)
+                            };
+                            if let Some(id) = id {
+                                self.run_command(
+                                    "workspace.open",
+                                    Some(&json!({ "id": id })),
+                                    window,
+                                    cx,
+                                )?;
+                            }
+                        }
+                    }
                 }
             }
         }
         let _ = window;
+        // What it would have changed in the core was not sent: the core is away.
+        if self.sidebar.read(cx).take_refused() {
+            return Err(crate::client::NOT_CONNECTED.into());
+        }
         Ok(())
     }
 
-    fn toggle_palette(&mut self, cx: &mut Context<Self>) {
-        if self.palette.take().is_some() {
-            cx.notify();
+    /// The keybind help (`stock:keybind-help`), as the web opens it: once, until it is closed.
+    fn open_keybind_help(&mut self, cx: &mut Context<Self>) {
+        if self.screens.is_open("keybind-help") {
             return;
         }
-        let keymap = self.keymap(cx);
-        let sidebar = self.sidebar.read(cx);
-        let sessions: Vec<SessionRef> = sidebar
-            .model()
-            .hosts
-            .iter()
-            .flat_map(|h| &h.projects)
-            .flat_map(|p| {
-                p.sessions
-                    .iter()
-                    .chain(p.workspaces.iter().flat_map(|w| &w.sessions))
-            })
-            .map(|s| SessionRef {
-                id: s.id.clone(),
-                title: s.title.clone(),
-            })
-            .collect();
-        let providers = self.launch_choices(LOCAL, cx);
-        let pinned = sidebar.pinned();
-        self.palette = Some(Palette::new(palette::entries(
-            &keymap,
-            &sessions,
-            &providers,
-            self.tabs.active().is_some(),
-            pinned,
-        )));
+        if self.screens.has("keybind-help", cx) {
+            self.open_screen("keybind-help", json!({ "open": true }), None, None, cx);
+            return;
+        }
+        self.notice = Some(
+            "No mod draws the keybind help. The stock one is restored when the app starts.".into(),
+        );
+        cx.notify();
+    }
+
+    fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.screens.is_open("navigator") {
+            self.screen_closed("navigator", Value::Null, window, cx);
+            return;
+        }
+        if self.screens.has("navigator", cx) {
+            let props = self.navigator_props(cx);
+            self.open_screen(
+                "navigator",
+                props,
+                None,
+                Some(Box::new(|this, result, window, cx| {
+                    let outcome = this.navigator_result(&result, window, cx);
+                    this.finish(outcome, cx);
+                })),
+                cx,
+            );
+            return;
+        }
+        self.notice = Some(
+            "No mod draws the Navigator. The stock one is restored when the app starts.".into(),
+        );
         cx.notify();
     }
 
     /// The tab at `index` (1 is first), or the last one.
     fn select(&mut self, index: Option<usize>, cx: &mut Context<Self>) -> Result<(), String> {
-        if !self.tabs.jump(index) {
-            return Err(match index {
-                Some(n) => format!("No tab {n}: there are {}.", self.tabs.strip().len()),
-                None => "There are no tabs.".into(),
-            });
+        let shown = self.drawn_strip(cx);
+        if !self.tabs.jump(index, &shown) {
+            return Err("There are no tabs.".into());
         }
         self.after_change(cx);
         Ok(())
@@ -1083,16 +3875,29 @@ impl Workspace {
 
     /// Close a tab, which ends its session as in the web (`requestCloseSession`). A tab that only
     /// watches a session another view controls just leaves the view. An agent's tab asks first
-    /// while Settings > Warn before closing an agent is on (it is until the core says otherwise):
-    /// the first close arms, a second within [`CLOSE_CONFIRM_WITHIN`] ends it. Everything else
-    /// is ended at once. Ending asks the core to delete the session over the terminal's own
+    /// while Settings > Warn before closing an agent is on (it is until the core says otherwise),
+    /// with the web's close guard drawn by the `confirm` screen (`CloseGuardProps`): stop for
+    /// everyone ends it (and may turn the warning off), keep running only puts the tab away, and
+    /// cancel keeps it. With no mod to ask through it is not ended. Everything else is ended at
+    /// once. Ending asks the core to delete the session over the terminal's own
     /// connection, the one that holds the keyboard, because the core refuses to end a session
     /// another connection controls; the tab goes only when the core confirms it is deleted. If
     /// the core refuses, does not answer in time, or the connection drops, the tab stays and says
     /// the session is still running: an unconfirmed end is never taken for an end. The core
     /// deleting the session later still closes the tab, whatever the wait said. A tab with no
-    /// attached terminal has no connection to ask over: it closes, and the session keeps running.
+    /// attached terminal has no connection to ask over, so the main connection asks for it instead
+    /// (as the web's `session.delete`), through the same guard; the tab goes when the core deletes.
     fn close(&mut self, id: &str, cx: &mut Context<Self>) {
+        if is_browser_tab(id) {
+            return self.close_browser_tab(id, cx);
+        }
+        // A file's tab just goes: its draft stays in the core's buffer, as the web's does. A review
+        // tab keeps nothing of its own: its comments are the core's.
+        if file_tab(id).is_some() || review_tab(id).is_some() {
+            self.tabs.close(id);
+            self.after_change(cx);
+            return;
+        }
         let Some(pane) = self.panes.get(id) else {
             return;
         };
@@ -1103,48 +3908,54 @@ impl Workspace {
         let view = pane.view.clone();
         let watching = view.as_ref().is_some_and(|view| view.read(cx).watching());
         let can_end = view.as_ref().is_some_and(|view| view.read(cx).can_end());
-        if watching || !can_end {
-            self.tabs.close(id);
-            self.panes.remove(id);
-            let why = if watching {
-                "Another view controls this session, so it keeps running."
-            } else {
-                "This window is not attached to the session, so it was not ended and keeps running."
-            };
-            let again = if is_plain(&open) {
-                "Turn on Show terminals in the sidebar to open it again."
-            } else {
-                "It is still in the sidebar."
-            };
-            self.notice = Some(format!("Closed the tab. {why} {again}"));
-            self.after_change(cx);
+        if watching {
+            self.put_away(
+                id,
+                "Another view controls this session, so it keeps running.",
+                cx,
+            );
             return;
         }
-        let armed = self
-            .armed_close
-            .take()
-            .is_some_and(|(armed, _)| armed == id);
+        if !can_end {
+            // This view has no connection that may end the session (it never attached, the core
+            // went away, or the shell has exited): the web's `requestCloseSession` asks the core
+            // to delete it over its own connection, so this does too, through the close guard
+            // for an agent. A session the core no longer lists has nothing to delete.
+            if self.close_untabbed(id, cx).is_err() {
+                self.put_away(id, "The core no longer lists it.", cx);
+            }
+            return;
+        }
+        let armed = self.armed_close.take().is_some_and(|armed| armed == id);
         if !armed && self.warns_before_ending(&open, cx) {
-            let timer = cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(CLOSE_CONFIRM_WITHIN).await;
-                let _ = this.update(cx, |this, cx| {
-                    this.armed_close = None;
-                    if this
-                        .notice
-                        .as_deref()
-                        .is_some_and(|n| n.starts_with(CLOSE_ASKS))
-                    {
-                        this.notice = None;
+            if !self.screens.has("confirm", cx) {
+                self.notice = Some(
+                    "No mod draws the confirmation, so the agent was not stopped. The stock one is \
+                     restored when the app starts."
+                        .into(),
+                );
+                cx.notify();
+                return;
+            }
+            let target = id.to_string();
+            let label = self.title_of(id, cx);
+            self.open_screen(
+                "confirm",
+                json!({ "sessionId": id, "label": label }),
+                None,
+                Some(Box::new(move |this, result, _, cx| {
+                    if result.get("keepRunning").and_then(Value::as_bool) == Some(true) {
+                        this.put_away(&target, "It keeps running.", cx);
+                    } else if result.get("confirmed").and_then(Value::as_bool) == Some(true) {
+                        if result.get("never").and_then(Value::as_bool) == Some(true) {
+                            this.change(Change::WarnCloseAgent(false), cx);
+                        }
+                        this.armed_close = Some(target.clone());
+                        this.close(&target, cx);
                     }
-                    cx.notify();
-                });
-            });
-            self.armed_close = Some((id.to_string(), timer));
-            self.notice = Some(format!(
-                "{CLOSE_ASKS} {} and its agent. Close the tab again to confirm.",
-                open.title
-            ));
-            cx.notify();
+                })),
+                cx,
+            );
             return;
         }
         let id = id.to_string();
@@ -1165,6 +3976,214 @@ impl Workspace {
         }
         self.notice = Some("Ending the session\u{2026}".into());
         cx.notify();
+    }
+
+    /// The web's `project.new` with `argv`: add `folder` as a project on this computer, show it,
+    /// then run `command` in a new terminal of its workspace (`workspace.run`) and show that once
+    /// the core lists it. Each step waits for the core's answer; a refusal, or no answer, stops
+    /// there and says so. Nothing is retried.
+    fn new_project_running(
+        &mut self,
+        host: String,
+        folder: String,
+        name: Option<String>,
+        command: String,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let model = self.sidebar.read(cx).model();
+        let store = &model.store;
+        let can_run = store
+            .local_capabilities
+            .iter()
+            .any(|c| c == "workspace.run.v1");
+        if host != LOCAL || !model.connected || !can_run {
+            return Err("Run needs a connected local workspace and an updated core.".into());
+        }
+        let known: HashSet<String> = store.projects.iter().map(|p| p.id.clone()).collect();
+        let (reply, answer) = futures::channel::oneshot::channel();
+        self.sidebar.read(cx).send(Command::AddProject {
+            host_id: host.clone(),
+            path: folder.clone(),
+            name,
+            reply,
+        });
+        cx.spawn(async move |this, cx| {
+            let failed = |why: String| format!("{why}: {folder} was not started.");
+            let added = match answer.await {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(error)) => Err(failed(error)),
+                Err(_) => Err(failed("The core did not answer".into())),
+            };
+            // The project at the folder on this computer, as the web finds it, and its workspace,
+            // waited for up to 10 s: the add's answer and the listing that shows the project come
+            // apart. Another project listed meanwhile is never taken for it.
+            let unlisted = || failed("The core added the project but has not listed it or its workspace".into());
+            let tries = if added.is_ok() { 100 } else { 0 };
+            // The core lists the folder by its real path (`~` expanded, links resolved).
+            let listed_at = perch_core::db::canonical_path_for_host(&host, &folder);
+            let mut workspace = added.and_then(|()| Err(unlisted()));
+            for _ in 0..tries {
+                let found = this.update(cx, |this, cx| {
+                    let store = this.sidebar.read(cx).model().store.clone();
+                    let at_folder =
+                        |p: &&perch_core::protocol::ProjectSummary| p.host_id == host && p.path == listed_at;
+                    let created = store
+                        .projects
+                        .iter()
+                        .filter(at_folder)
+                        .find(|p| !known.contains(&p.id))
+                        .or_else(|| store.projects.iter().find(at_folder))?;
+                    let (landing, _) = navigation::landing_workspace(&store, &created.id, None)?;
+                    if let Some((_, perch)) = screens::mods(cx) {
+                        if let Some(Err(error)) =
+                            perch.run_own("project.focus", &json!({ "id": created.id }))
+                        {
+                            return Some(Err(failed(error)));
+                        }
+                        perch.flush(cx);
+                    }
+                    Some(Ok(landing))
+                });
+                match found {
+                    Err(_) => return,
+                    Ok(Some(result)) => {
+                        workspace = result;
+                        break;
+                    }
+                    Ok(None) => cx.background_executor().timer(Duration::from_millis(100)).await,
+                }
+            }
+            let started = match workspace {
+                Ok(workspace) => {
+                    let frame = json!({ "type": "workspace.run", "workspaceId": workspace, "command": command });
+                    let asked = this.update(cx, |this, cx| this.ask(frame, cx));
+                    match asked {
+                        Ok(answer) => match answer.await {
+                            Ok(Ok(started)) => started["sessionId"]
+                                .as_str()
+                                .map(str::to_string)
+                                .ok_or_else(|| failed("The core did not say which terminal".into())),
+                            Ok(Err(error)) => Err(failed(error)),
+                            Err(_) => Err(failed(
+                                "The run's outcome is unknown; check the workspace's terminals before running again".into(),
+                            )),
+                        },
+                        Err(_) => return,
+                    }
+                }
+                Err(error) => Err(error),
+            };
+            let session = match started {
+                Ok(session) => session,
+                Err(error) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.notice = Some(error);
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+            // Shown once the core lists it, as the web's `showWhenListed`, for up to 10 s.
+            for _ in 0..100 {
+                let shown = this.update(cx, |this, cx| {
+                    let listed = this.sidebar.read(cx).session_to_open(&session);
+                    listed.map(|open| {
+                        this.sidebar.update(cx, |sidebar, cx| {
+                            sidebar.open(open.host_id, open.session_id, Some(perch_core::agent_fleet::TERMINAL_PROVIDER.into()), cx)
+                        })
+                    })
+                });
+                match shown {
+                    Ok(Some(())) | Err(_) => return,
+                    Ok(None) => cx.background_executor().timer(Duration::from_millis(100)).await,
+                }
+            }
+        })
+        .detach();
+        Ok(())
+    }
+
+    /// End session `id`, which has no tab here, as the web's `requestCloseSession`: an agent asks
+    /// first through the close guard while Settings > Warn before closing an agent is on, and
+    /// anything else is ended at once. Ending is the core's: the sidebar row goes when it says
+    /// the session is deleted. Keep running puts its tab away, if it has one, and ends nothing.
+    fn close_untabbed(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
+        // Wherever the core lists it, also outside any project.
+        let open = {
+            let sidebar = self.sidebar.read(cx);
+            let model = sidebar.model();
+            let session = model.store.sessions.iter().find(|s| s.id == id);
+            sidebar.session_to_open(id).or_else(|| {
+                session.map(|s| OpenSession {
+                    host_id: s.host_id.clone(),
+                    session_id: s.id.clone(),
+                    title: s.title.clone(),
+                    provider_id: s.current_provider_id.clone().or(s.cli_provider_id.clone()),
+                    blank: false,
+                    core_url: model.core_url.clone(),
+                })
+            })
+        }
+        .ok_or_else(|| format!("No session {id}."))?;
+        let delete = Command::DeleteSession {
+            session_id: id.to_string(),
+        };
+        let target = id.to_string();
+        if !self.warns_before_ending(&open, cx) {
+            self.sidebar.read(cx).send(delete);
+            return Ok(());
+        }
+        if !self.screens.has("confirm", cx) {
+            return Err(
+                "No mod draws the confirmation, so the agent was not stopped. The stock \
+                        one is restored when the app starts."
+                    .into(),
+            );
+        }
+        let label = Some(open.title.clone())
+            .filter(|t| !t.trim().is_empty())
+            .unwrap_or_else(|| self.title_of(id, cx));
+        self.open_screen(
+            "confirm",
+            json!({ "sessionId": id, "label": label }),
+            None,
+            Some(Box::new(move |this, result, _, cx| {
+                if result.get("keepRunning").and_then(Value::as_bool) == Some(true) {
+                    this.put_away(&target, "It keeps running.", cx);
+                    return;
+                }
+                if result.get("confirmed").and_then(Value::as_bool) != Some(true) {
+                    return;
+                }
+                if result.get("never").and_then(Value::as_bool) == Some(true) {
+                    this.change(Change::WarnCloseAgent(false), cx);
+                }
+                let sidebar = this.sidebar.read(cx);
+                sidebar.send(delete);
+                if sidebar.take_refused() {
+                    this.notice = Some(crate::client::NOT_CONNECTED.into());
+                    cx.notify();
+                }
+            })),
+            cx,
+        );
+        Ok(())
+    }
+
+    /// Take tab `id` out of this window without ending its session, saying `why` it keeps running.
+    fn put_away(&mut self, id: &str, why: &str, cx: &mut Context<Self>) {
+        let Some(pane) = self.panes.remove(id) else {
+            return;
+        };
+        self.tabs.close(id);
+        self.put_away.insert(id.to_string());
+        let again = if is_plain(&pane.open) {
+            "Turn on Show terminals in the sidebar to open it again."
+        } else {
+            "It is still in the sidebar."
+        };
+        self.notice = Some(format!("Closed the tab. {why} {again}"));
+        self.after_change(cx);
     }
 
     /// Whether ending this tab's session asks first: it runs an agent (what the core sees in it,
@@ -1226,60 +4245,89 @@ impl Workspace {
         }
     }
 
-    /// Show a toast for a session that finished or needs the person: it goes by itself, or when
-    /// clicked, which also opens the session. Only the newest is kept.
+    /// List a notification for the notifications screen: a session that finished or needs the
+    /// person, or a usage alert. The screen says how long each stays.
     pub fn toast(&mut self, heard: Heard, cx: &mut Context<Self>) {
-        let session_id = heard.session_id.clone();
-        let mine = session_id.clone();
-        let timer = cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(TOAST_FOR).await;
-            let _ = this.update(cx, |this, cx| {
-                if this.toast.as_ref().is_some_and(|t| t.session_id == mine) {
-                    this.toast = None;
-                    cx.notify();
-                }
-            });
+        self.notify(heard, None, cx);
+    }
+
+    /// List mod `mod_id`'s notification (`perch.notify`): about no session, so opening it runs
+    /// its action, if any, and puts it away.
+    pub fn notify_for_mod(
+        &mut self,
+        mod_id: &str,
+        title: String,
+        body: Option<String>,
+        notice: Notice,
+        cx: &mut Context<Self>,
+    ) {
+        let heard = Heard {
+            alert: Alert::Usage,
+            session_id: format!("mod:{mod_id}"),
+            title,
+            sound: false,
+            file: None,
+            toast: crate::sidebar::Toast::App,
+            body,
+        };
+        self.notify(heard, Some(notice), cx);
+    }
+
+    /// The terminal host stopped answering, or answers again (`daemon.health`), worded and timed as
+    /// the web's toast. One at a time: the news replaces the last, so a recovery clears the alarm.
+    /// Terminals keep running either way.
+    pub fn daemon_health(&mut self, health: &crate::sidebar::Health, cx: &mut Context<Self>) {
+        self.notifications
+            .retain(|n| n.heard.session_id != DAEMON_HEALTH);
+        let (title, body, level, timeout) = if health.healthy {
+            (
+                "Terminal host is responding again".to_string(),
+                None,
+                "info",
+                None,
+            )
+        } else {
+            let problem = health
+                .problem
+                .as_deref()
+                .unwrap_or("No answer to a health check");
+            (
+                "Terminal host is not responding".to_string(),
+                Some(format!(
+                    "{problem}. Terminals were left running; nothing was restarted."
+                )),
+                "error",
+                Some(60_000),
+            )
+        };
+        let heard = Heard {
+            alert: Alert::Usage,
+            session_id: DAEMON_HEALTH.into(),
+            title,
+            sound: false,
+            file: None,
+            toast: crate::sidebar::Toast::App,
+            body,
+        };
+        let notice = Notice {
+            level: Some(level.into()),
+            timeout,
+            ..Notice::default()
+        };
+        self.notify(heard, Some(notice), cx);
+    }
+
+    fn notify(&mut self, heard: Heard, notice: Option<Notice>, cx: &mut Context<Self>) {
+        self.next_notification += 1;
+        self.notifications.push(Notification {
+            id: format!("n{}", self.next_notification),
+            heard,
+            notice,
         });
-        self.toast = Some(Toast {
-            session_id,
-            text: heard.text(),
-            _timer: timer,
-        });
+        if self.notifications.len() > MAX_NOTIFICATIONS {
+            self.notifications.remove(0);
+        }
         cx.notify();
-    }
-
-    /// The toast's text, while one is up.
-    pub fn toast_text(&self) -> Option<&str> {
-        self.toast.as_ref().map(|t| t.text.as_str())
-    }
-
-    fn toast_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let toast = self.toast.as_ref()?;
-        let session = toast.session_id.clone();
-        Some(
-            div()
-                .id("toast")
-                .absolute()
-                .top(px(TAB_BAR_HEIGHT + 12.))
-                .right_3()
-                .max_w(px(360.))
-                .px_3()
-                .py_2()
-                .rounded_md()
-                .border_1()
-                .border_color(rgb(OVERLAY_BORDER))
-                .bg(rgb(SIDEBAR_BG))
-                .cursor_pointer()
-                .text_sm()
-                .text_color(rgb(TITLE_COLOR))
-                .child(toast.text.clone())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.toast = None;
-                    let result = this.show_session(&session, cx);
-                    this.finish(result, cx);
-                }))
-                .into_any_element(),
-        )
     }
 
     /// Open the pane menu at `at` for the pane `id`. A pane in a split takes the keyboard first,
@@ -1290,100 +4338,18 @@ impl Workspace {
             return;
         };
         let can_stop = view.read(cx).can_stop();
-        let mut items = vec![
-            ("Copy", "terminal.copy"),
-            ("Paste", "terminal.paste"),
-            ("Select all", "terminal.selectAll"),
-            ("Find\u{2026}", "terminal.find"),
-            ("Clear", "terminal.clear"),
-            ("Split right", "panes.splitRight"),
-            ("Split down", "panes.splitDown"),
-        ];
-        if self.tabs.zoomed() {
-            items.push(("Restore pane", "panes.zoom"));
-        } else if self.tabs.shown().len() > 1 {
-            items.push(("Zoom pane", "panes.zoom"));
-        }
-        if can_stop {
-            items.push((STOP, "terminal.kill"));
-        }
-        items.push(("Close", "tabs.close"));
-        self.menu = Some(PaneMenu { at, items });
-        cx.notify();
-    }
-
-    fn menu_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let menu = self.menu.as_ref()?;
-        let mut list = div()
-            .absolute()
-            .left(menu.at.x)
-            .top(menu.at.y)
-            .min_w(px(180.))
-            .py_1()
-            .rounded_md()
-            .border_1()
-            .border_color(rgb(OVERLAY_BORDER))
-            .bg(rgb(SIDEBAR_BG))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation());
-        for (at, (label, command)) in menu.items.iter().copied().enumerate() {
-            list = list.child(
-                div()
-                    .id(SharedString::from(format!("menu-{at}")))
-                    .cursor_pointer()
-                    .px_3()
-                    .py_1()
-                    .text_sm()
-                    .text_color(rgb(TITLE_COLOR))
-                    .hover(|row| row.bg(rgb(SELECTED_BG)))
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        // Stopping the process cannot be taken back, and an agent may be what is
-                        // running: the first click asks, only the second stops it.
-                        if label == STOP {
-                            if let Some(item) =
-                                this.menu.as_mut().and_then(|menu| menu.items.get_mut(at))
-                            {
-                                item.0 = STOP_CONFIRM;
-                            }
-                            cx.notify();
-                            return;
-                        }
-                        this.menu = None;
-                        if let Err(error) = this.run_command(command, None, window, cx) {
-                            this.notice = Some(error);
-                        }
-                        cx.notify();
-                    })),
+        if self.screens.has("pane-menu", cx) {
+            self.open_pane_menu(id, at, can_stop, cx);
+        } else {
+            self.notice = Some(
+                "No mod draws the pane menu. The stock one is restored when the app starts.".into(),
             );
+            cx.notify();
         }
-        // A click anywhere else closes it.
-        Some(
-            div()
-                .id("pane-menu")
-                .absolute()
-                .inset_0()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, _, cx| {
-                        this.menu = None;
-                        cx.notify();
-                    }),
-                )
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(|this, _, _, cx| {
-                        this.menu = None;
-                        cx.notify();
-                    }),
-                )
-                .child(list)
-                .into_any_element(),
-        )
     }
 
     /// Go to a session's tab, opening one if it has none: a peek of it becomes that tab.
-    fn show_session(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
+    pub fn show_session(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
         let open = match self.panes.get(id) {
             Some(pane) => pane.open.clone(),
             None => self
@@ -1409,29 +4375,36 @@ impl Workspace {
             self.park_peek(cx);
             return Ok(());
         }
-        if self.tabs.contains(id) {
-            return Err("That session is open in a tab; terminal.show goes to it.".into());
+        if self.tabs.shown().iter().any(|tab| tab == id) {
+            return Err("That session is on screen; terminal.show goes to it.".into());
         }
-        let open = self
-            .sidebar
-            .read(cx)
-            .session_to_open(id)
-            .ok_or("That session is gone.")?;
+        // A session whose tab is out of sight peeks through its own pane.
+        let open = match self.panes.get(id) {
+            Some(pane) => pane.open.clone(),
+            None => self
+                .sidebar
+                .read(cx)
+                .session_to_open(id)
+                .ok_or("That session is gone.")?,
+        };
         self.park_peek(cx);
-        let view = self.attach(&open, cx);
-        self.panes.insert(
-            id.to_string(),
-            Pane {
-                open,
-                view,
-                settle: Settle::default(),
-                retry: None,
-                attempts: 0,
-                closing: None,
-                seen: 0,
-                parked: false,
-            },
-        );
+        self.peek_was_warm = self.panes.get(id).is_some_and(|pane| pane.view.is_some());
+        let view = match self.panes.get(id).and_then(|pane| pane.view.clone()) {
+            Some(view) => Some(view),
+            None => self.attach(&open, cx),
+        };
+        let pane = self.panes.entry(id.to_string()).or_insert_with(|| Pane {
+            open,
+            view: None,
+            settle: Settle::default(),
+            retry: None,
+            attempts: 0,
+            closing: None,
+            seen: 0,
+            parked: false,
+        });
+        pane.view = view;
+        pane.parked = false;
         self.peek = Some(id.to_string());
         cx.notify();
         Ok(())
@@ -1443,8 +4416,16 @@ impl Workspace {
         let Some(id) = self.peek.take() else {
             return false;
         };
-        if !self.tabs.contains(&id) {
+        // A tab on screen keeps its terminal, as does one out of sight that was warm before the
+        // peek; any other lets go until it is shown.
+        if !self.every_tabs().any(|tabs| tabs.contains(&id)) {
             self.panes.remove(&id);
+        } else if !self.tabs.shown().contains(&id) && !self.peek_was_warm {
+            if let Some(pane) = self.panes.get_mut(&id) {
+                pane.view = None;
+                pane.retry = None;
+                pane.parked = true;
+            }
         }
         cx.notify();
         true
@@ -1531,11 +4512,14 @@ impl Workspace {
         )
     }
 
-    /// Zoom every terminal, shown or kept, and say the level.
+    /// Zoom every terminal, shown or kept, and the file editors, and say the level.
     fn zoom_to(&mut self, zoom: Zoom, cx: &mut Context<Self>) {
         self.zoom = zoom;
         for view in self.panes.values().filter_map(|pane| pane.view.as_ref()) {
             view.update(cx, |view, cx| view.set_zoom(zoom.factor(), cx));
+        }
+        if let Some(mods) = cx.try_global::<crate::mods::WindowMods>() {
+            mods.editors.set_zoom(zoom.factor());
         }
         self.notice = Some(format!("Zoom {}%", (zoom.factor() * 100.0).round()));
         cx.notify();
@@ -1572,18 +4556,31 @@ impl Workspace {
         Ok(())
     }
 
+    /// Tab `id`'s terminal, else the one on screen.
+    fn terminal_named(&self, id: Option<&str>) -> Result<Entity<TerminalView>, String> {
+        match id {
+            Some(id) => self
+                .panes
+                .get(id)
+                .and_then(|p| p.view.clone())
+                .ok_or_else(|| format!("Tab {id} has no terminal.")),
+            None => self
+                .terminal()
+                .cloned()
+                .ok_or("No terminal is on screen.".into()),
+        }
+    }
+
     /// A terminal's named action (`terminal.find`, `terminal.scroll {pages: -1}`, ...) on the tab
-    /// on screen. The key dispatcher and the palette both end here.
+    /// on screen. The key dispatcher and the Navigator both end here.
     fn terminal_command(
         &mut self,
         name: &str,
         args: Option<&Value>,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
-        let view = self
-            .terminal()
-            .cloned()
-            .ok_or("No terminal is on screen.")?;
+        let id = args.and_then(|a| a.get("id")).and_then(Value::as_str);
+        let view = self.terminal_named(id)?;
         // The action, and what to say if the view did nothing.
         let (action, nothing) = match name {
             "terminal.find" => (Action::Find, ""),
@@ -1636,17 +4633,6 @@ impl Workspace {
         }
     }
 
-    fn commit_scrollback(&mut self, cx: &mut Context<Self>) {
-        let typed = self.settings.as_ref().and_then(|p| p.editing.clone());
-        if let Some(n) = typed.as_deref().and_then(scrollback_from_text) {
-            self.change(Change::Scrollback(n), cx);
-            if let Some(panel) = self.settings.as_mut() {
-                panel.editing = None;
-            }
-        }
-        cx.notify();
-    }
-
     fn change(&mut self, change: Change, cx: &mut Context<Self>) {
         self.sidebar.update(cx, |sidebar, _| {
             sidebar.send(Command::UpdateSettings(change.patch()))
@@ -1654,119 +4640,6 @@ impl Workspace {
     }
 
     // Drawing
-
-    fn tab_bar(&self, cx: &mut Context<Self>) -> gpui::Div {
-        let shown = self.tabs.shown();
-        let active = self.tabs.active().map(str::to_string);
-        let mut bar = div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_1()
-            .h(px(TAB_BAR_HEIGHT))
-            .px_2()
-            .bg(rgb(TAB_BAR_BG))
-            .text_sm();
-        for id in self.tabs.strip() {
-            let is_active = active.as_deref() == Some(id.as_str());
-            let in_split = shown.len() > 1 && shown.contains(id);
-            let attention = self
-                .sidebar
-                .read(cx)
-                .find_session(id)
-                .and_then(|s| s.attention);
-            let dot = attention.map_or(DIM_COLOR, |a| tint(a).0);
-            let (select, close) = (id.clone(), id.clone());
-            let mut tab = div()
-                .id(format!("tab-{id}"))
-                .cursor_pointer()
-                .flex()
-                .items_center()
-                .gap_2()
-                .px_2()
-                .h(px(TAB_BAR_HEIGHT - 6.))
-                .max_w(px(220.))
-                .rounded_sm()
-                .text_color(rgb(if is_active { TITLE_COLOR } else { DIM_COLOR }))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if this.tabs.show(&select) {
-                        this.after_change(cx);
-                    }
-                }))
-                .child(div().flex_none().size(px(8.)).rounded_full().bg(rgb(dot)))
-                .child(div().truncate().child(self.title_of(id, cx)));
-            if is_active {
-                tab = tab.bg(rgb(SELECTED_BG));
-            } else if in_split {
-                tab = tab.text_color(rgb(0xb0b0b8));
-            }
-            if attention == Some(Attention::NeedsYou) {
-                tab = tab.child(label(Attention::NeedsYou));
-            }
-            tab = tab.child(
-                div()
-                    .id(format!("close-{id}"))
-                    .flex_none()
-                    .text_color(rgb(DIM_COLOR))
-                    .child("×")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        cx.stop_propagation();
-                        this.close(&close, cx);
-                    })),
-            );
-            bar = bar.child(tab);
-        }
-        bar = bar.child(
-            div()
-                .id("new-tab")
-                .cursor_pointer()
-                .px_2()
-                .text_color(rgb(DIM_COLOR))
-                .child("+")
-                .on_click(cx.listener(|this, _, window, cx| {
-                    let result = this.run_command("tabs.new", None, window, cx);
-                    this.finish(result, cx);
-                })),
-        );
-        if self.leader.is_some() {
-            bar = bar.child(
-                div()
-                    .text_xs()
-                    .text_color(rgb(DIM_COLOR))
-                    .child("Leader… press a key"),
-            );
-        }
-        bar.child(div().flex_1())
-            .child(self.bar_link(
-                "open-palette",
-                "Commands",
-                cx.listener(|this, _, _, cx| this.toggle_palette(cx)),
-            ))
-            .child(self.bar_link(
-                "open-settings",
-                "Settings",
-                cx.listener(|this, _, _, cx| {
-                    this.settings = Some(SettingsPanel::default());
-                    cx.notify();
-                }),
-            ))
-    }
-
-    fn bar_link(
-        &self,
-        id: &'static str,
-        text: &'static str,
-        on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
-    ) -> gpui::Stateful<gpui::Div> {
-        div()
-            .id(id)
-            .cursor_pointer()
-            .px_2()
-            .text_xs()
-            .text_color(rgb(DIM_COLOR))
-            .child(text)
-            .on_click(on_click)
-    }
 
     /// The visible panes: a lone one fills the area, a split is rows and columns of them.
     fn node(
@@ -1777,7 +4650,26 @@ impl Workspace {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match node {
-            Node::Pane(id) => self.pane(id, focused == Some(id.as_str()) && split, cx),
+            Node::Pane(id) => {
+                let boxes = self.drop_boxes.clone();
+                let key = id.clone();
+                let measure = canvas(
+                    move |bounds, _, _| {
+                        boxes.borrow_mut().panes.insert(key, bounds);
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full();
+                div()
+                    .relative()
+                    .size_full()
+                    .child(self.pane(id, focused == Some(id.as_str()) && split, cx))
+                    .child(measure)
+                    .into_any_element()
+            }
             Node::Split { dir, kids, sizes } => {
                 let mut row = div().flex().size_full().gap(px(PANE_GAP));
                 row = match dir {
@@ -1801,6 +4693,23 @@ impl Workspace {
     }
 
     fn pane(&self, id: &str, focused: bool, cx: &mut Context<Self>) -> AnyElement {
+        let body = self.pane_body(id, focused, cx);
+        match self.screens.inflow(&format!("pane-header#{id}")) {
+            Some(header) => div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(div().flex_none().h(px(PANE_HEADER_HEIGHT)).child(header))
+                .child(div().flex_1().min_h_0().child(body))
+                .into_any_element(),
+            None => body,
+        }
+    }
+
+    fn pane_body(&self, id: &str, focused: bool, cx: &mut Context<Self>) -> AnyElement {
+        if let Some(page) = self.browser_body(id, focused, cx) {
+            return page;
+        }
         let target = id.to_string();
         let frame = div()
             .id(format!("pane-{id}"))
@@ -1813,8 +4722,30 @@ impl Workspace {
                 MouseButton::Left,
                 cx.listener(move |this, _, _, cx| this.focus_pane(&target, cx)),
             );
+        // What a mod draws over the terminal, in the pane's box: the agent's controls, the find
+        // bar, the phone-size notice.
+        if review_tab(id).is_some() {
+            return match self.screens.inflow(&format!("review#{id}")) {
+                Some(view) => frame.relative().child(view).into_any_element(),
+                None => frame.child(self.title_of(id, cx)).into_any_element(),
+            };
+        }
+        if file_tab(id).is_some() {
+            return match self.screens.inflow(&format!("files#{id}")) {
+                Some(view) => frame.relative().child(view).into_any_element(),
+                None => frame.child(self.title_of(id, cx)).into_any_element(),
+            };
+        }
+        let over = ["agent-control", "terminal-search", "phone-size"]
+            .into_iter()
+            .filter_map(|screen| self.screens.inflow(&format!("{screen}#{id}")))
+            .map(|view| div().absolute().inset_0().child(view));
         match self.panes.get(id).and_then(|p| p.view.clone()) {
-            Some(view) => frame.child(view).into_any_element(),
+            Some(view) => frame
+                .relative()
+                .child(view)
+                .children(over)
+                .into_any_element(),
             None => frame
                 .flex()
                 .items_center()
@@ -1825,523 +4756,193 @@ impl Workspace {
                 .into_any_element(),
         }
     }
+}
 
-    fn palette_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let palette = self.palette.as_ref()?;
-        let mut list = div().flex().flex_col();
-        let header = |text: String| {
-            div()
-                .px_3()
-                .py_2()
-                .border_b_1()
-                .border_color(rgb(OVERLAY_BORDER))
-                .text_color(rgb(TITLE_COLOR))
-                .child(text)
-        };
-        if let Some(prompt) = &palette.prompt {
-            list = list
-                .child(
-                    div()
-                        .px_3()
-                        .pt_2()
-                        .text_xs()
-                        .text_color(rgb(DIM_COLOR))
-                        .child(prompt.label.clone()),
-                )
-                .child(header(format!("{}▏", prompt.text)));
-        } else {
-            list = list.child(header(if palette.query.is_empty() {
-                "Type a command, a session or an agent▏".to_string()
-            } else {
-                format!("{}▏", palette.query)
-            }));
-            let shown = palette.shown();
-            let start = palette.selected.saturating_sub(PALETTE_ROWS - 1);
-            for (i, entry) in shown.iter().enumerate().skip(start).take(PALETTE_ROWS) {
-                let picked = i == palette.selected;
-                let entry_owned = (*entry).clone();
-                let mut row = div()
-                    .id(format!("palette-{i}"))
-                    .cursor_pointer()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .px_3()
-                    .py_1()
-                    .text_sm()
-                    .text_color(rgb(if picked { TITLE_COLOR } else { 0xb0b0b8 }))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.palette = None;
-                        let result = this.run_entry(&entry_owned, window, cx);
-                        this.finish(result, cx);
-                    }))
-                    .child(div().truncate().child(entry.title.clone()))
-                    .child(
-                        div()
-                            .flex_1()
-                            .truncate()
-                            .text_xs()
-                            .text_color(rgb(DIM_COLOR))
-                            .child(entry.id.clone()),
-                    );
-                if let Some(keys) = &entry.keys {
-                    row = row.child(
-                        div()
-                            .flex_none()
-                            .text_xs()
-                            .text_color(rgb(DIM_COLOR))
-                            .child(keys.clone()),
-                    );
-                }
-                if picked {
-                    row = row.bg(rgb(SELECTED_BG));
-                }
-                list = list.child(row);
-            }
-            if shown.is_empty() {
-                list = list.child(
-                    div()
-                        .px_3()
-                        .py_2()
-                        .text_sm()
-                        .text_color(rgb(DIM_COLOR))
-                        .child("Nothing matches"),
-                );
-            }
-        }
-        Some(self.overlay(
-            "palette",
-            560.,
-            list,
-            |this, cx| {
-                this.palette = None;
-                cx.notify();
-            },
-            cx,
-        ))
-    }
+/// A screen result's web action: `{action, args}`.
+fn action_of(result: &Value) -> (Option<String>, Vec<Value>) {
+    let action = result
+        .get("action")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let args = result
+        .get("args")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    (action, args)
+}
 
-    fn settings_view(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let panel = self.settings.as_ref()?;
-        let terminal = self.sidebar.read(cx).model().terminal.clone();
-        let row = |title: &str, note: &str| {
-            div()
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(rgb(TITLE_COLOR))
-                        .child(title.to_string()),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(rgb(DIM_COLOR))
-                        .child(note.to_string()),
-                )
-        };
-        let mut body = div().flex().flex_col().gap_3().p_3().child(
-            div()
-                .flex()
-                .justify_between()
-                .child(
-                    div()
-                        .text_color(rgb(TITLE_COLOR))
-                        .child("Settings · Terminal"),
-                )
-                .child(
-                    div()
-                        .id("settings-close")
-                        .cursor_pointer()
-                        .text_xs()
-                        .text_color(rgb(DIM_COLOR))
-                        .child("Close")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.settings = None;
-                            cx.notify();
-                        })),
-                ),
-        );
-        let Some(terminal) = terminal else {
-            body = body.child(hint("Waiting for the core"));
-            return Some(self.overlay(
-                "settings",
-                520.,
-                body,
-                |this, cx| {
-                    this.settings = None;
-                    cx.notify();
-                },
-                cx,
-            ));
-        };
-        let typed = panel.editing.clone();
-        let valid = typed
-            .as_deref()
-            .is_none_or(|t| scrollback_from_text(t).is_some());
-        let scrollback_box = div()
-            .id("scrollback")
-            .cursor_pointer()
-            .px_2()
-            .py_1()
-            .rounded_sm()
-            .bg(rgb(SELECTED_BG))
-            .text_sm()
-            .text_color(rgb(if valid { TITLE_COLOR } else { 0xe5484d }))
-            .child(match &typed {
-                Some(text) => format!("{text}▏"),
-                None => terminal.scrollback.to_string(),
-            })
-            .on_click({
-                let current = terminal.scrollback.to_string();
-                cx.listener(move |this, _, _, cx| {
-                    if let Some(panel) = this.settings.as_mut() {
-                        panel.editing = Some(current.clone());
-                    }
-                    cx.notify();
-                })
-            });
-        let sound_file = |file: &str| {
-            if file.is_empty() {
-                "the system alert".to_string()
-            } else {
-                file.to_string()
-            }
-        };
-        let [across, down] = terminal.padding;
-        body = body
-            .child(setting_row(
-                "Scrollback (lines)",
-                &format!("{MIN_SCROLLBACK}\u{2013}{MAX_SCROLLBACK} lines, Enter to save. Open terminals follow at once."),
-                scrollback_box.into_any_element(),
-            ))
-            .child(self.switch(
-                "login-shell",
-                "Login shell",
-                "Spawn plain terminal panes as a login shell. Only for terminals created afterwards.",
-                terminal.login_shell,
-                Change::LoginShell(!terminal.login_shell),
-                cx,
-            ))
-            .child(self.switch(
-                "double-quotes",
-                "Wrap dropped paths in double quotes",
-                "Applies to file drops. Off uses single quotes.",
-                terminal.dropped_path_double_quotes,
-                Change::DroppedPathDoubleQuotes(!terminal.dropped_path_double_quotes),
-                cx,
-            ))
-            .child(self.stepper(
-                "contrast",
-                "Minimum contrast",
-                "Text below this ratio (1 to 21) is pushed toward black or white. 1 leaves colours alone.",
-                format!("{:.1}", terminal.minimum_contrast),
-                Change::MinimumContrast(stepped(terminal.minimum_contrast, -0.5, CONTRAST)),
-                Change::MinimumContrast(stepped(terminal.minimum_contrast, 0.5, CONTRAST)),
-                cx,
-            ))
-            .child(self.switch(
-                "clipboard-write",
-                "Programs may write the clipboard",
-                "A program in a terminal can copy text with OSC 52.",
-                terminal.clipboard_write,
-                Change::ClipboardWrite(!terminal.clipboard_write),
-                cx,
-            ))
-            .child(self.switch(
-                "copy-on-select",
-                "Copy on select",
-                "Releasing a mouse selection in a terminal copies it.",
-                terminal.copy_on_select,
-                Change::CopyOnSelect(!terminal.copy_on_select),
-                cx,
-            ))
-            .child(self.switch(
-                "scrollbars",
-                "Scrollbars",
-                "A strip over the text edge while there is history to scroll.",
-                terminal.pane_scrollbars,
-                Change::PaneScrollbars(!terminal.pane_scrollbars),
-                cx,
-            ))
-            .child(self.stepper(
-                "padding-across",
-                "Padding across (px)",
-                "Space left and right of the text, 0 to 64.",
-                format!("{across}"),
-                Change::Padding([stepped(across, -2.0, PADDING), down]),
-                Change::Padding([stepped(across, 2.0, PADDING), down]),
-                cx,
-            ))
-            .child(self.stepper(
-                "padding-down",
-                "Padding down (px)",
-                "Space above and below the text, 0 to 64.",
-                format!("{down}"),
-                Change::Padding([across, stepped(down, -2.0, PADDING)]),
-                Change::Padding([across, stepped(down, 2.0, PADDING)]),
-                cx,
-            ))
-            .child(self.stepper(
-                "opacity",
-                "Opacity",
-                "0.1 to 1. Below 1, what is behind a terminal shows through.",
-                format!("{:.1}", terminal.opacity),
-                Change::Opacity(stepped(terminal.opacity, -0.1, OPACITY)),
-                Change::Opacity(stepped(terminal.opacity, 0.1, OPACITY)),
-                cx,
-            ))
-            .child(self.choice(
-                "option-as-alt",
-                "Option as Alt",
-                "auto, on, off, left or right. This window treats on, left and right as auto.",
-                &terminal.option_as_alt,
-                Change::OptionAsAlt(next_choice(&OPTION_AS_ALT, &terminal.option_as_alt)),
-                cx,
-            ))
-            .child(
-                div()
-                    .pt_2()
-                    .text_xs()
-                    .text_color(rgb(DIM_COLOR))
-                    .child("Alerts"),
-            )
-            .child(self.switch(
-                "sounds",
-                "Alert sounds",
-                "A sound when a session finishes or needs you and you are not looking at it.",
-                terminal.sound_enabled,
-                Change::SoundEnabled(!terminal.sound_enabled),
-                cx,
-            ))
-            .child(row(
-                "Sound files",
-                &format!(
-                    "Done: {}. Needs you: {}. Chosen in Perch.",
-                    sound_file(&terminal.sound_done),
-                    sound_file(&terminal.sound_blocked)
-                ),
-            ))
-            .child(self.choice(
-                "toasts",
-                "Toasts",
-                "app: a message in the window; system: a system notification; off.",
-                &terminal.toast_delivery,
-                Change::ToastDelivery(next_choice(&TOAST_DELIVERY, &terminal.toast_delivery)),
-                cx,
-            ))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(rgb(DIM_COLOR))
-                    .child("Line height, ligatures and scroll speed have no setting in the core yet."),
-            )
-            .child(
-                div().id("settings-handoff").cursor_pointer().text_xs().text_color(rgb(DIM_COLOR))
-                    .child("Every other setting is in Perch: Open Settings in Perch")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        let result = this.hand_off(Place::Settings);
-                        this.finish(result, cx);
-                    })),
-            );
-        Some(self.overlay(
-            "settings",
-            520.,
-            body,
-            |this, cx| {
-                this.settings = None;
-                cx.notify();
-            },
-            cx,
-        ))
-    }
+/// Argument `at` of an action, as text.
+/// The web's `programIn`: `argv` and `task` as one shell command, each part single-quoted.
+fn program_in(argv: &Value, task: Option<&str>) -> Result<String, String> {
+    let parts = argv
+        .as_array()
+        .filter(|parts| !parts.is_empty())
+        .and_then(|parts| {
+            parts
+                .iter()
+                .map(|p| p.as_str().filter(|p| !p.is_empty()))
+                .collect::<Option<Vec<_>>>()
+        })
+        .ok_or("argv is a list of strings: [program, ...arguments].")?;
+    let quote = |part: &str| format!("'{}'", part.replace('\'', "'\\''"));
+    Ok(parts
+        .into_iter()
+        .chain(task.filter(|t| !t.is_empty()))
+        .map(quote)
+        .collect::<Vec<_>>()
+        .join(" "))
+}
 
-    fn switch(
-        &self,
-        id: &'static str,
-        title: &str,
-        note: &str,
-        on: bool,
-        flip: Change,
-        cx: &mut Context<Self>,
-    ) -> gpui::Div {
-        let button = div()
-            .id(id)
-            .cursor_pointer()
-            .px_2()
-            .py_1()
-            .rounded_sm()
-            .text_sm()
-            .bg(rgb(SELECTED_BG))
-            .text_color(rgb(if on { 0x4caf6a } else { DIM_COLOR }))
-            .child(if on { "On" } else { "Off" })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.change(flip, cx);
-                cx.notify();
-            }));
-        setting_row(title, note, button.into_any_element())
-    }
-
-    /// A value with a button either side that move it by one step. Each button saves the value it
-    /// would give, so a click is one `settings.update`.
-    #[allow(clippy::too_many_arguments)]
-    fn stepper(
-        &self,
-        id: &'static str,
-        title: &str,
-        note: &str,
-        shown: String,
-        lower: Change,
-        higher: Change,
-        cx: &mut Context<Self>,
-    ) -> gpui::Div {
-        let button = |label: &'static str, id: String, change: Change, cx: &mut Context<Self>| {
-            div()
-                .id(SharedString::from(id))
-                .cursor_pointer()
-                .px_2()
-                .py_1()
-                .rounded_sm()
-                .text_sm()
-                .bg(rgb(SELECTED_BG))
-                .text_color(rgb(TITLE_COLOR))
-                .child(label)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.change(change, cx);
-                    cx.notify();
-                }))
-        };
-        let control = div()
-            .flex()
-            .items_center()
-            .gap_1()
-            .child(button("\u{2212}", format!("{id}-less"), lower, cx))
-            .child(
-                div()
-                    .min_w(px(44.))
-                    .flex()
-                    .justify_center()
-                    .text_sm()
-                    .text_color(rgb(TITLE_COLOR))
-                    .child(shown),
-            )
-            .child(button("+", format!("{id}-more"), higher, cx));
-        setting_row(title, note, control.into_any_element())
-    }
-
-    /// A value that moves to the next of a few when clicked.
-    fn choice(
-        &self,
-        id: &'static str,
-        title: &str,
-        note: &str,
-        shown: &str,
-        next: Change,
-        cx: &mut Context<Self>,
-    ) -> gpui::Div {
-        let button = div()
-            .id(id)
-            .cursor_pointer()
-            .px_2()
-            .py_1()
-            .rounded_sm()
-            .text_sm()
-            .bg(rgb(SELECTED_BG))
-            .text_color(rgb(TITLE_COLOR))
-            .child(shown.to_string())
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.change(next, cx);
-                cx.notify();
-            }));
-        setting_row(title, note, button.into_any_element())
-    }
-
-    /// A box over the main area; a click outside it closes it.
-    fn overlay(
-        &self,
-        id: &'static str,
-        width: f32,
-        body: gpui::Div,
-        close: impl Fn(&mut Self, &mut Context<Self>) + 'static + Clone,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        // Room above (48) and below (24) it, up to what a box of lists needs.
-        let room = if self.viewport_height > 0.0 {
-            (self.viewport_height - 72.).clamp(120., 560.)
-        } else {
-            560.
-        };
-        div()
-            .id(id)
-            .absolute()
-            .inset_0()
-            .flex()
-            .justify_center()
-            .pt(px(48.))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _, cx| close(this, cx)),
-            )
-            .child(
-                div()
-                    .w(px(width))
-                    .h_auto()
-                    .max_h(px(room))
-                    .overflow_hidden()
-                    .rounded_md()
-                    .border_1()
-                    .border_color(rgb(OVERLAY_BORDER))
-                    .bg(rgb(SIDEBAR_BG))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(
-                        div()
-                            .id(SharedString::from(format!("{id}-body")))
-                            .max_h(px(room - 2.))
-                            .overflow_y_scroll()
-                            .child(body),
-                    ),
-            )
-            .into_any_element()
+/// A file tab's workspace and path: its id is the web's `fileTabKey`, `<workspace id>\n<path>`
+/// (a session id never holds a line break).
+impl Workspace {
+    /// Every workspace's strip (its tabs in order, sessions among them for their places, its
+    /// splits, previews and active tab) and the sessions closed here without ending go to the
+    /// window's state file, as the web keeps its file tabs, tab order and split sets.
+    fn keep_tabs(&mut self) {
+        let strips: serde_json::Map<String, Value> = std::iter::once((&self.tabs_of, &self.tabs))
+            .chain(self.parked.iter().map(|(key, (tabs, _))| (key, tabs)))
+            .filter(|(key, tabs)| !key.is_empty() && **tabs != Tabs::default())
+            .map(|(key, tabs)| (key.clone(), serde_json::to_value(tabs).unwrap_or_default()))
+            .collect();
+        let mut put_away: Vec<&String> = self.put_away.iter().collect();
+        put_away.sort();
+        self.chrome
+            .set_tabs(json!({ "strips": strips, "putAway": put_away }));
     }
 }
 
-/// A setting: its name and what it does on the left, its control on the right.
-fn setting_row(title: &str, note: &str, control: AnyElement) -> gpui::Div {
-    div()
-        .flex()
-        .justify_between()
-        .items_center()
-        .gap_3()
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                // The words give way to the control, which keeps its size.
-                .flex_1()
-                .min_w_0()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(rgb(TITLE_COLOR))
-                        .child(title.to_string()),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(rgb(DIM_COLOR))
-                        .child(note.to_string()),
-                ),
-        )
-        .child(div().flex_none().child(control))
+pub fn file_tab(id: &str) -> Option<(&str, &str)> {
+    id.split_once('\n')
+        .filter(|_| !is_browser_tab(id) && review_tab(id).is_none())
+}
+
+fn word(args: &[Value], at: usize) -> Option<String> {
+    args.get(at).and_then(Value::as_str).map(str::to_string)
+}
+
+impl Workspace {
+    /// The theme's tokens the window's frame draws with.
+    fn tokens(&self, cx: &App) -> Tokens {
+        Tokens::of(&screens::mods(cx).map_or_else(
+            || theme::resolve(theme::DEFAULT),
+            |(_, perch)| perch.theme(),
+        ))
+    }
+
+    /// The sidebar's width while it is shown, for the drawer's room.
+    fn shown_sidebar(&self, cx: &App) -> Option<f32> {
+        self.sidebar
+            .read(cx)
+            .visible()
+            .then(|| self.chrome.sidebar())
+    }
+
+    /// A press on a column's handle: a double press puts the column back to its default width,
+    /// a single one holds it.
+    fn press_column(&mut self, column: Column, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        let sidebar = self.shown_sidebar(cx);
+        if event.click_count >= 2 {
+            match column {
+                Column::Sidebar => self.chrome.set_sidebar_width(None),
+                Column::Drawer => self.chrome.set_tools_width(None),
+            }
+            self.chrome.keep();
+        } else {
+            let start = match column {
+                Column::Sidebar => self.chrome.sidebar(),
+                Column::Drawer => self.chrome.tools_width(self.viewport_width, sidebar),
+            };
+            self.column_drag = Some(ColumnDrag {
+                column,
+                from: f32::from(event.position.x),
+                start,
+            });
+        }
+        cx.notify();
+    }
+
+    /// The pointer moved while a handle is held.
+    fn drag_column(&mut self, x: Pixels, cx: &mut Context<Self>) {
+        let Some(drag) = &self.column_drag else {
+            return;
+        };
+        let moved = f32::from(x) - drag.from;
+        match drag.column {
+            Column::Sidebar => self.chrome.set_sidebar_width(Some(drag.start + moved)),
+            Column::Drawer => {
+                let (least, most) =
+                    Chrome::tools_range(self.viewport_width, self.shown_sidebar(cx));
+                self.chrome
+                    .set_tools_width(Some((drag.start - moved).clamp(least, most)));
+            }
+        }
+        cx.notify();
+    }
+
+    /// The handle was let go: the width stays and is kept.
+    fn end_column_drag(&mut self, cx: &mut Context<Self>) {
+        if self.column_drag.take().is_some() {
+            self.chrome.keep();
+            cx.notify();
+        }
+    }
 }
 
 impl gpui::Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_editors(window, cx);
+        // ponytail: serialises every strip on each frame (a few hundred bytes each) to see whether
+        // it changed; a dirty flag set by each strip change would skip it.
+        self.keep_tabs();
         self.viewport_height = f32::from(window.viewport_size().height);
+        if window.focused(cx).is_none() {
+            self.root_focus.focus(window, cx);
+        }
+        if self.activation.is_none() {
+            let send = |active: bool, sidebar: &Entity<Sidebar>, cx: &App| {
+                sidebar.read(cx).send(Command::WindowActive(active));
+            };
+            send(window.is_window_active(), &self.sidebar, cx);
+            self.activation = Some(cx.observe_window_activation(
+                window,
+                move |this, window, cx| {
+                    send(window.is_window_active(), &this.sidebar, cx);
+                    // The active window sizes the terminals it shows; an inactive one hands the
+                    // size to the other window on this computer.
+                    let active = window.is_window_active();
+                    for pane in this.panes.values() {
+                        if let Some(view) = &pane.view {
+                            view.update(cx, |view, _| view.window_active(active));
+                        }
+                    }
+                    // As the web's blur: a tab drag, or a press a mod follows, ends with nothing
+                    // changed.
+                    if !window.is_window_active() {
+                        this.drag_ended(false, cx);
+                        this.cancel_follow(cx);
+                    }
+                },
+            ));
+        }
+        self.browser_frame(window, cx);
+        // Screens mods draw: the notifications screen is up while there are notifications, the
+        // floating ones opened since the last draw get their views, the in-flow ones are placed.
+        let toast_up = self.screens.is_open("toast");
+        if self.notifications.is_empty() && toast_up {
+            self.screens.take("toast", cx);
+        } else if !self.notifications.is_empty() && !toast_up {
+            self.screens.open("toast", json!({}), None, None, cx);
+        }
+        self.screens.realize(&self.screen_focus, window, cx);
+        let wanted = self.inflow_wanted(cx);
+        self.let_go_of_stale_hold(&wanted, cx);
+        self.screens.place(wanted.clone(), window, cx);
+        self.browser_engine_frame(&wanted, window, cx);
         // A terminal that attaches takes the keyboard when it first draws; the tab that has it in
-        // the layout keeps it.
-        if self.palette.is_none() && self.settings.is_none() {
+        // the layout keeps it. A modal screen has the keyboard while it is up.
+        if self.screens.top_modal().is_none() && self.keyboard_held.is_none() {
             let peeked = self
                 .peek
                 .as_ref()
@@ -2349,16 +4950,31 @@ impl gpui::Render for Workspace {
                 .and_then(|pane| pane.view.as_ref());
             if let Some(view) = peeked.or_else(|| self.terminal()) {
                 let handle = view.focus_handle(cx);
+                self.given_keyboard = Some(handle.downgrade());
                 if !handle.is_focused(window) {
                     window.defer(cx, move |window, cx| handle.focus(window, cx));
                 }
+            } else if let Some(gone) = self.given_keyboard.take().and_then(|h| h.upgrade()) {
+                // No terminal on screen: the one that had the keyboard lets go of it, as a page's
+                // removed element does, and the window keeps it so its keys still work.
+                if gone.is_focused(window) {
+                    let root = self.root_focus.clone();
+                    window.defer(cx, move |window, cx| root.focus(window, cx));
+                }
             }
+        } else if self.screens.top_modal().is_some() && window.focused(cx).is_none() {
+            // A press on a modal mod's background lets go of the keyboard; the screen's layer
+            // takes it back, so Escape still reaches the window.
+            let handle = self.screen_focus.clone();
+            window.defer(cx, move |window, cx| handle.focus(window, cx));
         }
         // Every kept tab stays attached; the ones not on screen are told so, which ends their
         // focus and their redraws until their tab comes back. Any change to the layout (a tab
         // switch, a close, a zoom, a split) ends here.
         let shown = self.tabs.shown();
         let room = self.room.get();
+        // Every pane on screen draws its box afresh below.
+        self.drop_boxes.borrow_mut().panes.clear();
         // A blank session's choices follow the computer's launch list as it arrives.
         let choosing: Vec<_> = self
             .panes
@@ -2374,6 +4990,10 @@ impl gpui::Render for Workspace {
             let Some(view) = &pane.view else { continue };
             let on_screen = shown.contains(id) || self.peek.as_ref() == Some(id);
             view.update(cx, |view, cx| view.set_visible(on_screen, cx));
+            // A terminal shown in the active window is sized by it.
+            if on_screen && window.is_window_active() {
+                view.update(cx, |view, _| view.window_active(true));
+            }
             if on_screen {
                 pane.settle.reset();
             } else if let Some(room) = room {
@@ -2389,30 +5009,222 @@ impl gpui::Render for Workspace {
             let sidebar = self.sidebar.read(cx);
             (sidebar.visible(), sidebar.needs_you())
         };
-        let sidebar = if visible {
-            self.sidebar.clone().into_any_element()
+        self.viewport_width = f32::from(window.viewport_size().width);
+        let tokens = self.tokens(cx);
+        let this = cx.entity();
+        let inset = if cfg!(target_os = "macos") {
+            TOGGLE_INSET_MAC
         } else {
-            // Hidden, the sidebar leaves a control that shows it, with the count that needs you.
-            let toggle = self.sidebar.clone();
-            div()
-                .id("show-sidebar")
-                .cursor_pointer()
-                .p_2()
-                .text_xs()
-                .text_color(rgb(DIM_COLOR))
-                .child(if needs > 0 {
-                    format!("Sidebar · {needs}")
-                } else {
-                    "Sidebar".to_string()
+            TOGGLE_INSET
+        };
+        let toggle_sidebar = {
+            let sidebar = self.sidebar.clone();
+            move |_: &mut Window, cx: &mut App| {
+                sidebar.update(cx, |sidebar, cx| {
+                    sidebar.run_action("global.sidebar", cx);
                 })
-                .on_click(move |_, _, cx| {
-                    toggle.update(cx, |sidebar, cx| {
-                        sidebar.run_action("global.sidebar", cx);
+            }
+        };
+        let toggle_drawer = {
+            let this = this.clone();
+            move |_: &mut Window, cx: &mut App| {
+                this.update(cx, |this, cx| {
+                    this.chrome.toggle_drawer();
+                    cx.notify();
+                })
+            }
+        };
+        let sidebar_card = visible.then(|| {
+            let body = if let Some(view) = self.screens.inflow("sidebar") {
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .child(view)
+                    .into_any_element()
+            } else {
+                // The stock `sidebar` mod draws the sidebar; without it its place says why.
+                let why = if screens::mods(cx).is_none() {
+                    "Mods are off in this window, so nothing draws the sidebar."
+                } else {
+                    "No mod draws the sidebar. The stock one is restored when the app starts."
+                };
+                div()
+                    .id("sidebar")
+                    .flex_1()
+                    .min_h_0()
+                    .p_3()
+                    .child(hint(why))
+                    .into_any_element()
+            };
+            shell::card(tokens)
+                .id("sidebar-card")
+                .flex_none()
+                .w(px(self.chrome.sidebar()))
+                .child(shell::drags_window(shell::head().pl(px(inset))).child(
+                    shell::sidebar_toggle(tokens, false, needs, toggle_sidebar.clone()),
+                ))
+                .child(body)
+                .child(shell::round_corners(tokens.backdrop))
+        });
+        let sidebar_handle = visible.then(|| {
+            let held = self
+                .column_drag
+                .as_ref()
+                .is_some_and(|d| d.column == Column::Sidebar);
+            shell::resize_handle(
+                "resize-sidebar",
+                held,
+                tokens,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    this.press_column(Column::Sidebar, event, cx)
+                }),
+            )
+        });
+        let tools = self.chrome.tools();
+        let mut drawer_browser = (tools == Some(shell::Tools::Browser))
+            .then(|| self.drawer_browser(cx))
+            .flatten();
+        let drawer_has_page = drawer_browser.is_some();
+        let drawer_card = tools.map(|tab| {
+            let width = self
+                .chrome
+                .tools_width(self.viewport_width, self.shown_sidebar(cx));
+            let tabs = shell::Tools::ALL.into_iter().map(|each| {
+                let this = this.clone();
+                shell::tools_tab(each, each == tab, tokens, move |_, cx| {
+                    this.update(cx, |this, cx| {
+                        this.chrome.set_tools(Some(each));
+                        cx.notify();
                     })
                 })
-                .into_any_element()
+            });
+            shell::card(tokens)
+                .id("tools-card")
+                .flex_none()
+                .w(px(width))
+                .child(
+                    shell::drags_window(shell::head())
+                        .justify_between()
+                        .gap_2()
+                        .px_2()
+                        .child(div().flex().items_center().gap(px(2.)).children(tabs))
+                        .child(shell::drawer_toggle(tokens, toggle_drawer.clone())),
+                )
+                .children(
+                    drawer_browser
+                        .take()
+                        .map(|page| div().flex_1().min_h_0().child(page).into_any_element()),
+                )
+                .when(!drawer_has_page, |card| {
+                    card.child(match (tab, self.screens.inflow("files#drawer")) {
+                        (shell::Tools::Files, Some(explorer)) => div()
+                            .flex_1()
+                            .min_h_0()
+                            .flex()
+                            .flex_col()
+                            .child(explorer)
+                            .into_any_element(),
+                        (shell::Tools::Git, _) => match self.drawer_review() {
+                            Some(review) => review,
+                            None => self.empty_tools_body(tokens),
+                        },
+                        _ => self.empty_tools_body(tokens),
+                    })
+                })
+                .child(shell::round_corners(tokens.backdrop))
+        });
+        let drawer_handle = tools.map(|_| {
+            let held = self
+                .column_drag
+                .as_ref()
+                .is_some_and(|d| d.column == Column::Drawer);
+            shell::resize_handle(
+                "resize-tools",
+                held,
+                tokens,
+                cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                    this.press_column(Column::Drawer, event, cx)
+                }),
+            )
+        });
+        // The tab strip heads the main card, with or without a session open.
+        let bar = match self.screens.inflow("tabs") {
+            Some(view) => {
+                let boxes = self.drop_boxes.clone();
+                let measure = canvas(
+                    move |bounds, _, _| boxes.borrow_mut().strip = Some(bounds),
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full();
+                // The strip's empty space drags the window (the web's `data-tauri-drag-region`);
+                // a tab, its controls and anything else a mod handles take their own presses.
+                shell::drags_window(div().relative().flex_1().min_w_0().h_full())
+                    .child(view)
+                    .child(measure)
+                    .into_any_element()
+            }
+            // The stock `tabs` mod draws the strip; without it its place says why.
+            None => div()
+                .id("tab-strip-missing")
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .px_2()
+                .flex()
+                .items_center()
+                .child(hint(if screens::mods(cx).is_none() {
+                    "Mods are off in this window, so nothing draws the tab strip."
+                } else {
+                    "No mod draws the tab strip. The stock one is restored when the app starts."
+                }))
+                .into_any_element(),
         };
-        let mut area = div().relative().flex().flex_col().flex_1().min_w_0();
+        let mut main_head = shell::head();
+        if !visible {
+            // With the sidebar closed, its toggle (and the traffic lights' room) heads the main card.
+            main_head = main_head.child(
+                shell::drags_window(
+                    div()
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .h_full()
+                        .pl(px(inset))
+                        .pr(px(TOGGLE_AFTER)),
+                )
+                .child(shell::sidebar_toggle(
+                    tokens,
+                    true,
+                    needs,
+                    toggle_sidebar.clone(),
+                )),
+            );
+        }
+        main_head = main_head.child(bar);
+        if tools.is_none() {
+            main_head = main_head.child(
+                shell::drags_window(
+                    div()
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .h_full()
+                        .pl(px(4.))
+                        .pr(px(8.)),
+                )
+                .child(shell::drawer_toggle(tokens, toggle_drawer.clone())),
+            );
+        }
+        let mut area = shell::card(tokens)
+            .id("main-card")
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .child(main_head);
         match self.tabs.visible() {
             Some(node) => {
                 let split = matches!(node, Node::Split { .. });
@@ -2431,7 +5243,7 @@ impl gpui::Render for Workspace {
                 )
                 .absolute()
                 .size_full();
-                area = area.child(self.tab_bar(cx)).child(
+                area = area.child(
                     div()
                         .relative()
                         .flex_1()
@@ -2441,25 +5253,42 @@ impl gpui::Render for Workspace {
                         .child(self.node(&node, focused.as_deref(), split, cx)),
                 );
             }
+            // The stock `start` mod draws what the main area shows with nothing open; without it
+            // its place says why.
             None => {
-                area = area.items_center().justify_center().child(
-                    div()
+                let start = match self.screens.inflow("start") {
+                    Some(view) => div()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .child(view)
+                        .into_any_element(),
+                    None => div()
+                        .id("start-missing")
+                        .flex_1()
                         .flex()
-                        .flex_col()
                         .items_center()
-                        .gap_2()
-                        .text_sm()
-                        .text_color(rgb(DIM_COLOR))
-                        .child("Select a session")
-                        .child(self.bar_link(
-                            "open-palette",
-                            "Commands",
-                            cx.listener(|this, _, _, cx| this.toggle_palette(cx)),
-                        )),
-                );
+                        .justify_center()
+                        .child(hint(if screens::mods(cx).is_none() {
+                            "Mods are off in this window, so nothing draws the start page."
+                        } else {
+                            "No mod draws the start page. The stock one is restored when the app starts."
+                        }))
+                        .into_any_element(),
+                };
+                area = area.child(start);
             }
         }
-        if let Some(notice) = &self.notice {
+        // Below the cards, on the backdrop, the whole window wide.
+        let status = self.screens.inflow("status").map(|view| {
+            let (_, height) = self.screens.size("status", cx);
+            div().flex_none().w_full().h(px(height)).child(view)
+        });
+        let notice = self
+            .notice
+            .clone()
+            .or_else(|| self.sidebar.read(cx).notice().map(str::to_string));
+        if let Some(notice) = notice {
             area = area.child(
                 div()
                     .absolute()
@@ -2467,36 +5296,168 @@ impl gpui::Render for Workspace {
                     .left_3()
                     .text_xs()
                     .text_color(rgb(DIM_COLOR))
-                    .child(notice.clone()),
+                    .child(notice),
             );
         }
-        let overlays = self
-            .palette_view(cx)
-            .or_else(|| self.settings_view(cx))
-            .into_iter()
-            .chain(self.peek_view(cx))
-            .chain(self.toast_view(cx));
+        let floating: Vec<AnyElement> = self
+            .screens
+            .floating
+            .iter()
+            .filter_map(|open| self.floating_view(open))
+            .collect();
+        let overlays = self.peek_view(cx).into_iter();
+        // While a tab is pressed the window follows the pointer wherever it is, before anything
+        // under it: what is under a drag does not react to it. While a press a mod follows lasts,
+        // the pointer is forwarded to that mod, and only then.
+        // Painted after every page's slot: the pages follow what was drawn.
+        let pages_follow = self.browser_reconcile();
+        let follow = (self.drag.is_some() || self.follow.is_some()).then(|| {
+            let this = cx.entity().downgrade();
+            canvas(
+                |_, _, _| {},
+                move |_, _, window, _| {
+                    let moved = this.clone();
+                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                        if phase != DispatchPhase::Capture {
+                            return;
+                        }
+                        let _ = moved.update(cx, |this, cx| {
+                            if event.pressed_button == Some(MouseButton::Left) {
+                                this.drag_moved(event.position, cx);
+                                this.forward_pointer("move", event.position, cx);
+                            } else {
+                                // The release was not seen: nothing changes.
+                                this.drag_ended(false, cx);
+                                this.forward_pointer("cancel", event.position, cx);
+                            }
+                        });
+                    });
+                    // A new press while one is still followed (its release was never seen): the
+                    // followed one ends with nothing changed.
+                    let pressed = this.clone();
+                    window.on_mouse_event(move |_: &MouseDownEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Capture {
+                            let _ = pressed.update(cx, |this, cx| this.cancel_follow(cx));
+                        }
+                    });
+                    let released = this.clone();
+                    window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                        if phase != DispatchPhase::Capture || event.button != MouseButton::Left {
+                            return;
+                        }
+                        let dragged = released
+                            .update(cx, |this, cx| {
+                                this.forward_pointer("up", event.position, cx);
+                                this.drag_ended(true, cx)
+                            })
+                            .unwrap_or(false);
+                        // The release after a drag is not a click on what is under it.
+                        if dragged {
+                            cx.stop_propagation();
+                        }
+                    });
+                },
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+        });
+        // A handle held: the window follows the pointer wherever it is, until it is let go.
+        let columns = self.column_drag.is_some().then(|| {
+            let this = cx.entity().downgrade();
+            canvas(
+                |_, _, _| {},
+                move |_, _, window, _| {
+                    let moved = this.clone();
+                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                        if phase != DispatchPhase::Capture {
+                            return;
+                        }
+                        let _ = moved.update(cx, |this, cx| {
+                            if event.pressed_button == Some(MouseButton::Left) {
+                                this.drag_column(event.position.x, cx);
+                            } else {
+                                this.end_column_drag(cx);
+                            }
+                        });
+                    });
+                    let released = this.clone();
+                    window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                            let _ = released.update(cx, |this, cx| this.end_column_drag(cx));
+                        }
+                    });
+                },
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+        });
         div()
             .relative()
             .flex()
+            .flex_col()
             .size_full()
-            .bg(rgb(MAIN_BG))
+            .bg(tokens.backdrop)
             .key_context("Workspace")
+            .track_focus(&self.root_focus)
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.key(&event.keystroke, window, cx) {
                     cx.stop_propagation();
                 }
             }))
-            .child(sidebar)
-            .child(area.children(overlays))
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .px(px(GUTTER))
+                    .pt(px(GUTTER))
+                    .children(sidebar_card)
+                    .children(sidebar_handle)
+                    .child(
+                        area.children(overlays)
+                            .child(shell::round_corners(tokens.backdrop)),
+                    )
+                    .children(drawer_handle)
+                    .children(drawer_card),
+            )
+            .children(status)
+            // The gutter above the cards is title bar too.
+            .child(shell::drags_window(
+                div().absolute().top_0().left_0().w_full().h(px(GUTTER)),
+            ))
             // Over the whole window: it opens where the pointer was, in window coordinates.
-            .children(self.menu_view(cx))
+            .children(floating)
+            .children(follow)
+            .children(columns)
+            .children(pages_follow)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Settle;
+    use super::{program_in, Settle};
+    use serde_json::json;
+
+    #[test]
+    fn a_program_is_quoted_as_the_web_quotes_it() {
+        assert_eq!(
+            program_in(&json!(["claude", "--model", "x"]), Some("fix it's bug")),
+            Ok("'claude' '--model' 'x' 'fix it'\\''s bug'".to_string())
+        );
+        assert_eq!(program_in(&json!(["sh"]), Some("")), Ok("'sh'".to_string()));
+        for bad in [
+            json!([]),
+            json!("claude"),
+            json!(["claude", ""]),
+            json!([1]),
+        ] {
+            assert!(program_in(&bad, None).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn a_size_is_applied_once_it_holds_for_two_draws() {

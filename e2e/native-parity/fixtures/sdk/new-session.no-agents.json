@@ -1,0 +1,30 @@
+{
+  "props": {
+    "hostId": "local",
+    "projectCwds": [],
+    "fixedCwd": "/Users/dev/code/perch",
+    "anchorRect": {
+      "x": 1041,
+      "y": 14,
+      "width": 28,
+      "height": 32
+    },
+    "extras": [
+      {
+        "id": "browser",
+        "label": "New browser"
+      },
+      {
+        "id": "file",
+        "label": "New file"
+      }
+    ]
+  },
+  "agentChoices": {
+    "connected": true,
+    "discovery": true,
+    "choices": [],
+    "lastChoice": "claude",
+    "state": "ready"
+  }
+}

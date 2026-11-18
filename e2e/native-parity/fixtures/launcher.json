@@ -1,0 +1,286 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "launcher",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. The centred, keyboard-only New session picker (stock-ui/launcher; Cmd+Shift+T or the sidebar's New session). It first lists the host's projects (and Add project and No project), then, after one is picked, that project's agents and the browser and file rows. Props are `LauncherProps` as components/NewSessionDialog.tsx builds them (the host's non-Quickchat projects with the workspace a tab would land in; `activeProjectId` is the project on screen, which starts highlighted); callbacks are no-ops. Which stage is shown, the filter text and the highlight are the screen's own state, so states reach them with `steps` (click a row = Enter on it; type into the filter). The agents come from @perch/sdk `useAgentChoices(hostId)` over the store's `agentManifestsByHost` (recorded in sdk.agentChoices). The panel is `min(480px, 100vw - 2rem)` wide, at most `min(420px, 100dvh - 16vh - 2rem)` high, 12vh down from the top.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {
+    "serverInfo": {
+      "type": "server.info",
+      "hostname": "studio",
+      "isSsh": false,
+      "platform": "macOS",
+      "capabilities": [
+        "workspace.snapshot",
+        "agent.manifest.list"
+      ]
+    },
+    "agentManifestsByHost": {
+      "local": {
+        "state": "ready",
+        "manifests": [
+          {
+            "id": "claude",
+            "displayName": "Claude",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true,
+            "isDefault": true
+          },
+          {
+            "id": "codex",
+            "displayName": "Codex",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true
+          },
+          {
+            "id": "pi",
+            "displayName": "Pi",
+            "supportedModes": [
+              "cli"
+            ],
+            "resumability": "none",
+            "capabilities": [
+              "interactiveTerminal"
+            ],
+            "statusDetection": "hooks",
+            "available": true,
+            "enabled": true
+          }
+        ]
+      }
+    }
+  },
+  "props": {
+    "hostId": "local",
+    "projects": [
+      {
+        "id": "p-perch",
+        "name": "perch",
+        "path": "/Users/dev/code/perch",
+        "workspace": {
+          "id": "w-perch-main",
+          "path": "/Users/dev/code/perch"
+        }
+      },
+      {
+        "id": "p-api",
+        "name": "api-server",
+        "path": "/Users/dev/code/api-server",
+        "workspace": {
+          "id": "w-api-main",
+          "path": "/Users/dev/code/api-server"
+        }
+      },
+      {
+        "id": "p-notes",
+        "name": "notes",
+        "path": "/Users/dev/notes",
+        "workspace": {
+          "id": "w-notes",
+          "path": "/Users/dev/notes"
+        }
+      },
+      {
+        "id": "p-site",
+        "name": "scratch-site",
+        "path": "/Users/dev/code/scratch-site",
+        "workspace": {
+          "id": "w-site",
+          "path": "/Users/dev/code/scratch-site"
+        }
+      }
+    ],
+    "activeProjectId": "p-perch"
+  },
+  "states": [
+    {
+      "id": "projects",
+      "title": "Opened: 'New session in...', the projects with their paths, Add project and No project (muted, with its Quickchat note); the project on screen is highlighted; keys 1 to 6"
+    },
+    {
+      "id": "long-path",
+      "title": "Projects with paths longer than the row: the name stays whole on one line and the path is cut with an ellipsis at its end",
+      "props": {
+        "projects": [
+          {
+            "id": "p-perch",
+            "name": "perch",
+            "path": "/Users/dev/code/clients/a-very-long-organisation-name/services/payments-gateway-production-checkout/perch",
+            "workspace": {
+              "id": "w-perch-main",
+              "path": "/Users/dev/code/clients/a-very-long-organisation-name/services/payments-gateway-production-checkout/perch"
+            }
+          },
+          {
+            "id": "p-api",
+            "name": "api-server",
+            "path": "/Users/dev/code/clients/a-very-long-organisation-name/api-server",
+            "workspace": {
+              "id": "w-api-main",
+              "path": "/Users/dev/code/clients/a-very-long-organisation-name/api-server"
+            }
+          },
+          {
+            "id": "p-notes",
+            "name": "notes",
+            "path": "/Users/dev/notes",
+            "workspace": {
+              "id": "w-notes",
+              "path": "/Users/dev/notes"
+            }
+          }
+        ],
+        "activeProjectId": "p-perch"
+      }
+    },
+    {
+      "id": "projects-filtered",
+      "title": "'api' typed: the list narrows to the rows whose name or path contain it, the key numbers are gone",
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"new-session-filter\"]",
+            "text": "api"
+          }
+        }
+      ]
+    },
+    {
+      "id": "no-match",
+      "title": "A filter nothing matches: 'No match.'",
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"new-session-filter\"]",
+            "text": "zzzq"
+          }
+        }
+      ]
+    },
+    {
+      "id": "no-projects",
+      "title": "A host with no projects yet: only Add project and No project",
+      "props": {
+        "projects": [],
+        "activeProjectId": null
+      }
+    },
+    {
+      "id": "agents",
+      "title": "A project picked: 'New in perch', its agents with keys 1 to 3, New browser, New file, then Manage agents (muted)",
+      "steps": [
+        {
+          "click": "[data-testid=\"new-session-row-p-perch\"]"
+        }
+      ]
+    },
+    {
+      "id": "agents-filtered",
+      "title": "'co' typed in the agent stage: Codex only",
+      "steps": [
+        {
+          "click": "[data-testid=\"new-session-row-p-perch\"]"
+        },
+        {
+          "type": {
+            "selector": "[data-testid=\"new-session-filter\"]",
+            "text": "co"
+          }
+        }
+      ]
+    },
+    {
+      "id": "no-project-agents",
+      "title": "'No project' picked (a Quickchat): the agents and Manage agents, no browser or file row (no workspace)",
+      "steps": [
+        {
+          "click": "[data-testid=\"new-session-row-none\"]"
+        }
+      ]
+    },
+    {
+      "id": "agents-loading",
+      "title": "The host's agents are still being listed: the agent rows are disabled (40%) and 'Checking agents...' shows",
+      "patch": {
+        "agentManifestsByHost": {
+          "local": {
+            "state": "loading",
+            "manifests": [
+              {
+                "id": "claude",
+                "displayName": "Claude",
+                "supportedModes": [
+                  "cli"
+                ],
+                "resumability": "none",
+                "capabilities": [
+                  "interactiveTerminal"
+                ],
+                "statusDetection": "hooks",
+                "available": true,
+                "enabled": true,
+                "isDefault": true
+              },
+              {
+                "id": "codex",
+                "displayName": "Codex",
+                "supportedModes": [
+                  "cli"
+                ],
+                "resumability": "none",
+                "capabilities": [
+                  "interactiveTerminal"
+                ],
+                "statusDetection": "hooks",
+                "available": true,
+                "enabled": true
+              },
+              {
+                "id": "pi",
+                "displayName": "Pi",
+                "supportedModes": [
+                  "cli"
+                ],
+                "resumability": "none",
+                "capabilities": [
+                  "interactiveTerminal"
+                ],
+                "statusDetection": "hooks",
+                "available": true,
+                "enabled": true
+              }
+            ]
+          }
+        }
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"new-session-row-p-perch\"]"
+        }
+      ]
+    }
+  ]
+}

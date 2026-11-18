@@ -734,6 +734,8 @@ pub async fn run(
     if let Err(error) = purge {
         tracing::warn!("could not delete archived sessions and projects: {error}");
     }
+    // A sub-session stopped before this start closes now, as it would have when it stopped.
+    sub_sessions::close_stopped_children(&state);
     // A claimed prompt or review packet may have crossed the dispatch barrier
     // immediately before a prior process exited. Preserve it as explicitly
     // unconfirmed so reconnect/reload paths cannot launch a duplicate.
@@ -793,6 +795,7 @@ pub async fn run(
 
     spawn_git_poll_task(state.clone());
     spawn_agent_idle_sweep_task(state.clone());
+    spawn_daemon_health_task(state.clone());
     spawn_agent_lifecycle_task(state.clone());
     spawn_agent_turn_state_task(state.clone(), open_turns);
     tokio::spawn(agent_mail::run_deliveries(state.clone()));
@@ -1796,6 +1799,43 @@ fn spawn_agent_hibernation_task(state: AppState) {
     });
 }
 
+/// Every 15 s, ask the terminal host for its health. A host that does not
+/// answer within 10 s, or reports stuck locks, is announced to every client
+/// as unhealthy (and its recovery likewise). It is never restarted or
+/// replaced over it: unknown runtime state is not exit.
+fn spawn_daemon_health_task(state: AppState) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(15));
+        let mut was_healthy = true;
+        loop {
+            tick.tick().await;
+            let probe = tokio::task::spawn_blocking(crate::daemon::health_problem);
+            let problem =
+                match tokio::time::timeout(std::time::Duration::from_secs(10), probe).await {
+                    Ok(Ok(problem)) => problem,
+                    Ok(Err(_)) => continue, // the probe failed itself: nothing learned
+                    Err(_) => Some("it did not answer a health check within 10 s".into()),
+                };
+            crate::daemon::set_problem(problem.clone());
+            if problem.is_none() == was_healthy {
+                continue;
+            }
+            was_healthy = problem.is_none();
+            match &problem {
+                Some(problem) => tracing::error!("terminal host unhealthy: {problem}"),
+                None => tracing::info!("terminal host healthy again"),
+            }
+            let _ = state
+                .hub
+                .hub_events_tx
+                .send(Arc::new(ServerMessage::DaemonHealth {
+                    healthy: problem.is_none(),
+                    problem,
+                }));
+        }
+    });
+}
+
 fn spawn_agent_idle_sweep_task(state: AppState) {
     tokio::spawn(async move {
         let tick = AGENT_QUIET_THRESHOLD / 4;
@@ -2388,6 +2428,12 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
             .snapshot_revision
             .load(std::sync::atomic::Ordering::SeqCst),
     });
+    if let Some(problem) = crate::daemon::last_problem() {
+        let _ = state.out_tx.send(ServerMessage::DaemonHealth {
+            healthy: false,
+            problem: Some(problem),
+        });
+    }
     let _ = state.out_tx.send(worktree_jobs::jobs_message(&state.app));
     let _ = state
         .out_tx
@@ -2684,6 +2730,7 @@ fn foundation_capabilities() -> Vec<String> {
         "terminal.sharedInput",
         "upload.scp.v1",
         "usage.alert.v1",
+        "daemon.health.v1",
         "context.bridge.v1",
         "terminal.list",
         "terminal.release",

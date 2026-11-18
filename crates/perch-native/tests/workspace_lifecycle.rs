@@ -126,8 +126,17 @@ fn a_shell_that_ended_before_attach(rig: &Rig, h: &mut Harness, id: &str) {
         unreachable!()
     };
     assert!(reason.contains("no longer available"), "{reason}");
-    let note = h.view(id, |v| v.note()).flatten().unwrap();
-    assert!(note.starts_with("Could not open the terminal"), "{note}");
+    // The agent's chip says it is unavailable, with the core's reason and Retry CLI, which
+    // only a click runs.
+    let control = h.view(id, |v| v.agent_control()).unwrap();
+    assert_eq!(control["label"], "Agent unavailable");
+    assert!(
+        control["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("no longer available")),
+        "{control}"
+    );
+    assert_eq!(control["retry"], true);
     // Nothing is retried or started over.
     h.settle();
     assert!(matches!(
@@ -139,14 +148,12 @@ fn a_shell_that_ended_before_attach(rig: &Rig, h: &mut Harness, id: &str) {
         alive_before,
         "no shell was started in its place"
     );
-    // A tab the core never attached has nothing to end over: it closes, and says the session
-    // keeps running.
+    // A tab the core never attached has no connection of its own to end over: the main
+    // connection asks the core to delete the session, as the web does, and the tab goes with it.
     assert!(h.press("cmd-w"));
-    h.wait("the tab to go", |h| h.shown().is_empty());
-    let note = h
-        .ws(|ws, _| ws.notice().map(str::to_owned))
-        .unwrap_or_default();
-    assert!(note.contains("keeps running"), "{note}");
+    // The workspace's other session (listed by the core, so in the strip) is what shows next.
+    h.wait("the tab to go", |h| h.ws(|ws, _| !ws.tabs().contains(id)));
+    h.wait("the session to be gone", |h| h.attention(id).is_none());
 }
 
 /// The core goes away and comes back at another address. The pane keeps its screen and says it is
@@ -212,10 +219,12 @@ fn a_core_that_drops_and_returns(
         "{seen:?}"
     );
     assert!(h.rows(id).contains(&pid_line), "the screen is kept");
-    let note = h.view(id, |v| v.note()).flatten().unwrap_or_default();
-    assert!(
-        note.contains("econnect"),
-        "the note says the window is waiting: {note:?}"
+    let label = h
+        .view(id, |v| v.agent_control()["label"].clone())
+        .unwrap_or_default();
+    assert_eq!(
+        label, "Reconnecting\u{2026}",
+        "the agent's chip says the window is waiting"
     );
     assert!(
         shells(rig).contains(&(pid, true)),
@@ -367,10 +376,15 @@ fn files_and_images_reach_the_core(
         assert!(v.drop_files(std::slice::from_ref(&file), true, cx));
     });
     h.wait("the core's answer", |h| {
-        h.view(&id, |v| v.note().is_some_and(|n| n.contains("SSH host")))
-            .unwrap_or(false)
+        h.view(&id, |v| {
+            v.drop_notice().is_some_and(|n| n.contains("SSH host"))
+        })
+        .unwrap_or(false)
     });
-    let note = h.view(&id, |v| v.note()).flatten().unwrap();
+    let note = h
+        .view(&id, |v| v.drop_notice().map(str::to_string))
+        .flatten()
+        .unwrap();
     assert!(
         note.contains("report 1.txt") && note.contains("disabled, missing"),
         "{note}"
@@ -411,7 +425,8 @@ fn typing_is_shared_but_stopping_is_not(
             .unwrap_or(false)
     });
     assert!(
-        h.view(&id, |v| v.note()).flatten().is_none(),
+        h.view(&id, |v| v.agent_control()["label"].is_null())
+            .unwrap_or(false),
         "nothing to warn about"
     );
 

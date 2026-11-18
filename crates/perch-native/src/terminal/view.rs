@@ -10,10 +10,17 @@
 //!   it, so it always matches what the program draws for.
 //! - Typing, and anything else the program is told (the mouse, answers to its queries, focus),
 //!   needs the input lease.
-//! - A phone can hold the size. Where typing is shared the pane's note then offers the web's two
-//!   choices, "Take back this tab" (the input and the size) and "Take back all tabs" (the window
-//!   takes the size alone of each terminal a phone holds, see [`TerminalEvent::TakeBackAll`]);
-//!   without shared typing it offers Take control.
+//! - A phone can hold the size. Where typing is shared the window draws the web's phone-size
+//!   notice over the pane ([`TerminalView::offers_take_back`]), with its two choices, "Take back
+//!   this tab" (the input and the size) and "Take back all tabs" (the window takes the size alone
+//!   of each terminal a phone holds); without shared typing the agent's chip offers Take control.
+//! - What the pane says about the agent (the chip: "Viewing agent", "Reconnecting…"; Take control,
+//!   Retry CLI; the error line; the exited or sleeping banner with Restart CLI, Resume agent and
+//!   Close session) is the window's `agent-control` screen over the pane, drawn from
+//!   [`TerminalView::agent_control`]. Starting the agent again is only ever a person's click
+//!   ([`TerminalView::restart`]), after the core said the attach failed or the shell ended.
+//! - Find is the view's (the query, the matches, the highlights); its bar is the window's
+//!   `terminal-search` screen over the pane, which [`TerminalEvent::Chrome`] says to draw.
 //! - A dropped connection leaves the screen as it was and says so. It is never taken for the end
 //!   of the shell, and nothing here reattaches, which would start the session again.
 //! - A session the core lists as blank (no provider, nothing ever started in it) has no shell to
@@ -22,13 +29,15 @@
 //!   an attach names as the session's own, so nothing else ever picks one.
 //!
 
+use serde_json::{json, Value};
+
 use super::actions::{Action, Scroll};
 use super::attach::{self, AgentInfo, FromCore, Piece, ToCore};
 use super::clipboard::{self, Clipboard, MemoryClipboard};
 use super::context::{self, Capture};
 use super::fallback;
 use super::graphics::Layer;
-use super::keys::{expects_real_chords, key_bytes_with, option_side_for};
+use super::keys::{expects_real_chords, key_bytes_with, option_side_for, types_only_its_text};
 use super::layout::{self, Fit, Metrics};
 use super::links::{self, Target};
 use super::scroll;
@@ -115,9 +124,9 @@ pub enum TerminalEvent {
     /// window, which sees the session's row, says it is still blank ([`TerminalView::start_with`])
     /// or not ([`TerminalView::refuse_choice`]).
     Chose(String),
-    /// A person chose "Take back all tabs" in the pane's note: the window takes back the size of
-    /// every terminal a phone holds ([`TerminalView::perform`] with [`Action::TakeSize`], on each).
-    TakeBackAll,
+    /// What the window draws over the pane changed: find opened or closed, or a phone began or
+    /// stopped holding the size ([`TerminalView::find_open`], [`TerminalView::offers_take_back`]).
+    Chrome,
 }
 
 impl EventEmitter<TerminalEvent> for TerminalView {}
@@ -280,6 +289,8 @@ pub struct TerminalView {
     /// The pane is not on screen: it holds no focus and draws nothing.
     hidden: bool,
     find: Find,
+    /// See [`Self::phone_holds`].
+    phone_holds: u64,
     _find_timer: Option<Task<()>>,
     clipboard: Rc<dyn Clipboard>,
     /// A left-button drag is selecting text.
@@ -297,7 +308,8 @@ pub struct TerminalView {
     /// The blinking cursor is in its visible half.
     blink_on: bool,
     cursor_blinks: bool,
-    _blink: Task<()>,
+    /// Flips `blink_on`, only while the cursor blinks in a focused pane on screen.
+    blink: Option<Task<()>>,
     /// Lay the pane out afresh once, whatever holds the size: the font changed.
     refit: bool,
     /// The window's zoom: what the font and the padding are multiplied by.
@@ -313,8 +325,16 @@ pub struct TerminalView {
     hosted: bool,
     /// The session and provider this view attaches, kept to attach to again.
     target: Option<(String, String)>,
-    /// A window will attach again after a drop, so the note says it is waiting for the core.
+    /// A window will attach again after a drop, so the agent's chip says it is waiting for the
+    /// core.
     reconnects: bool,
+    /// A take-over this view asked for, until the core answers (the leases change) or the
+    /// connection changes: the web's `pending`.
+    taking: bool,
+    /// The window asked the core for the size as it became active, and has no answer yet.
+    claiming: bool,
+    /// The agent-control props last drawn: a change tells the window ([`TerminalEvent::Chrome`]).
+    drawn_control: Value,
 }
 
 impl TerminalView {
@@ -361,6 +381,7 @@ impl TerminalView {
             marked: None,
             hidden: false,
             find: Find::default(),
+            phone_holds: 0,
             _find_timer: None,
             clipboard: Rc::new(MemoryClipboard::default()),
             selecting: false,
@@ -372,12 +393,7 @@ impl TerminalView {
             epoch: Instant::now(),
             blink_on: true,
             cursor_blinks: false,
-            _blink: cx.spawn(async move |this, cx| loop {
-                cx.background_executor().timer(BLINK_HALF_PERIOD).await;
-                if this.update(cx, |this, cx| this.blink_tick(cx)).is_err() {
-                    return;
-                }
-            }),
+            blink: None,
             cursor_cell: None,
             buttons_down: Vec::new(),
             was_focused: false,
@@ -385,6 +401,9 @@ impl TerminalView {
             hosted: false,
             target: None,
             reconnects: false,
+            taking: false,
+            claiming: false,
+            drawn_control: Value::Null,
         }
     }
 
@@ -534,9 +553,24 @@ impl TerminalView {
     /// refusal is a failure to attach, never an exit. False, doing nothing, unless the view is
     /// disconnected from a session it attached.
     pub fn reattach(&mut self, core: Core, cx: &mut Context<Self>) -> bool {
-        let (Status::Disconnected(_), Some((session_id, provider))) =
-            (&self.status, self.target.clone())
-        else {
+        if !matches!(self.status, Status::Disconnected(_)) {
+            return false;
+        }
+        self.attach_again(core, cx)
+    }
+
+    /// Starts the agent again at a person's request, as the web's Retry CLI, Restart CLI and
+    /// Resume agent do: only once the core said it could not attach or the shell ended, never on
+    /// a drop, whose shell is not known to have ended. False otherwise.
+    pub fn restart(&mut self, core: Core, cx: &mut Context<Self>) -> bool {
+        if !matches!(self.status, Status::Failed(_) | Status::Exited(_)) {
+            return false;
+        }
+        self.attach_again(core, cx)
+    }
+
+    fn attach_again(&mut self, core: Core, cx: &mut Context<Self>) -> bool {
+        let Some((session_id, provider)) = self.target.clone() else {
             return false;
         };
         let (cols, rows) = self.fitted.map_or(self.vt.size(), |f| (f.cols, f.rows));
@@ -640,6 +674,29 @@ impl TerminalView {
         }
     }
 
+    /// Runs the blink timer while the cursor blinks in a focused pane on screen, and stops it
+    /// (the cursor stays on) otherwise, so an idle terminal wakes nothing.
+    fn sync_blink(&mut self, cx: &mut Context<Self>) {
+        if !(self.cursor_blinks && self.was_focused && !self.hidden) {
+            self.blink = None;
+            self.blink_on = true;
+            return;
+        }
+        if self.blink.is_none() {
+            self.blink = Some(cx.spawn(async move |this, cx| loop {
+                cx.background_executor().timer(BLINK_HALF_PERIOD).await;
+                if this.update(cx, |this, cx| this.blink_tick(cx)).is_err() {
+                    return;
+                }
+            }));
+        }
+    }
+
+    /// Whether the blink timer runs (for tests that check an idle pane wakes nothing).
+    pub fn blinking(&self) -> bool {
+        self.blink.is_some()
+    }
+
     /// The grid the screen is at: the size the core last gave it.
     pub fn grid_size(&self) -> (u16, u16) {
         self.vt.size()
@@ -721,6 +778,7 @@ impl TerminalView {
 
     fn set_status(&mut self, status: Status, cx: &mut Context<Self>) {
         if self.status != status {
+            self.taking = false;
             self.status = status.clone();
             cx.emit(TerminalEvent::Status(status));
             cx.notify();
@@ -746,9 +804,13 @@ impl TerminalView {
                 resize,
                 agent,
             } => {
+                let offered = self.offers_take_back();
                 self.input_lease = input;
                 self.resize_lease = resize;
                 self.agent = agent;
+                // A take asked on the connection before this one has no answer coming: the window
+                // asks again on this one.
+                self.claiming = false;
                 // The size is told once after attaching, as the web terminal does, whatever
                 // the fit looks like.
                 self.requested = None;
@@ -761,6 +823,7 @@ impl TerminalView {
                 self.backlog.push_back(Work::Replay(false));
                 self.flush(cx);
                 self.set_status(Status::Live, cx);
+                self.holds_changed(offered, cx);
             }
             FromCore::Output(data) => self.output(&data, cx),
             FromCore::Profile(profile) => self.apply_core(Some(profile), None, cx),
@@ -789,9 +852,13 @@ impl TerminalView {
                         self.send(ToCore::Resize(fit.cols, fit.rows));
                     }
                 }
+                let offered = self.offers_take_back();
+                self.taking = false;
+                self.claiming = false;
                 self.input_lease = agent.input;
                 self.resize_lease = agent.resize;
                 self.agent = Some(agent);
+                self.holds_changed(offered, cx);
                 cx.notify();
             }
             FromCore::Exited(code) => self.set_status(Status::Exited(code), cx),
@@ -807,6 +874,7 @@ impl TerminalView {
                 // The screen stays; the shell is not known to have ended.
                 self.input_lease = false;
                 self.resize_lease = false;
+                self.claiming = false;
                 self.agent = None;
                 self.set_status(Status::Disconnected(reason), cx);
             }
@@ -1005,8 +1073,19 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// A key press. Returns whether the terminal took it; the keyboard path of the window calls
-    /// this, and so do tests.
+    /// Whether the window leaves `event` to the system's text input ([`EntityInputHandler`]),
+    /// which types the characters the key event carries: a plain key that only types its text
+    /// ([`types_only_its_text`]), while nothing else here (the launch choices, the find field)
+    /// holds the keys.
+    pub fn leaves_to_text_input(&mut self, event: &KeyDownEvent) -> bool {
+        self.choice.is_none()
+            && !self.find.open
+            && types_only_its_text(&mut self.vt, &event.keystroke, event.is_held)
+    }
+
+    /// A key press, as the terminal encodes it. Returns whether the terminal took it. The window
+    /// asks [`Self::leaves_to_text_input`] first and calls this for every other key; tests call
+    /// it directly.
     pub fn key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
         self.keystroke(&event.keystroke, event.is_held, cx)
     }
@@ -1107,6 +1186,21 @@ impl TerminalView {
     /// Whether the Context Bridge is offered for this terminal's selection.
     pub fn can_ask_agent(&self) -> bool {
         self.place.available() && self.vt.has_selection()
+    }
+
+    /// Puts `frame` (a Context Bridge send) to the core on this terminal's own connection, the
+    /// one that holds the agent's input lease. None when it holds none (or is not live): another
+    /// connection's request is then the core's to refuse or allow.
+    pub fn request(
+        &self,
+        frame: serde_json::Value,
+    ) -> Option<futures::channel::oneshot::Receiver<Result<serde_json::Value, String>>> {
+        if !self.can_stop() {
+            return None;
+        }
+        let (reply, answer) = attach::Reply::new();
+        self.send(ToCore::Request { frame, reply });
+        Some(answer)
     }
 
     /// The core this terminal is attached to, for preparing and sending a context packet.
@@ -1548,6 +1642,7 @@ impl TerminalView {
                 }
             }
         }));
+        cx.emit(TerminalEvent::Chrome);
         cx.notify();
     }
 
@@ -1556,7 +1651,25 @@ impl TerminalView {
         self.find.open = false;
         self._find_timer = None;
         self.vt.search("");
+        cx.emit(TerminalEvent::Chrome);
         cx.notify();
+    }
+
+    /// How many times a phone began holding this terminal's size where it can be taken back: a
+    /// new hold shows the phone-size notice again after it was folded (the web's `generation`).
+    pub fn phone_holds(&self) -> u64 {
+        self.phone_holds
+    }
+
+    /// Counts a phone's new hold on the size and tells the window when the notice comes or goes.
+    fn holds_changed(&mut self, offered: bool, cx: &mut Context<Self>) {
+        let now = self.offers_take_back();
+        if now != offered {
+            if now {
+                self.phone_holds += 1;
+            }
+            cx.emit(TerminalEvent::Chrome);
+        }
     }
 
     /// Replace the query.
@@ -1841,7 +1954,25 @@ impl TerminalView {
                 self.send(ToCore::Input(b"\x1b[O".to_vec()));
             }
         }
+        self.sync_blink(cx);
         cx.notify();
+    }
+
+    /// The window became active or not. The active window sizes the terminals it shows, taking
+    /// the size from another window on this computer (never from a phone, which the person takes
+    /// back on purpose); an inactive one gives the size up, so the other window sizes them. The
+    /// core's resize lease keeps one owner throughout.
+    pub fn window_active(&mut self, active: bool) {
+        if self.to_core.is_none() || self.status != Status::Live {
+            return;
+        }
+        let phone = self.agent.is_some_and(|a| a.resize_on_device);
+        if active && !self.hidden && !self.resize_lease && !phone && !self.claiming {
+            self.claiming = true;
+            self.send(ToCore::TakeSize);
+        } else if !active && self.resize_lease {
+            self.send(ToCore::GiveSize);
+        }
     }
 
     /// Scale the text and the padding by `factor` (the window's zoom), refitting the grid.
@@ -2001,6 +2132,7 @@ impl TerminalView {
         let frame_cursor_cell = frame.cursor_cell;
         self.cursor_cell = frame.cursor_cell;
         self.cursor_blinks = frame.cursor.is_some_and(|c| c.blink);
+        self.sync_blink(cx);
         Painted {
             frame,
             metrics: fit.metrics,
@@ -2172,52 +2304,88 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// What the pane says about the session when it is not simply showing the shell, in the
-    /// words the web's agent chip uses.
-    pub fn note(&self) -> Option<String> {
-        if let Some(reason) = &self.drop_notice {
-            return Some(reason.clone());
-        }
-        if self.choice.is_some() {
-            return Some("Nothing is running in this session. Choose what to start.".into());
-        }
+    /// What the file drop or paste last said on the pane, until the next key: what is being
+    /// sent, or why something was not (the web's `fileDrop` notice).
+    pub fn drop_notice(&self) -> Option<&str> {
+        self.drop_notice.as_deref()
+    }
+
+    /// A take-over this view asked for that the core has not answered yet.
+    pub fn taking(&self) -> bool {
+        self.taking
+    }
+
+    /// The props of the web's `agent-control` screen over this terminal, as
+    /// `PersistentAgentTerminal` works them out on a desktop, with the actions as flags (`retry`,
+    /// `control`, `ended.close`) that the screen's mod turns into the window's commands. Empty
+    /// (no `label`, `error` or `ended`) when there is nothing to draw. Where the native view
+    /// knows more than the web, it says only what is known: a drop the window will not
+    /// reattach is "Disconnected", not "Reconnecting…".
+    pub fn agent_control(&self) -> Value {
         let sleeping = self.agent.is_some_and(|a| a.state == AgentState::Sleeping);
-        match &self.status {
-            Status::Detached => Some("Not connected".into()),
-            Status::Connecting => Some("Connecting".into()),
-            Status::Live => {
-                let Some(agent) = self.agent else {
-                    return (!self.can_type()).then(|| "Viewing agent".into());
-                };
-                if agent.state == AgentState::Reconnecting {
-                    Some("Reconnecting\u{2026}".into())
-                } else if agent.resize_on_device && !agent.resize {
-                    // The web's notice, whose choices ([`Self::offers_take_back`]) stand in for
-                    // Take control.
-                    Some(if self.shared_input() {
-                        "Your phone is sizing this terminal".into()
-                    } else {
-                        "A phone sets this terminal's size".into()
-                    })
-                } else if self.can_type() {
-                    None
-                } else if agent.input_elsewhere {
-                    Some("Another view is typing in this agent".into())
-                } else {
-                    Some("Viewing agent".into())
-                }
+        let reconnecting = self
+            .agent
+            .is_some_and(|a| a.state == AgentState::Reconnecting);
+        let dropped = matches!(self.status, Status::Disconnected(_));
+        let connected = !dropped && !reconnecting;
+        let shared = self.shared_input();
+        let label: Option<&str> = match &self.status {
+            // A blank session lists its launch choices instead.
+            Status::Detached if self.choice.is_some() => None,
+            Status::Detached | Status::Connecting => Some("Opening agent\u{2026}"),
+            Status::Disconnected(_) if self.reconnects => Some("Reconnecting\u{2026}"),
+            Status::Disconnected(_) => Some("Disconnected"),
+            Status::Failed(_) => Some("Agent unavailable"),
+            Status::Exited(_) => None,
+            Status::Live if reconnecting => Some("Reconnecting\u{2026}"),
+            // The phone-size notice says it.
+            Status::Live if self.offers_take_back() => None,
+            Status::Live if self.input_lease || shared => None,
+            Status::Live if self.agent.is_some_and(|a| a.input_elsewhere) => {
+                Some("Another view is typing in this agent")
             }
-            Status::Disconnected(_) if self.reconnects => {
-                Some("Disconnected \u{2014} reconnecting to the core\u{2026}".into())
-            }
-            Status::Disconnected(_) => Some("Disconnected".into()),
-            Status::Failed(reason) => Some(format!("Could not open the terminal: {reason}")),
-            // A hibernated agent closes its terminal like an exit, but its conversation is kept.
-            Status::Exited(_) if sleeping => {
-                Some("Sleeping to save memory \u{2014} its conversation is kept".into())
-            }
-            Status::Exited(code) => Some(format!("Shell exited (code {code})")),
-        }
+            Status::Live => Some("Viewing agent"),
+        };
+        let attached = matches!(self.status, Status::Live) || dropped;
+        let control = (attached && !self.input_lease && !shared).then(|| {
+            json!({
+                "label": if self.taking { "Taking control\u{2026}" } else { "Take control" },
+                "disabled": self.taking || !connected || self.to_core.is_none(),
+            })
+        });
+        let error = match &self.status {
+            Status::Failed(reason) => Some(reason.as_str()),
+            _ => None,
+        };
+        let ended = match self.status {
+            Status::Exited(code) => Some(json!({
+                "sleeping": sleeping,
+                "exitCode": if sleeping { Value::Null } else { json!(code) },
+                "close": true,
+            })),
+            _ => None,
+        };
+        json!({
+            "agent": self.target.as_ref().map_or("", |t| t.1.as_str()),
+            "label": label,
+            "connected": connected,
+            "pending": self.taking,
+            "retry": matches!(self.status, Status::Failed(_)) && self.target.is_some(),
+            "control": control,
+            "error": error,
+            "ended": ended,
+            "state": {
+                "controlling": self.input_lease,
+                "shared": shared,
+                "writable": self.can_type(),
+                "phone": false,
+            },
+        })
+    }
+
+    /// Whether this view holds the lease that sizes the shell.
+    pub fn holds_size(&self) -> bool {
+        self.resize_lease
     }
 
     /// Whether a paired device (a phone) holds this terminal's size, and this view is attached to
@@ -2285,18 +2453,23 @@ impl TerminalView {
                 self.open_find(cx);
                 true
             }
+            // One take-over at a time, as the web's: a second waits for the core's answer.
             Action::TakeControl => {
-                if !self.can_take_control() {
+                if self.taking || !self.can_take_control() {
                     return false;
                 }
                 self.send(ToCore::TakeControl);
+                self.taking = true;
+                cx.notify();
                 true
             }
             Action::TakeBack => {
-                if !self.size_held_by_phone() {
+                if self.taking || !self.size_held_by_phone() {
                     return false;
                 }
                 self.send(ToCore::TakeControl);
+                self.taking = true;
+                cx.notify();
                 true
             }
             Action::TakeSize => {
@@ -2314,80 +2487,6 @@ impl TerminalView {
                 true
             }
         }
-    }
-}
-
-impl TerminalView {
-    /// The find bar over the pane's top right: the query, the match counter and the buttons.
-    /// A click on it never reaches the terminal underneath.
-    fn find_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let button = |id: &'static str, label: &'static str| {
-            div()
-                .id(id)
-                .w(px(22.))
-                .h(px(22.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_sm()
-                .bg(rgb(0x3a3a40))
-                .text_color(rgb(0xd8d8de))
-                .hover(|style| style.bg(rgb(0x4a4a52)))
-                .child(label)
-        };
-        let query = if self.find.query.is_empty() {
-            SharedString::from("Find…")
-        } else {
-            SharedString::from(self.find.query.clone())
-        };
-        div()
-            .id("terminal-find")
-            .absolute()
-            .top_2()
-            .right_3()
-            .flex()
-            .items_center()
-            .gap_1()
-            .px_2()
-            .py_1()
-            .rounded_md()
-            .bg(rgb(0x2a2a2e))
-            .text_xs()
-            .text_color(rgb(0xd8d8de))
-            .on_mouse_down(GpuiButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(
-                div()
-                    .w(px(150.))
-                    .px_1()
-                    .overflow_hidden()
-                    .text_color(if self.find.query.is_empty() {
-                        rgb(NOTE_COLOR)
-                    } else {
-                        rgb(0xd8d8de)
-                    })
-                    .child(query),
-            )
-            .child(
-                div()
-                    .min_w(px(56.))
-                    .text_color(rgb(NOTE_COLOR))
-                    .child(self.find_label()),
-            )
-            .child(
-                button("find-previous", "↑").on_click(cx.listener(|this, _, _, cx| {
-                    this.find_previous(cx);
-                })),
-            )
-            .child(
-                button("find-next", "↓").on_click(cx.listener(|this, _, _, cx| {
-                    this.find_next(cx);
-                })),
-            )
-            .child(
-                button("find-close", "×").on_click(cx.listener(|this, _, _, cx| {
-                    this.close_find(cx);
-                })),
-            )
     }
 }
 
@@ -2843,9 +2942,14 @@ impl gpui::Render for TerminalView {
         let focused = self.focus.is_focused(window);
         let mut bg = color(self.vt.background());
         bg.a = self.settings.opacity;
-        let note = self.note();
-        let take_back = self.offers_take_back();
-        let take_control = self.can_take_control() && self.status == Status::Live && !take_back;
+        // The agent's chip, error line and ended banner are the window's `agent-control`
+        // screen over the pane; only what a file drop or paste said is drawn here.
+        let notice = self.drop_notice.clone();
+        let control = self.agent_control();
+        if control != self.drawn_control {
+            self.drawn_control = control;
+            cx.emit(TerminalEvent::Chrome);
+        }
         let mut pane = div()
             .id("terminal")
             .track_focus(&self.focus)
@@ -2855,7 +2959,8 @@ impl gpui::Render for TerminalView {
             .overflow_hidden()
             .bg(bg)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                if this.key_down(event, cx) {
+                // Left unhandled, a plain text key reaches the text input below.
+                if !this.leaves_to_text_input(event) && this.key_down(event, cx) {
                     cx.stop_propagation();
                 }
             }))
@@ -2916,7 +3021,6 @@ impl gpui::Render for TerminalView {
             )
             .size_full(),
         )
-        .when(self.find.open, |pane| pane.child(self.find_bar(cx)))
         .when_some(self.choice.as_ref(), |pane, choice| {
             pane.child(
                 div()
@@ -2945,58 +3049,22 @@ impl gpui::Render for TerminalView {
                     })),
             )
         })
-        .when_some(note, |pane, note| {
+        .when_some(notice, |pane, notice| {
             pane.child(
                 div()
                     .absolute()
                     .bottom_2()
                     .right_3()
-                    .flex()
-                    .items_center()
-                    .gap_2()
                     .text_xs()
                     .text_color(rgb(NOTE_COLOR))
-                    .child(note)
-                    .when(take_control, |row| {
-                        row.child(note_button("take-control", "Take control").on_click(
-                            cx.listener(|this, _, _, cx| {
-                                this.perform(Action::TakeControl, cx);
-                            }),
-                        ))
-                    })
-                    .when(take_back, |row| {
-                        row.child(
-                            note_button("take-back-this", "Take back this tab").on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.perform(Action::TakeBack, cx);
-                                }),
-                            ),
-                        )
-                        .child(
-                            note_button("take-back-all", "Take back all tabs").on_click(
-                                cx.listener(|_, _, _, cx| cx.emit(TerminalEvent::TakeBackAll)),
-                            ),
-                        )
-                    }),
+                    .child(notice),
             )
         })
     }
 }
 
-/// A button in the pane's note row.
-fn note_button(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(id)
-        .px_2()
-        .rounded_sm()
-        .cursor_pointer()
-        .border_1()
-        .border_color(rgb(NOTE_COLOR))
-        .child(label)
-        .on_mouse_down(GpuiButton::Left, |_, _, cx| cx.stop_propagation())
-}
-
-/// Text from the system's input (dead keys, AltGr, input methods) that no key press produced.
+/// Text from the system's input: dead keys, AltGr, input methods, and every plain key that only
+/// types its text ([`TerminalView::leaves_to_text_input`]), with the characters its event carries.
 /// Composition is drawn at the cursor; what is committed goes to the program as typed.
 impl EntityInputHandler for TerminalView {
     fn text_for_range(

@@ -1,0 +1,52 @@
+{
+  "props": {
+    "value": "perch",
+    "options": [
+      {
+        "value": "perch",
+        "label": "Perch"
+      },
+      {
+        "value": "catppuccin-mocha",
+        "label": "Catppuccin Mocha"
+      },
+      {
+        "value": "catppuccin-macchiato",
+        "label": "Catppuccin Macchiato"
+      },
+      {
+        "value": "catppuccin-frappe",
+        "label": "Catppuccin Frappé"
+      },
+      {
+        "value": "catppuccin-latte",
+        "label": "Catppuccin Latte"
+      },
+      {
+        "value": "tokyo-night",
+        "label": "Tokyo Night"
+      },
+      {
+        "value": "gruvbox-dark",
+        "label": "Gruvbox Dark"
+      },
+      {
+        "value": "nord",
+        "label": "Nord"
+      }
+    ],
+    "ariaLabel": "Theme",
+    "testId": "select-demo",
+    "className": "rounded-ui bg-surface-1 text-fg [font-family:inherit] px-2 py-[0.3rem] text-[0.8rem] max-[700px]:min-h-11 focus:[outline:1px_solid_var(--accent)] w-full",
+    "at": {
+      "x": 520,
+      "y": 700,
+      "width": 224
+    }
+  },
+  "steps": [
+    {
+      "click": "[data-testid=\"select-demo\"]"
+    }
+  ]
+}

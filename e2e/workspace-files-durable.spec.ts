@@ -241,7 +241,7 @@ test.describe("V-05/V-06 durable file workflow", () => {
       await openWorkspaceTool(page, workspaceId, "gitReview");
       await expect(page.getByTestId("workspace-git-review")).toBeVisible({ timeout: 15000 });
       await page.getByTestId("git-refresh").click();
-      await expect(page.getByTestId("git-status")).toContainText(RELATIVE_FILE, { timeout: 15000 });
+      await expect(page.getByTestId("git-status")).toContainText(RELATIVE_FILE.split("/").pop()!, { timeout: 15000 });
       const fileSelect = page.getByTestId("git-diff-file-select");
       await expect.poll(async () => (await optionStates(fileSelect)).filter((file) => file.value === RELATIVE_FILE).map((file) => file.text), { timeout: 15000 }).toEqual([expect.stringContaining("modified")]);
       await expect(page.getByTestId("git-diff")).toContainText("saved sentinel", { timeout: 15000 });

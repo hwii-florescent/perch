@@ -6,19 +6,19 @@ import { sdkSurface } from "./sdk";
 describe("@perch/sdk", () => {
   // The public surface is versioned: adding or removing an export means changing this list and SDK_VERSION together
   // (a removal or an incompatible change is a new major), and docs/MOD-SDK.md with them.
-  it("exports exactly the 1.10 surface", async () => {
-    expect(SDK_VERSION).toBe("1.10.2");
+  it("exports exactly the 1.13 surface", async () => {
+    expect(SDK_VERSION).toBe("1.13.0");
     expect(Object.keys(sdkSurface()).sort()).toEqual([
-      "AgentIcon", "BrowserPage", "Chevron", "CloseIcon", "CodeEditor", "ConfirmDialog", "CopyButton", "Dialog",
+      "AgentIcon", "BrowserPage", "Chevron", "CloseIcon", "CodeEditor", "ConfirmDialog", "CopyButton", "Dialog", "DiffView",
       "EllipsisIcon", "FileAsset", "FileEntryMenu", "FileIcon", "FolderBrowser", "GearIcon", "GitMarker", "HostStateDot", "InstructionsDialog",
       "Layout", "Markdown", "MarkdownPreview", "MemoryDialog", "ModeSwitch", "NewFilePrompt", "NewSessionMenu",
-      "PageIcon", "PlusIcon", "QrCode", "Select", "SessionDot", "SessionMenu", "SettingRow", "SettingsGroup", "SlashPopover", "Slot", "Switch",
+      "PageIcon", "PlusIcon", "QrCode", "Select", "SessionDot", "SessionMenu", "SettingRow", "SettingsGroup", "SlashPopover", "Slot", "Submenu", "Switch",
       "TabDragLayer", "TabMenu", "WorktreeMenu", "agentStateColor", "anchoredPopoverStyle", "assetKind", "assetUrl",
       "beginReorderDrag", "beginTabDrag", "buttonClass", "cn", "fetchTerminal", "focus", "ghostButton", "glassClass", "iconButton",
       "isMac", "keyLabel", "layoutTree", "menuDividerClass", "menuItemClass", "menuPanel", "nestSessions", "newId",
       "openBrowserTab", "openFileTab", "pickFolder", "readTerminal", "redeemUsageReset", "refreshUsage", "resetZoom",
       "rowActionClass", "runCommand", "segmentClass", "sendToTerminal", "settingsClass", "shortcutFor",
-      "shortcutLabel", "startSession", "tabStateClass", "tapButtonClass", "terminals", "useAddProject", "useAddProjectRequest",
+      "shortcutLabel", "startSession", "tabStateClass", "tapButtonClass", "terminals", "tip", "useAddProject", "useAddProjectRequest",
       "useAgentChoices", "useBrowserPages", "useDismissOnOutsideClick", "useGitReview", "useHosts", "useInstance",
       "useInstanceState", "useKeybindings", "useModData", "useNativeChat", "useNavigation", "useNewTabRequest",
       "useNotifications", "usePaneLook", "usePlanUsage", "useResourceState", "useSessionFolders", "useSettingsQuery",
@@ -33,6 +33,12 @@ describe("@perch/sdk", () => {
     // A package's own `@perch/sdk` binds `assetUrl` to it; the shared one has no package to name a file of.
     expect(() => sdk.assetUrl("a.png")).toThrow(/only in a package's own modules/);
     expect(sdk.version).toBe(SDK_VERSION);
+  });
+
+  it("tip puts the key bound to a command after the label, and leaves the label alone when none is", async () => {
+    const { tip } = await import("./sdk");
+    expect(tip("Save", "editor.save")).toMatch(/^Save \(.+\)$/);
+    expect(tip("Nothing", "no.such.command")).toBe("Nothing");
   });
 
   it("useTerminals draws again when a pin or this device's order changes, so a copy can group and order by them", async () => {

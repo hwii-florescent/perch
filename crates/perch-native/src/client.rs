@@ -20,7 +20,7 @@ use futures::{SinkExt, StreamExt};
 use perch_core::agent_fleet::TERMINAL_PROVIDER;
 use perch_core::protocol::{AgentLifecycleStatus, ProjectSummary, ServerMessage, SessionSummary};
 use serde_json::{json, Value};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -269,6 +269,55 @@ impl Core {
             .await
     }
 
+    /// `GET {base}workspace-file`: the bytes of `path` in a workspace, read by the core inside the
+    /// workspace's confinement, refused past `max` bytes. Blocking: call it off the UI thread.
+    pub fn fetch_file(&self, workspace_id: &str, path: &str, max: u64) -> Result<Vec<u8>> {
+        use std::io::{Read, Write};
+        let target = format!(
+            "{}workspace-file?workspaceId={}&path={}",
+            self.base_path,
+            percent_encode(workspace_id),
+            percent_encode(path)
+        );
+        let mut stream = std::net::TcpStream::connect(&self.authority)
+            .with_context(|| format!("could not reach the core at {}", self.authority))?;
+        stream.set_read_timeout(Some(REPLY_TIMEOUT))?;
+        write!(
+            stream,
+            "GET {target} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nConnection: close\r\n\r\n",
+            self.authority, self.token
+        )?;
+        // The head, a byte at a time up to its blank line (it is short).
+        let mut head = Vec::new();
+        let mut byte = [0u8; 1];
+        while !head.ends_with(b"\r\n\r\n") {
+            if stream.read(&mut byte)? == 0 || head.len() > 16 * 1024 {
+                bail!("the core sent no answer");
+            }
+            head.push(byte[0]);
+        }
+        let head = String::from_utf8_lossy(&head);
+        let status = head
+            .split_whitespace()
+            .nth(1)
+            .unwrap_or_default()
+            .to_string();
+        let mut body = Vec::new();
+        stream.take(max + 1).read_to_end(&mut body)?;
+        if status != "200" {
+            let said: String = String::from_utf8_lossy(&body)
+                .trim()
+                .chars()
+                .take(300)
+                .collect();
+            bail!("{REFUSED}{said} ({status})");
+        }
+        if body.len() as u64 > max {
+            bail!("the file is larger than {max} bytes");
+        }
+        Ok(body)
+    }
+
     /// One HTTP/1.1 POST of `length` bytes read from `body`, answered with the `path` of the
     /// core's JSON reply. The core's reason is kept when it says no.
     async fn post(
@@ -495,10 +544,27 @@ impl Connection {
         .await
     }
 
-    /// Ask the core for something; the answer arrives through [`Connection::next`].
-    pub async fn request(&mut self, request: &Request) -> Result<()> {
+    /// Add a local folder as a project and wait for the core to confirm it.
+    pub async fn create_project(&mut self, path: &str) -> Result<()> {
         let id = self.request_id();
-        self.send(request_frame(&id, request)).await
+        self.send(create_project_frame(&id, LOCAL, path, None))
+            .await?;
+        self.reply(Some(&id), |m| match m {
+            ServerMessage::ProjectUpdated { request_id, .. }
+                if request_id.as_deref() == Some(id.as_str()) =>
+            {
+                Some(())
+            }
+            _ => None,
+        })
+        .await
+    }
+
+    /// Ask the core for something; the answer arrives through [`Connection::next`].
+    pub async fn request(&mut self, request: &Request) -> Result<String> {
+        let id = self.request_id();
+        self.send(request_frame(&id, request)).await?;
+        Ok(id)
     }
 
     /// Attach the shell of a session (starting it if needed) and take control of its input
@@ -584,6 +650,26 @@ impl Connection {
                 false,
             )
             .await?;
+        Ok(())
+    }
+
+    /// Give up the resize lease this connection holds, so another view (the other window on this
+    /// computer) sizes the shell. Nothing to do when it holds none.
+    pub async fn release_resize(&mut self, terminal: &mut Terminal) -> Result<()> {
+        let Some(generation) = terminal.resize else {
+            return Ok(());
+        };
+        let id = self.request_id();
+        self.send(json!({"type": "agent.control.release", "requestId": id,
+            "sessionId": terminal.session_id, "workspaceId": terminal.workspace_id,
+            "agentId": terminal.provider, "channel": "resize", "generation": generation}))
+            .await?;
+        self.reply(Some(&id), |m| match m {
+            ServerMessage::AgentControl { request_id, .. } if *request_id == id => Some(()),
+            _ => None,
+        })
+        .await?;
+        terminal.resize = None;
         Ok(())
     }
 
@@ -679,12 +765,12 @@ impl Connection {
         }
     }
 
-    fn request_id(&mut self) -> String {
+    pub(crate) fn request_id(&mut self) -> String {
         self.next_request += 1;
         format!("native-{}", self.next_request)
     }
 
-    async fn send(&mut self, frame: Value) -> Result<()> {
+    pub(crate) async fn send(&mut self, frame: Value) -> Result<()> {
         self.socket
             .send(Message::text(frame.to_string()))
             .await
@@ -778,6 +864,444 @@ pub enum Command {
     PinWorkspace { workspace_id: String, pinned: bool },
     /// Change settings: the `settings.update` patch, with only the fields that changed.
     UpdateSettings(Value),
+    /// Ask the core for plan usage (`usage.get`); `force` skips its short cache.
+    UsageGet { force: bool },
+    /// Spend one banked reset of an account (`usage.redeemReset`).
+    UsageRedeemReset { account_id: String },
+    /// What a session does with messages from other sessions (`inbound.act` `set_mode`): `accept`,
+    /// `hold` or `refuse`. The menu follows the session list's `inboundMode`, not this request.
+    InboundMode { session_id: String, mode: String },
+    /// A message the core answers with a broadcast, not a reply (`frame`, from [`send_frame`]):
+    /// a setting or a computer's change. The sidebar follows what the core then says.
+    Send(Value),
+    /// A question for the core (`frame`, from [`ask_frame`], given a request id here), answered
+    /// with what the core says to it or why not. A dropped connection drops `reply`.
+    Ask { frame: Value, reply: Answer },
+    /// Register `path` on `host_id` as a project (`project.create`), named `name` or by its
+    /// folder. Answered once the core sends this connection the project's snapshot, or refuses.
+    AddProject {
+        host_id: String,
+        path: String,
+        name: Option<String>,
+        reply: Answer,
+    },
+    /// End a session and delete it (`session.delete`). Its tab goes when the core says it is
+    /// deleted, not on this request.
+    DeleteSession { session_id: String },
+    /// Replace the core's order of projects or sessions on a computer (`workspace.order.set`);
+    /// a list left out is untouched.
+    SetOrder {
+        host_id: String,
+        projects: Option<Vec<String>>,
+        sessions: Option<Vec<String>>,
+    },
+    /// Rename a project (`project.rename`).
+    RenameProject { project_id: String, name: String },
+    /// Delete a project and end its sessions; the folder stays (`project.remove`).
+    RemoveProject { project_id: String },
+    /// Add a folder as a project on a computer (`project.create`).
+    CreateProject {
+        host_id: String,
+        path: String,
+        name: Option<String>,
+    },
+    /// Rename a workspace (`workspace.rename`).
+    RenameWorkspace { workspace_id: String, name: String },
+    /// Hide a linked worktree from the sidebar or show it again (`workspace.visibility`).
+    HideWorkspace { workspace_id: String, hidden: bool },
+    /// Wake a sleeping workspace (`workspace.restore`).
+    RestoreWorkspace { workspace_id: String },
+    /// Ask a computer for its projects and workspaces again (`workspace.snapshot`).
+    RefreshHost(String),
+    /// Cancel, retry or dismiss a background worktree create (`worktree.job.<verb>`).
+    WorktreeJob { verb: &'static str, job_id: String },
+}
+
+/// Why a command that changes something was refused: no connection to the core was up.
+pub const NOT_CONNECTED: &str =
+    "Perch is not connected to its core, so nothing was changed. Try again once it is back.";
+
+/// The questions a screen puts to the core that change nothing there.
+const READS: [&str; 11] = [
+    "fs.browse",
+    "context.preview",
+    "instructions.get",
+    "memory.list",
+    "memory.get",
+    "worktree.list",
+    "device.list",
+    "phone.access.get",
+    "machine.hosts",
+    "agent.models.list",
+    "agent.manifest.list",
+];
+
+impl Command {
+    /// Whether it changes what the core keeps or runs. One of these is never kept for a
+    /// connection that is not up: as the web's socket drops a send while it is closed, so that
+    /// nothing runs minutes later against whatever core is found by then.
+    pub fn changes_state(&self) -> bool {
+        match self {
+            Command::View(_)
+            | Command::ShowTerminals(_)
+            | Command::WindowActive(_)
+            | Command::RefreshHost(_)
+            | Command::UsageGet { .. } => false,
+            Command::Ask { frame, .. } => !READS.contains(&frame["type"].as_str().unwrap_or("")),
+            _ => true,
+        }
+    }
+
+    /// Refused with `why`: a question gets it as its answer; anything else is dropped.
+    pub fn refuse(self, why: &str) {
+        if let Command::Ask { reply, .. } | Command::AddProject { reply, .. } = self {
+            let _ = reply.send(Err(why.into()));
+        }
+    }
+}
+
+/// Where the answer to one request goes.
+pub type Answer = futures::channel::oneshot::Sender<Result<Value, String>>;
+
+/// The questions a screen may put to the core (`kind`), and the fields each takes: a string, an
+/// optional string, a bool or a list of strings.
+const ASKS: &[(&str, &[(&str, Field)])] = &[
+    (
+        "fs.browse",
+        &[("hostId", Field::Host), ("path", Field::MaybeText)],
+    ),
+    (
+        "instructions.get",
+        &[("scope", Field::Scope), ("id", Field::Text)],
+    ),
+    (
+        "instructions.set",
+        &[
+            ("scope", Field::Scope),
+            ("id", Field::Text),
+            ("text", Field::Text),
+            ("folders", Field::Texts),
+        ],
+    ),
+    ("memory.list", &[("projectId", Field::Text)]),
+    // A browser page's address bar: remembered pages and the engine's suggestions for what is typed.
+    ("browser.history.search", &[("query", Field::Text)]),
+    ("browser.suggest", &[("query", Field::Text)]),
+    // Settings' pages: the paired devices and the pairing code, who can reach this computer, the
+    // ssh look at a computer, the models of each harness and each computer's agent list. All
+    // answered under the request id.
+    ("device.list", &[]),
+    ("device.pair.start", &[]),
+    ("device.pair.cancel", &[]),
+    ("device.revoke", &[("deviceId", Field::Text)]),
+    ("phone.access.get", &[]),
+    ("machine.hosts", &[]),
+    ("machine.probe", &[("sshHost", Field::Text)]),
+    ("machine.install", &[("sshHost", Field::Text)]),
+    ("agent.models.list", &[]),
+    ("agent.manifest.list", &[("hostId", Field::Host)]),
+    (
+        "agent.provider.configure",
+        &[
+            ("hostId", Field::Host),
+            ("providerId", Field::Text),
+            ("enabled", Field::MaybeFlag),
+            ("isDefault", Field::MaybeFlag),
+        ],
+    ),
+    (
+        "memory.get",
+        &[("projectId", Field::Text), ("name", Field::Text)],
+    ),
+    (
+        "memory.set",
+        &[
+            ("projectId", Field::Text),
+            ("name", Field::Text),
+            ("text", Field::Text),
+            ("baseRevision", Field::MaybeText),
+        ],
+    ),
+    (
+        "memory.delete",
+        &[
+            ("projectId", Field::Text),
+            ("name", Field::Text),
+            ("baseRevision", Field::Text),
+        ],
+    ),
+    (
+        "memory.enable",
+        &[("projectId", Field::Text), ("enabled", Field::Flag)],
+    ),
+    (
+        "worktree.list",
+        &[("hostId", Field::Host), ("repoPath", Field::Text)],
+    ),
+    (
+        "worktree.create",
+        &[
+            ("hostId", Field::Host),
+            ("repoPath", Field::Text),
+            ("branch", Field::Text),
+            ("newBranch", Field::Flag),
+            ("path", Field::MaybeText),
+            ("name", Field::MaybeText),
+            ("startFrom", Field::MaybeText),
+            ("parentWorkspaceId", Field::MaybeText),
+        ],
+    ),
+    // Not `workspace.run`: it runs any program, so only the window asks it, for a project the
+    // person adds with one (`project.new`), never a mod.
+    // This computer's own background create (`worktree.job`): it names no other computer.
+    (
+        "worktree.job.start",
+        &[
+            ("repoPath", Field::Text),
+            ("branch", Field::Text),
+            ("newBranch", Field::Flag),
+            ("path", Field::MaybeText),
+            ("name", Field::MaybeText),
+            ("startFrom", Field::MaybeText),
+            ("parentWorkspaceId", Field::MaybeText),
+        ],
+    ),
+    (
+        "worktree.remove",
+        &[
+            ("hostId", Field::Host),
+            ("repoPath", Field::Text),
+            ("path", Field::Text),
+            ("force", Field::Flag),
+            ("deleteBranch", Field::Flag),
+        ],
+    ),
+    (
+        "worktree.branch.delete",
+        &[
+            ("hostId", Field::Host),
+            ("repoPath", Field::Text),
+            ("branch", Field::Text),
+            ("expectedHead", Field::Text),
+        ],
+    ),
+];
+
+#[derive(Clone, Copy)]
+enum Field {
+    Text,
+    MaybeText,
+    Flag,
+    Texts,
+    /// `project` or `workspace`.
+    Scope,
+    /// A computer: left out for this one, as the web client does.
+    Host,
+    /// A flag, or null to leave it out.
+    MaybeFlag,
+}
+
+/// The frame for question `kind` with `args`' fields, checked against [`ASKS`] (its request
+/// id is added when it is sent), or why it cannot be asked.
+pub fn ask_frame(kind: &str, args: &Value) -> Result<Value, String> {
+    let (_, fields) = ASKS
+        .iter()
+        .find(|(k, _)| *k == kind)
+        .ok_or_else(|| format!("The core is not asked {kind:?} from a screen."))?;
+    let mut frame = json!({ "type": kind });
+    for (name, field) in fields.iter() {
+        let value = &args[*name];
+        let bad = || format!("{kind} needs {name} as {}.", field.word());
+        let out = match field {
+            Field::Text => Some(value.as_str().ok_or_else(bad)?.into()),
+            Field::MaybeText | Field::Host if value.is_null() => None,
+            Field::MaybeText => Some(value.as_str().ok_or_else(bad)?.into()),
+            Field::Host => Some(value.as_str().ok_or_else(bad)?)
+                .filter(|host| *host != LOCAL)
+                .map(Value::from),
+            Field::Flag => Some(value.as_bool().ok_or_else(bad)?.into()),
+            Field::MaybeFlag if value.is_null() => None,
+            Field::MaybeFlag => Some(value.as_bool().ok_or_else(bad)?.into()),
+            Field::Scope => Some(
+                value
+                    .as_str()
+                    .filter(|s| matches!(*s, "project" | "workspace"))
+                    .ok_or_else(bad)?
+                    .into(),
+            ),
+            Field::Texts => {
+                let list = value.as_array().ok_or_else(bad)?;
+                if !list.iter().all(Value::is_string) {
+                    return Err(bad());
+                }
+                Some(value.clone())
+            }
+        };
+        if let Some(out) = out {
+            frame[*name] = out;
+        }
+    }
+    Ok(frame)
+}
+
+/// The frame for change `kind` with `args` (`settings.update` with its `patch`, `hosts.upsert`
+/// with its `host`, `hosts.delete` with its `id`), checked as the core reads it. The core
+/// answers each with a broadcast (`settings.current`, `hosts.updated`), not under a request id.
+pub fn send_frame(kind: &str, args: &Value) -> Result<Value, String> {
+    match kind {
+        "settings.update" => {
+            let patch = &args["patch"];
+            serde_json::from_value::<perch_core::protocol::SettingsPatch>(patch.clone())
+                .map_err(|e| format!("settings.update takes a settings patch: {e}"))?;
+            Ok(json!({"type": kind, "patch": patch}))
+        }
+        "hosts.upsert" => {
+            let host = &args["host"];
+            serde_json::from_value::<perch_core::protocol::SshHostEntry>(host.clone())
+                .map_err(|e| format!("hosts.upsert takes a computer: {e}"))?;
+            Ok(json!({"type": kind, "host": host}))
+        }
+        "browser.history.clear" => Ok(json!({"type": kind})),
+        // A page a browser page showed, and an entry the address bar's list removes.
+        "browser.history.record" => {
+            let url = args["url"]
+                .as_str()
+                .ok_or_else(|| "browser.history.record needs url as text.".to_string())?;
+            let title = args["title"].as_str().unwrap_or("");
+            let visit = args["visit"].as_bool().unwrap_or(false);
+            Ok(json!({"type": kind, "url": url, "title": title, "visit": visit}))
+        }
+        "browser.history.remove" => {
+            let url = args["url"]
+                .as_str()
+                .ok_or_else(|| "browser.history.remove needs url as text.".to_string())?;
+            Ok(json!({"type": kind, "url": url}))
+        }
+        "hosts.delete" => {
+            let id = args["id"]
+                .as_str()
+                .ok_or_else(|| "hosts.delete needs id as text.".to_string())?;
+            Ok(json!({"type": kind, "id": id}))
+        }
+        _ => Err(format!("The core is not sent {kind:?} from a screen.")),
+    }
+}
+
+impl Field {
+    fn word(self) -> &'static str {
+        match self {
+            Field::Text => "text",
+            Field::MaybeText | Field::Host => "text or null",
+            Field::Flag => "true or false",
+            Field::MaybeFlag => "true, false or null",
+            Field::Texts => "a list of text",
+            Field::Scope => "\"project\" or \"workspace\"",
+        }
+    }
+}
+
+/// The answer `message` gives to one of this connection's requests: its id and the outcome.
+pub(crate) fn answer_of(message: &ServerMessage) -> Option<(&str, Result<Value, String>)> {
+    match message {
+        // Context Bridge: the prepared packet and its agents, and the answer to a send.
+        ServerMessage::ContextPreviewResult {
+            request_id,
+            packet,
+            agents,
+        } => Some((
+            request_id,
+            Ok(json!({ "packet": packet, "agents": agents })),
+        )),
+        ServerMessage::AgentUiResult {
+            request_id,
+            session_id,
+            accepted,
+            ..
+        } => Some((
+            request_id,
+            Ok(json!({ "sessionId": session_id, "accepted": accepted })),
+        )),
+        // The state the core answers with, as the web's clients keep it (without its kind and id).
+        ServerMessage::InstructionsState { request_id, .. }
+        | ServerMessage::MemoryState { request_id, .. }
+        | ServerMessage::MemoryFileState { request_id, .. } => {
+            let mut state = serde_json::to_value(message).unwrap_or(Value::Null);
+            if let Some(state) = state.as_object_mut() {
+                state.remove("type");
+                state.remove("requestId");
+            }
+            Some((request_id, Ok(state)))
+        }
+        // Settings' pages read these as the core sent them (without their kind and request id).
+        ServerMessage::DevicePairCode { request_id, .. }
+        | ServerMessage::DeviceListResult { request_id, .. }
+        | ServerMessage::PhoneAccessStatus { request_id, .. }
+        | ServerMessage::MachineHosts { request_id, .. }
+        | ServerMessage::MachineResult { request_id, .. }
+        | ServerMessage::AgentModelsList { request_id, .. }
+        | ServerMessage::AgentManifestList { request_id, .. }
+        | ServerMessage::BrowserHistoryResult { request_id, .. }
+        | ServerMessage::BrowserSuggestResult { request_id, .. } => {
+            let mut state = serde_json::to_value(message).unwrap_or(Value::Null);
+            if let Some(state) = state.as_object_mut() {
+                state.remove("type");
+                state.remove("requestId");
+            }
+            Some((request_id, Ok(state)))
+        }
+        ServerMessage::FsBrowseResult {
+            request_id,
+            path,
+            parent,
+            entries,
+            ..
+        } => Some((
+            request_id,
+            Ok(json!({ "path": path, "parent": parent, "entries": entries })),
+        )),
+        // A worktree answer keeps its kind: a refusal (`worktree.error`, `dirty` for the checkout's
+        // guard) is an answer the screen reads, not a failure of the question.
+        ServerMessage::WorktreeListResult { request_id, .. }
+        | ServerMessage::WorktreeJobStarted { request_id, .. }
+        | ServerMessage::WorktreeDone { request_id, .. }
+        | ServerMessage::WorktreeError { request_id, .. } => {
+            let mut answer = serde_json::to_value(message).unwrap_or(Value::Null);
+            if let Some(answer) = answer.as_object_mut() {
+                answer.remove("requestId");
+            }
+            Some((request_id, Ok(answer)))
+        }
+        // A Git or review answer: the message's own fields, as the web's store reads them.
+        ServerMessage::GitStatusResult { request_id, .. }
+        | ServerMessage::GitRefsResult { request_id, .. }
+        | ServerMessage::GitDiffResult { request_id, .. }
+        | ServerMessage::GitActionResult { request_id, .. }
+        | ServerMessage::GitPreviewResult { request_id, .. }
+        | ServerMessage::ReviewListResult { request_id, .. }
+        | ServerMessage::ReviewCommentResult { request_id, .. }
+        | ServerMessage::ReviewDeleteResult { request_id, .. }
+        | ServerMessage::ReviewBatchPreviewResult { request_id, .. }
+        | ServerMessage::ReviewBatchSendResult { request_id, .. } => {
+            let mut answer = serde_json::to_value(message).unwrap_or(Value::Null);
+            if let Some(answer) = answer.as_object_mut() {
+                answer.remove("requestId");
+                answer.remove("type");
+            }
+            Some((request_id, Ok(answer)))
+        }
+        ServerMessage::WorkspaceRunStarted {
+            request_id,
+            session_id,
+        } => Some((request_id, Ok(json!({ "sessionId": session_id })))),
+        // The core sends the project's snapshot to the connection that created it only.
+        ServerMessage::WorkspaceSnapshot { request_id, .. } => Some((request_id, Ok(Value::Null))),
+        ServerMessage::Error {
+            message,
+            request_id: Some(id),
+            ..
+        } => Some((id, Err(message.clone()))),
+        _ => None,
+    }
 }
 
 /// What the window learns.
@@ -799,6 +1323,32 @@ pub enum Update {
     },
     /// A session finished or needs you and the person should hear it.
     Alert(Heard),
+    /// The terminal host stopped answering or answers again; the window says so.
+    Health(crate::sidebar::Health),
+    /// A message for the window's file store (`files::store`): an `fs.*` reply or `fs.changed`.
+    Files(Box<ServerMessage>),
+    /// A review delivery for the window's Git store (`git::store`), broadcast with no request.
+    Review(Box<ServerMessage>),
+}
+
+/// Whether the window's file store reads `message`. `fs.browse` stays a screen's question.
+fn for_files(message: &ServerMessage) -> bool {
+    use ServerMessage as M;
+    matches!(
+        message,
+        M::FsTreeResult { .. }
+            | M::FsSearchResult { .. }
+            | M::FsExtractResult { .. }
+            | M::FsReadResult { .. }
+            | M::FsPreviewResult { .. }
+            | M::FsMutateResult { .. }
+            | M::FsWriteResult { .. }
+            | M::FsBufferListResult { .. }
+            | M::FsBufferResult { .. }
+            | M::FsBufferCloseResult { .. }
+            | M::FsChanged { .. }
+            | M::FsError { .. }
+    )
 }
 
 /// A launch on the core's own computer, waiting for the core to say it worked.
@@ -958,6 +1508,17 @@ fn publish(state: &State, shown: &mut Option<Model>, updates: &UnboundedSender<U
     updates.unbounded_send(Update::Model(model)).is_ok()
 }
 
+/// The next command: one carried over from before the connection first, then the window's.
+async fn next_command(
+    carried: &mut std::collections::VecDeque<Command>,
+    commands: &mut UnboundedReceiver<Command>,
+) -> Option<Command> {
+    match carried.pop_front() {
+        Some(command) => Some(command),
+        None => commands.next().await,
+    }
+}
+
 /// One connection's life: `Ok` when the window closed, `Err` when the socket dropped. Requests
 /// never wait for their answer here: a launch is a small state machine fed by the same frames
 /// as everything else, so the sidebar keeps following the core while one is in flight.
@@ -970,11 +1531,23 @@ async fn live(
     launch: &mut Option<Launch>,
 ) -> Result<()> {
     state.connect();
+    // What the window asked while no connection was up: what changes something is refused (it
+    // was asked of a core that may not be this one), the rest is done now.
+    let mut carried = std::collections::VecDeque::new();
+    while let Ok(command) = commands.try_recv() {
+        if command.changes_state() {
+            command.refuse(NOT_CONNECTED);
+        } else {
+            carried.push_back(command);
+        }
+    }
+    // The requests waiting on an answer, by id; they go with the connection.
+    let mut pending: HashMap<String, Answer> = HashMap::new();
     connection.send(json!({"type": "session.list"})).await?;
     connection.request(&Request::Projects(LOCAL.into())).await?;
-    connection
-        .request(&Request::Providers(LOCAL.into()))
-        .await?;
+    let providers = Request::Providers(LOCAL.into());
+    let id = connection.request(&providers).await?;
+    state.asked(&providers, &id);
     // `keys.json` rides on the mods state.
     connection.request(&Request::Mods).await?;
     // What the window was showing is viewed again, so the core still counts it as read.
@@ -992,6 +1565,21 @@ async fn live(
         tokio::select! {
             message = connection.next() => {
                 let message = message?;
+                if for_files(&message)
+                    && updates.unbounded_send(Update::Files(Box::new(message.clone()))).is_err()
+                {
+                    return Ok(());
+                }
+                if matches!(message, ServerMessage::ReviewBatchDelivery { .. })
+                    && updates.unbounded_send(Update::Review(Box::new(message.clone()))).is_err()
+                {
+                    return Ok(());
+                }
+                if let Some((id, outcome)) = answer_of(&message) {
+                    if let Some(reply) = pending.remove(id) {
+                        let _ = reply.send(outcome);
+                    }
+                }
                 if let Some(step) = launch.as_mut().map(|l| l.on_message(&message)) {
                     for frame in step.send {
                         connection.send(frame).await?;
@@ -1004,15 +1592,21 @@ async fn live(
                     }
                 }
                 for ask in state.apply(&message) {
-                    connection.request(&ask).await?;
+                    let id = connection.request(&ask).await?;
+                    state.asked(&ask, &id);
                 }
                 for alert in state.take_alerts() {
                     if updates.unbounded_send(Update::Alert(alert)).is_err() {
                         return Ok(());
                     }
                 }
+                if let Some(health) = state.take_health() {
+                    if updates.unbounded_send(Update::Health(health)).is_err() {
+                        return Ok(());
+                    }
+                }
             }
-            command = commands.next() => match command {
+            command = next_command(&mut carried, commands) => match command {
                 None => return Ok(()),
                 Some(Command::ShowTerminals(show)) => state.show_terminals = show,
                 Some(Command::WindowActive(active)) => state.set_window_active(active),
@@ -1029,6 +1623,78 @@ async fn live(
                 }
                 Some(Command::UpdateSettings(patch)) => {
                     connection.send(settings_frame(patch)).await?;
+                }
+                Some(Command::InboundMode { session_id, mode }) => {
+                    let id = connection.request_id();
+                    connection.send(inbound_mode_frame(&id, &session_id, &mode)).await?;
+                }
+                Some(Command::DeleteSession { session_id }) => {
+                    connection.send(delete_frame(&session_id)).await?;
+                }
+                Some(Command::SetOrder { host_id, projects, sessions }) => {
+                    state.set_order(&host_id, projects.clone(), sessions.clone());
+                    let id = connection.request_id();
+                    connection.send(order_frame(&id, &host_id, projects, sessions)).await?;
+                }
+                Some(Command::RenameProject { project_id, name }) => {
+                    let id = connection.request_id();
+                    let name = json!({ "name": name });
+                    connection.send(id_frame("project.rename", &id, "projectId", &project_id, name)).await?;
+                }
+                Some(Command::RemoveProject { project_id }) => {
+                    let id = connection.request_id();
+                    connection.send(id_frame("project.remove", &id, "projectId", &project_id, json!({}))).await?;
+                }
+                Some(Command::CreateProject { host_id, path, name }) => {
+                    let id = connection.request_id();
+                    connection.send(create_project_frame(&id, &host_id, &path, name.as_deref())).await?;
+                }
+                Some(Command::RenameWorkspace { workspace_id, name }) => {
+                    let id = connection.request_id();
+                    let name = json!({ "name": name });
+                    connection.send(id_frame("workspace.rename", &id, "workspaceId", &workspace_id, name)).await?;
+                }
+                Some(Command::HideWorkspace { workspace_id, hidden }) => {
+                    let id = connection.request_id();
+                    let hidden = json!({ "hidden": hidden });
+                    connection.send(id_frame("workspace.visibility", &id, "workspaceId", &workspace_id, hidden)).await?;
+                }
+                Some(Command::RestoreWorkspace { workspace_id }) => {
+                    let id = connection.request_id();
+                    connection.send(id_frame("workspace.restore", &id, "workspaceId", &workspace_id, json!({}))).await?;
+                }
+                Some(Command::WorktreeJob { verb, job_id }) => {
+                    connection.send(json!({"type": format!("worktree.job.{verb}"), "jobId": job_id})).await?;
+                }
+                Some(Command::RefreshHost(host_id)) => {
+                    let ask = Request::Workspaces(host_id);
+                    let id = connection.request(&ask).await?;
+                    state.asked(&ask, &id);
+                }
+                Some(Command::UsageGet { force }) => {
+                    connection.send(json!({"type": "usage.get", "force": force})).await?;
+                }
+                Some(Command::Send(frame)) => {
+                    connection.send(frame).await?;
+                }
+                Some(Command::Ask { mut frame, reply }) => {
+                    let id = connection.request_id();
+                    frame["requestId"] = json!(id);
+                    connection.send(frame).await?;
+                    pending.insert(id, reply);
+                }
+                Some(Command::AddProject { host_id, path, name, reply }) => {
+                    let id = connection.request_id();
+                    connection
+                        .send(create_project_frame(&id, &host_id, &path, name.as_deref()))
+                        .await?;
+                    pending.insert(id, reply);
+                }
+                Some(Command::UsageRedeemReset { account_id }) => {
+                    state.clear_redeem_result();
+                    connection
+                        .send(json!({"type": "usage.redeemReset", "accountId": account_id}))
+                        .await?;
                 }
                 Some(Command::SetHostEnabled { host_id, enabled }) => {
                     if let Some(frame) = state.host_enabled_frame(&host_id, enabled) {
@@ -1078,6 +1744,52 @@ fn rename_frame(session_id: &str, title: &str) -> Value {
 fn pin_frame(request_id: &str, workspace_id: &str, pinned: bool) -> Value {
     json!({"type": "workspace.pin", "requestId": request_id, "workspaceId": workspace_id,
            "pinned": pinned})
+}
+
+fn inbound_mode_frame(request_id: &str, session_id: &str, mode: &str) -> Value {
+    json!({"type": "inbound.act", "requestId": request_id, "sessionId": session_id,
+           "action": "set_mode", "mode": mode})
+}
+
+/// `hostId` is left out for the core's own computer, as the web client does.
+fn order_frame(
+    request_id: &str,
+    host_id: &str,
+    projects: Option<Vec<String>>,
+    sessions: Option<Vec<String>>,
+) -> Value {
+    let mut frame = json!({"type": "workspace.order.set", "requestId": request_id});
+    if host_id != LOCAL {
+        frame["hostId"] = json!(host_id);
+    }
+    if let Some(projects) = projects {
+        frame["projects"] = json!(projects);
+    }
+    if let Some(sessions) = sessions {
+        frame["sessions"] = json!(sessions);
+    }
+    frame
+}
+
+/// A `kind` request about one project or workspace (`key`: `projectId`, `workspaceId`), with the
+/// fields of `extra`.
+fn id_frame(kind: &str, request_id: &str, key: &str, id: &str, extra: Value) -> Value {
+    let mut frame = json!({"type": kind, "requestId": request_id, key: id});
+    if let (Some(frame), Value::Object(extra)) = (frame.as_object_mut(), extra) {
+        frame.extend(extra);
+    }
+    frame
+}
+
+fn create_project_frame(request_id: &str, host_id: &str, path: &str, name: Option<&str>) -> Value {
+    let mut frame = json!({"type": "project.create", "requestId": request_id, "path": path});
+    if host_id != LOCAL {
+        frame["hostId"] = json!(host_id);
+    }
+    if let Some(name) = name {
+        frame["name"] = json!(name);
+    }
+    frame
 }
 
 fn delete_frame(session_id: &str) -> Value {
@@ -1182,6 +1894,196 @@ mod tests {
     }
 
     #[test]
+    fn a_screens_questions_are_the_cores_messages() {
+        let asks = [
+            ("fs.browse", json!({"hostId": "local"})),
+            ("fs.browse", json!({"hostId": "build-box", "path": "/tmp"})),
+            ("instructions.get", json!({"scope": "project", "id": "p"})),
+            (
+                "instructions.set",
+                json!({"scope": "workspace", "id": "w", "text": "t", "folders": ["/a"]}),
+            ),
+            ("memory.list", json!({"projectId": "p"})),
+            ("device.list", json!({})),
+            ("device.pair.start", json!({})),
+            ("device.pair.cancel", json!({})),
+            ("device.revoke", json!({"deviceId": "d"})),
+            ("phone.access.get", json!({})),
+            ("machine.hosts", json!({})),
+            ("machine.probe", json!({"sshHost": "box"})),
+            ("machine.install", json!({"sshHost": "box"})),
+            ("agent.models.list", json!({})),
+            ("agent.manifest.list", json!({"hostId": "build-box"})),
+            (
+                "agent.provider.configure",
+                json!({"hostId": "local", "providerId": "claude", "enabled": false, "isDefault": null}),
+            ),
+            ("memory.get", json!({"projectId": "p", "name": "a.md"})),
+            (
+                "memory.set",
+                json!({"projectId": "p", "name": "a.md", "text": "t"}),
+            ),
+            (
+                "memory.set",
+                json!({"projectId": "p", "name": "a.md", "text": "t", "baseRevision": "r1"}),
+            ),
+            (
+                "memory.delete",
+                json!({"projectId": "p", "name": "a.md", "baseRevision": "r1"}),
+            ),
+            ("memory.enable", json!({"projectId": "p", "enabled": false})),
+            (
+                "worktree.list",
+                json!({"hostId": "local", "repoPath": "/r"}),
+            ),
+            (
+                "worktree.create",
+                json!({"hostId": "build-box", "repoPath": "/r", "branch": "", "newBranch": true,
+                    "name": "Fix it", "startFrom": null, "path": null, "parentWorkspaceId": "w"}),
+            ),
+            (
+                "worktree.job.start",
+                json!({"repoPath": "/r", "branch": "a", "newBranch": false, "path": "/wt/a",
+                    "name": "Task", "startFrom": null, "parentWorkspaceId": null}),
+            ),
+            (
+                "worktree.remove",
+                json!({"hostId": "local", "repoPath": "/r", "path": "/wt/a", "force": true,
+                    "deleteBranch": false}),
+            ),
+            (
+                "worktree.branch.delete",
+                json!({"hostId": "local", "repoPath": "/r", "branch": "a", "expectedHead": "c1"}),
+            ),
+        ];
+        for (kind, args) in asks {
+            let mut frame = ask_frame(kind, &args).unwrap();
+            frame["requestId"] = json!("r");
+            serde_json::from_value::<ClientMessage>(frame.clone())
+                .unwrap_or_else(|e| panic!("{frame}: {e}"));
+        }
+        assert_eq!(
+            ask_frame("fs.browse", &json!({"hostId": "local"})).unwrap(),
+            json!({"type": "fs.browse"}),
+            "this computer is left out"
+        );
+        // A change the core answers with a broadcast is checked as the core reads it.
+        for (kind, args) in [
+            (
+                "settings.update",
+                json!({"patch": {"terminalScrollback": 5000, "defaultCwd": null}}),
+            ),
+            (
+                "hosts.upsert",
+                json!({"host": {"id": "h", "name": "Box", "sshHost": "box", "remotePort": 7788, "enabled": true}}),
+            ),
+            ("hosts.delete", json!({"id": "h"})),
+            ("browser.history.clear", json!({})),
+        ] {
+            let frame = send_frame(kind, &args).unwrap_or_else(|e| panic!("{kind}: {e}"));
+            serde_json::from_value::<ClientMessage>(frame.clone())
+                .unwrap_or_else(|e| panic!("{frame}: {e}"));
+        }
+        assert!(send_frame(
+            "settings.update",
+            &json!({"patch": {"terminalScrollback": "lots"}})
+        )
+        .is_err());
+        assert!(send_frame("hosts.upsert", &json!({"host": {"id": 3}})).is_err());
+        assert!(send_frame("session.delete", &json!({"sessionId": "s"})).is_err());
+        // Only the questions listed, with their fields as the core takes them.
+        assert!(ask_frame("session.delete", &json!({"sessionId": "s"})).is_err());
+        assert!(
+            ask_frame(
+                "workspace.run",
+                &json!({"workspaceId": "w", "command": "sh"})
+            )
+            .is_err(),
+            "a screen never runs a program"
+        );
+        assert!(ask_frame("instructions.get", &json!({"scope": "host", "id": "p"})).is_err());
+        assert!(ask_frame("memory.enable", &json!({"projectId": "p", "enabled": "no"})).is_err());
+        assert!(ask_frame(
+            "worktree.remove",
+            &json!({"repoPath": "/r", "path": "/wt/a", "force": "yes", "deleteBranch": false})
+        )
+        .is_err());
+        // A background create is this computer's own: it takes no computer.
+        let frame = ask_frame(
+            "worktree.job.start",
+            &json!({"hostId": "buildbox", "repoPath": "/r", "branch": "a", "newBranch": true}),
+        )
+        .unwrap();
+        assert_eq!(
+            frame,
+            json!({"type": "worktree.job.start", "repoPath": "/r", "branch": "a", "newBranch": true})
+        );
+        assert!(ask_frame("worktree.job.start", &json!({"repoPath": "/r"})).is_err());
+        assert!(ask_frame(
+            "instructions.set",
+            &json!({"scope": "project", "id": "p", "text": "t", "folders": [1]})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_listing_or_a_refusal_answers_the_request_it_names() {
+        let message = |frame: Value| serde_json::from_value::<ServerMessage>(frame).unwrap();
+        let listing = message(
+            json!({"type": "fs.browse.result", "requestId": "b1", "hostId": "local",
+            "path": "/home/dev", "parent": "/home", "home": "/home/dev",
+            "entries": [{"name": "code", "path": "/home/dev/code", "isGitRepo": true}]}),
+        );
+        let (id, answer) = answer_of(&listing).expect("a listing answers");
+        assert_eq!(id, "b1");
+        assert_eq!(
+            answer.unwrap(),
+            json!({"path": "/home/dev", "parent": "/home",
+                "entries": [{"name": "code", "path": "/home/dev/code", "isGitRepo": true}]})
+        );
+        let refused =
+            message(json!({"type": "error", "requestId": "p1", "message": "not a directory"}));
+        let (id, answer) = answer_of(&refused).expect("a refusal answers");
+        assert_eq!((id, answer), ("p1", Err("not a directory".to_string())));
+        // An error for no request answers nothing.
+        assert!(answer_of(&message(json!({"type": "error", "message": "x"}))).is_none());
+        // A state is answered as the web's client keeps it.
+        let state = message(
+            json!({"type": "instructions.state", "requestId": "i1", "scope": "project",
+            "id": "p", "text": "t", "folders": [], "revision": 2, "maxChars": 100}),
+        );
+        let (id, answer) = answer_of(&state).expect("a state answers");
+        assert_eq!(id, "i1");
+        assert_eq!(
+            answer.unwrap(),
+            json!({"scope": "project", "id": "p", "text": "t", "folders": [], "revision": 2, "maxChars": 100})
+        );
+        // A worktree refusal is an answer the screen reads (the dirty guard), with its kind.
+        let dirty = message(
+            json!({"type": "worktree.error", "requestId": "t1", "hostId": "local",
+            "message": "contains modified files", "dirty": true}),
+        );
+        let (id, answer) = answer_of(&dirty).expect("a worktree refusal answers");
+        assert_eq!(id, "t1");
+        assert_eq!(
+            answer.unwrap(),
+            json!({"type": "worktree.error", "hostId": "local", "message": "contains modified files",
+                "dirty": true})
+        );
+        // A background create's acceptance answers its start, with the job.
+        let started = message(
+            json!({"type": "worktree.job.started", "requestId": "j1", "job": {"jobId": "job-1",
+            "repoPath": "/r", "branch": "a", "path": "/wt/a", "status": "running",
+            "phase": "Checking out", "startedAt": 1}}),
+        );
+        let (id, answer) = answer_of(&started).expect("an acceptance answers");
+        assert_eq!(id, "j1");
+        let answer = answer.unwrap();
+        assert_eq!(answer["type"], "worktree.job.started");
+        assert_eq!(answer["job"]["path"], "/wt/a");
+    }
+
+    #[test]
     fn a_pin_frame_is_the_cores_workspace_pin() {
         for pinned in [true, false] {
             let message: ClientMessage =
@@ -1209,7 +2111,35 @@ mod tests {
             request_frame("r", &Request::Mods),
             rename_frame("s", "a new title"),
             pin_frame("r", "w", true),
+            inbound_mode_frame("r", "s", "hold"),
             delete_frame("s"),
+            order_frame("r", LOCAL, Some(vec!["p".into()]), None),
+            order_frame("r", "build-box", None, Some(vec!["s".into(), "t".into()])),
+            create_project_frame("r", LOCAL, "/work", None),
+            create_project_frame("r", "build-box", "/work", Some("Work")),
+            id_frame(
+                "project.rename",
+                "r",
+                "projectId",
+                "p",
+                json!({"name": "n"}),
+            ),
+            id_frame("project.remove", "r", "projectId", "p", json!({})),
+            id_frame(
+                "workspace.rename",
+                "r",
+                "workspaceId",
+                "w",
+                json!({"name": "n"}),
+            ),
+            id_frame(
+                "workspace.visibility",
+                "r",
+                "workspaceId",
+                "w",
+                json!({"hidden": true}),
+            ),
+            id_frame("workspace.restore", "r", "workspaceId", "w", json!({})),
             settings_frame(json!({"terminalScrollback": 5000})),
             settings_frame(json!({"terminalLoginShell": true, "droppedPathDoubleQuotes": false})),
             request_frame("r", &Request::Projects(LOCAL.into())),
@@ -1405,6 +2335,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn what_changes_something_is_never_sent_to_a_core_that_was_away() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let core = Core::with_token(
+            &format!("http://{}/", listener.local_addr().unwrap()),
+            "token",
+        )
+        .unwrap();
+        let (gone_tx, mut gone_rx) = tokio::sync::mpsc::unbounded_channel();
+        let hold = std::sync::Arc::new(tokio::sync::Notify::new());
+        tokio::spawn(fake_core(listener, vec![vec![]], gone_tx, hold.clone()));
+
+        // Asked while no connection is up: a delete, a forced worktree removal, a listing.
+        let (commands_tx, commands) = futures::channel::mpsc::unbounded();
+        let (removed, removal) = futures::channel::oneshot::channel();
+        let (listed, listing) = futures::channel::oneshot::channel();
+        for command in [
+            Command::DeleteSession {
+                session_id: "s1".into(),
+            },
+            Command::Ask {
+                frame: json!({"type": "worktree.remove", "repoPath": "/work",
+                              "path": "/wt/a", "force": true, "deleteBranch": false}),
+                reply: removed,
+            },
+            Command::Ask {
+                frame: json!({"type": "fs.browse"}),
+                reply: listed,
+            },
+        ] {
+            commands_tx.unbounded_send(command).unwrap();
+        }
+        let (updates_tx, _updates) = futures::channel::mpsc::unbounded();
+        let following = tokio::spawn(follow(
+            move || Ok(core.clone()),
+            commands,
+            updates_tx,
+            Duration::from_millis(50),
+        ));
+        assert_eq!(
+            removal.await.unwrap(),
+            Err(NOT_CONNECTED.to_string()),
+            "the removal is refused, not carried over"
+        );
+        // Let the opening requests and the listing arrive before the core goes.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        hold.notify_one();
+        let received: Vec<String> = gone_rx
+            .recv()
+            .await
+            .unwrap()
+            .iter()
+            .map(|text| serde_json::from_str::<Value>(text).unwrap()["type"].to_string())
+            .collect();
+        assert!(received.contains(&"\"fs.browse\"".into()), "{received:?}");
+        assert!(
+            !received
+                .iter()
+                .any(|t| t.contains("delete") || t.contains("worktree")),
+            "{received:?}"
+        );
+        drop(listing);
+        following.abort();
+    }
+
+    #[tokio::test]
     async fn says_why_the_core_cannot_be_followed() {
         let (_commands_tx, commands) = futures::channel::mpsc::unbounded();
         let (updates_tx, mut updates) = futures::channel::mpsc::unbounded();
@@ -1523,6 +2518,85 @@ mod tests {
                 socket.send(Message::text(frame.to_string())).await.unwrap();
             }
         }
+    }
+
+    #[tokio::test]
+    async fn plan_usage_is_asked_for_and_kept_as_the_web_keeps_it() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let core = Core::with_token(
+            &format!("http://{}/", listener.local_addr().unwrap()),
+            "token",
+        )
+        .unwrap();
+        let asked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = asked.clone();
+        let account = json!({"provider": "claude", "label": "dev@example.com", "plan": "Max 5x",
+                             "windows": [{"label": "5h", "usedPercent": 42.5, "windowMinutes": 300,
+                                          "resetsAt": 1767312000}]});
+        let reply = account.clone();
+        let hello = json!({"type": "session.list", "sessions": []});
+        tokio::spawn(scripted_core(listener, vec![hello], move |sent| {
+            seen.lock().unwrap().push(sent.clone());
+            match sent["type"].as_str() {
+                Some("usage.get") => {
+                    vec![json!({"type": "usage.result", "accounts": [reply.clone()]})]
+                }
+                Some("usage.redeemReset") => vec![json!({"type": "usage.redeemResult",
+                    "accountId": sent["accountId"], "outcome": "noCredit"})],
+                _ => vec![],
+            }
+        }));
+        let (commands_tx, commands) = futures::channel::mpsc::unbounded();
+        let (updates_tx, mut updates) = futures::channel::mpsc::unbounded();
+        let following = tokio::spawn(follow(
+            move || Ok(core.clone()),
+            commands,
+            updates_tx,
+            Duration::from_millis(50),
+        ));
+        let first = model_where(&mut updates, |m| m.connected).await;
+        assert!(
+            first.store.plan_usage.is_null(),
+            "nothing until the core answers"
+        );
+
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        commands_tx
+            .unbounded_send(Command::UsageGet { force: true })
+            .unwrap();
+        let model = model_where(&mut updates, |m| !m.store.plan_usage.is_null()).await;
+        let usage = &model.store.plan_usage;
+        assert_eq!(usage["usage"], json!([account]));
+        assert_eq!(usage["spend"], Value::Null, "an older core sends no spend");
+        assert!(usage["updatedAt"].as_u64().unwrap() >= before, "{usage}");
+        assert_eq!(usage["redeemResult"], Value::Null);
+
+        commands_tx
+            .unbounded_send(Command::UsageRedeemReset {
+                account_id: "codex:1".into(),
+            })
+            .unwrap();
+        let model = model_where(&mut updates, |m| {
+            !m.store.plan_usage["redeemResult"].is_null()
+        })
+        .await;
+        assert_eq!(
+            model.store.plan_usage["redeemResult"],
+            json!({"type": "usage.redeemResult", "accountId": "codex:1", "outcome": "noCredit"})
+        );
+        let sent = asked.lock().unwrap().clone();
+        assert!(
+            sent.contains(&json!({"type": "usage.get", "force": true})),
+            "{sent:?}"
+        );
+        assert!(
+            sent.contains(&json!({"type": "usage.redeemReset", "accountId": "codex:1"})),
+            "{sent:?}"
+        );
+        following.abort();
     }
 
     #[tokio::test]
@@ -1785,5 +2859,80 @@ mod tests {
         assert!(split_base_url("https://127.0.0.1:1/").is_err());
         assert!(split_base_url("http://example.com:80/").is_err());
         assert!(Core::with_token("http://127.0.0.1:1/", "bad token").is_err());
+    }
+}
+
+#[cfg(test)]
+mod fetch_file_tests {
+    use super::Core;
+    use std::io::{Read, Write};
+
+    /// A one-request core: answers `reply` and hands back the request it read.
+    fn stub(reply: Vec<u8>) -> (Core, std::thread::JoinHandle<String>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let core = Core::with_token(
+            &format!("http://{}/base/", listener.local_addr().unwrap()),
+            "tok",
+        )
+        .unwrap();
+        let served = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut byte = [0u8; 1];
+            while !request.ends_with(b"\r\n\r\n") && stream.read(&mut byte).unwrap() == 1 {
+                request.push(byte[0]);
+            }
+            stream.write_all(&reply).unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        (core, served)
+    }
+
+    fn answer(status: &str, body: &[u8]) -> Vec<u8> {
+        let mut out = format!(
+            "HTTP/1.1 {status}\r\ncontent-length: {}\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        out.extend_from_slice(body);
+        out
+    }
+
+    #[test]
+    fn fetch_file_sends_the_token_and_returns_the_body() {
+        let (core, served) = stub(answer("200 OK", b"\x89PNG bytes"));
+        let bytes = core.fetch_file("ws 1", "a b/c.png", 1024).unwrap();
+        assert_eq!(bytes, b"\x89PNG bytes");
+        let request = served.join().unwrap();
+        assert!(
+            request.starts_with(
+                "GET /base/workspace-file?workspaceId=ws%201&path=a%20b%2Fc.png HTTP/1.1\r\n"
+            ),
+            "{request}"
+        );
+        assert!(
+            request.contains("Authorization: Bearer tok\r\n"),
+            "{request}"
+        );
+    }
+
+    #[test]
+    fn fetch_file_keeps_the_core_reason_on_refusal() {
+        let (core, _served) = stub(answer(
+            "501 Not Implemented",
+            b"Remote media/download transport is not available",
+        ));
+        let error = core.fetch_file("w", "x.png", 1024).unwrap_err();
+        assert!(super::is_refusal(&error), "{error}");
+        assert!(error.to_string().contains("Remote media"), "{error}");
+    }
+
+    #[test]
+    fn fetch_file_stops_past_the_cap() {
+        let (core, _served) = stub(answer("200 OK", &[7u8; 64]));
+        let error = core.fetch_file("w", "x.png", 63).unwrap_err();
+        assert!(error.to_string().contains("larger than 63"), "{error}");
+        let (core, _served) = stub(answer("200 OK", &[7u8; 64]));
+        assert_eq!(core.fetch_file("w", "x.png", 64).unwrap().len(), 64);
     }
 }

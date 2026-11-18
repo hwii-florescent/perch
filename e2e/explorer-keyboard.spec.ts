@@ -103,9 +103,9 @@ test("file icons and Git snapshots stay honest across themes, with centered usag
       if (["perch", "catppuccin", "catppuccin-latte"].includes(theme)) await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`explorer-${theme}.png`) });
     }
     await page.getByTestId("workspace-tools-gitReview").click();
-    const changed = page.getByTestId("git-status").getByRole("listitem");
-    await expect(changed.filter({ hasText: "src/dual.ts" }).getByTestId("file-git-marker")).toHaveText("M/M");
-    await expect(changed.filter({ hasText: "src/deleted.ts" }).getByTestId("file-git-marker")).toHaveText("D");
+    const changed = page.getByTestId("git-status").getByRole("treeitem");
+    await expect(changed.filter({ hasText: "dual.ts" }).getByTestId("file-git-marker")).toHaveText("M/M");
+    await expect(changed.filter({ hasText: "deleted.ts" }).getByTestId("file-git-marker")).toHaveText("D");
     await expect(page.getByTestId("git-diff-line").first()).toBeVisible();
     await expect(page.getByText("Reading Git status…", { exact: true })).toHaveCount(0);
     await page.screenshot({ animations: "disabled", path: testInfo.outputPath("git-rows.png") });

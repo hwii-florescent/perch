@@ -375,7 +375,8 @@ test.describe("Workspace Git/review UI", () => {
       await page.setViewportSize({ width: 390, height: 844 });
       await page.getByTestId("mobile-switch").click();
       await page.getByTestId("mobile-switcher").locator(`[data-testid="workspace-entry-${workspaceId}"] .workspace-entry__button`).first().click();
-      await page.getByRole("navigation", { name: "Mobile panes" }).getByRole("button", { name: "Git", exact: true }).click();
+      await page.getByTestId("mobile-tools").click();
+      await page.getByTestId("mobile-pane-git").click();
       await expect(page.getByTestId("mobile-active-pane-gitReview")).toBeVisible();
       await choose(selector, "workspaceStart");
       await expect(diff).toContainText(HEAD_TEXT);
@@ -405,9 +406,11 @@ test.describe("Workspace Git/review UI", () => {
       await expect(project).toBeVisible({ timeout: 10000 });
       await project.locator(`[data-testid="workspace-entry-${workspaceId}"] .workspace-entry__button`).first().click();
       await expect(switcher).not.toBeVisible({ timeout: 5000 });
-      await page.getByRole("navigation", { name: "Mobile panes" }).getByRole("button", { name: "Git", exact: true }).click();
+      await page.getByTestId("mobile-tools").click();
+      await page.getByTestId("mobile-pane-git").click();
       await expect(page.getByTestId("mobile-active-pane-gitReview")).toBeVisible({ timeout: 10000 });
-      await expect(page.locator('[data-testid^="mobile-active-pane-"]')).toHaveCount(1);
+      // The session stays mounted behind the Files/Git drawer; the drawer mounts only the pane it shows.
+      await expect(page.locator('[data-testid^="mobile-active-pane-"]:not([data-testid="mobile-active-pane-chat"])')).toHaveCount(1);
       await expect(page.locator(".dockview-theme-perch")).toHaveCount(0);
       await expect(page.getByTestId("git-status")).toContainText("1 changed path", { timeout: 15000 });
       await expect(page.getByTestId("git-diff")).toContainText(WORKTREE_TEXT, { timeout: 15000 });

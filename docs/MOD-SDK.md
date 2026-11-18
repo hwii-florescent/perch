@@ -197,14 +197,14 @@ The command fails when any copy of the current revision failed.
 - The core keeps the last 256 reports and 16 open questions. Past that it drops
   the oldest. A screen's reports go when it disconnects.
 
-## API reference (1.10)
+## API reference (1.13)
 
 The full signatures and field docs are in `perch-sdk.d.ts`; this lists what each
 export is for.
 
 ### `version: string`
 
-This page's SDK version, as semver (`"1.10.2"`). 1.1 added `assetUrl`,
+This page's SDK version, as semver (`"1.13.0"`). 1.1 added `assetUrl`,
 `useInstance` and `useInstanceState`; 1.2 the status bar, tab strip and pane
 header surface; 1.3 navigation (the sidebar); 1.4 resources (the Git review,
 `useResourceState`, and the terminal, layout and focus queries); 1.5 files, the
@@ -220,7 +220,9 @@ browser toolbar and the phone's own screens (their props types), `glassClass`,
 `tapButtonClass`, `GearIcon`, `PlusIcon` and `EllipsisIcon`; 1.10.1 makes `useTerminals` draw again when a
 pin or this device's order changes (`terminal.pin`, `terminal.order`), so a copy can group and order by them; 1.10.2 reshapes the phone's
 screens' props, with no export added: the header gets `onOpenTools`, the switcher `chatMode`, `onChatMode` and `onOpenSettings`, the
-panes `session` (`content` is now the drawer's tool), and the files screen is always given its `explorer`.
+panes `session` (`content` is now the drawer's tool), and the files screen is always given its `explorer`; 1.11
+adds `Submenu`, a menu row that opens a list of choices beside the menu (hover, click or keyboard). 1.12 adds
+the review's diff (`DiffView`). 1.13 adds `tip(label, command)`.
 
 ### `useKeybindings(): KeybindEntry[]`
 
@@ -381,6 +383,11 @@ unsent work.
   `previewId`. `askAgent(source)` opens Context Bridge's own preview and
   explicit send; it is absent where the host offers none. The screen never
   derives paths, line numbers, revisions or anchors itself.
+- `DiffView` (1.12): the review's diff for `workspaceId`, its own scroll surface
+  (`git-diff`), drawn from the review Perch keeps (the diff and its comments
+  are never props). The screen gives view state (`path`, `wrap`, `selection`,
+  the comment being edited) and hears line selection, the `＋`, Ask agent and
+  the thread actions through callbacks. The native client draws it natively.
 - `FileIcon`, `GitMarker`: Perch's file icon and Git state mark. `Select` takes
   `freeText` and `placeholder`.
 - `terminals()` and the hook `useTerminals()`: every session's terminal on
@@ -416,7 +423,7 @@ for actions.
   swap, a reload and the phone; a screen never writes a file itself.
   `askAgent(source)` opens Context Bridge's preview and explicit send.
 - `CodeEditor`, `FileAsset` (images, media, PDF), `MarkdownPreview`,
-  `FileEntryMenu`, `Chevron`, `assetKind`, `shortcutLabel`: the editor and
+  `FileEntryMenu`, `Chevron`, `assetKind`, `shortcutLabel`, `tip`: the editor and
   viewers are Perch's engines; place them, do not rebuild them.
 - `useNativeChat({ sessionId, providerId, terminalProviderId, … })`: one native
   chat as Perch keeps it: the transcript, the draft and its operation id, the

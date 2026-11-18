@@ -14,6 +14,45 @@ export function flattenTree(
   ]);
 }
 
+/** One row of the explorer as drawn: a file or folder at its depth, or a folder's state line (loading, failed,
+ * empty, cut short) at its children's depth. */
+export type TreeItem =
+  | { kind: "entry"; entry: DirectoryEntry; level: number }
+  | { kind: "loading" | "empty" | "truncated"; path: string; level: number }
+  | { kind: "error"; path: string; level: number; error?: string; entry: DirectoryEntry };
+
+/** The explorer's rows, top to bottom, as the nested tree draws them: a folder's state line or its children right
+ * after it while it is expanded and its listing has been asked for. */
+export function treeItems(
+  trees: Record<string, { entries: DirectoryEntry[]; state: string; truncated?: boolean; error?: string } | undefined>,
+  expanded: ReadonlySet<string>,
+  path = "",
+  level = 0,
+): TreeItem[] {
+  const tree = trees[path];
+  if (!tree) return [];
+  const items: TreeItem[] = [];
+  for (const entry of tree.entries) {
+    items.push({ kind: "entry", entry, level });
+    const child = entry.kind === "directory" && expanded.has(entry.path) ? trees[entry.path] : undefined;
+    if (child?.state === "loading") items.push({ kind: "loading", path: entry.path, level: level + 1 });
+    else if (child?.state === "error") items.push({ kind: "error", path: entry.path, level: level + 1, error: child.error, entry });
+    else if (child?.state === "ready") items.push(...treeItems(trees, expanded, entry.path, level + 1));
+  }
+  if (tree.truncated) items.push({ kind: "truncated", path, level });
+  if (tree.state === "ready" && tree.entries.length === 0) items.push({ kind: "empty", path, level });
+  return items;
+}
+
+/** The rows a tree of `count` rows draws when the view shows `shown` rows from row `top`: the chunks (of `chunk`
+ * rows) the view is in, with one more chunk before and after it. A move inside a chunk keeps the same rows. */
+export function treeWindow(count: number, top: number, shown: number, chunk: number): { start: number; end: number } {
+  const first = Math.floor(Math.max(0, top) / chunk) - 1;
+  const last = Math.floor((Math.max(0, top) + shown) / chunk) + 1;
+  const start = Math.min(Math.max(0, first * chunk), Math.max(0, count - chunk));
+  return { start: Math.max(0, start), end: Math.min(count, Math.max(start + chunk, (last + 1) * chunk)) };
+}
+
 /** What a key does in the explorer. Arrows only move the cursor (VS Code's list focus); Space
  * previews the file under it while keeping focus here; Enter opens it as a regular tab and moves
  * focus to the editor. Folders expand and collapse instead of opening. */

@@ -1,0 +1,5 @@
+{
+  "name": "Notifications",
+  "description": "The web app's stock notifications, unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

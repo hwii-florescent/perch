@@ -1,0 +1,117 @@
+{
+  "note": "Failing gate states that are accepted for now, each with its reason. compare.mjs fails on any failing state not listed here and on a listed state that passes again; remove entries as they are fixed.",
+  "accepted": [
+    {
+      "state": "keybind-help/all/dark",
+      "reason": "Rows for the drawer, preview tab and file editor wait for those screens."
+    },
+    {
+      "state": "keybind-help/all/light",
+      "reason": "Rows for the drawer, preview tab and file editor wait for those screens."
+    },
+    {
+      "state": "keybind-help/short-window/dark",
+      "reason": "Rows for the drawer, preview tab and file editor wait for those screens."
+    },
+    {
+      "state": "keybind-help/short-window/light",
+      "reason": "Rows for the drawer, preview tab and file editor wait for those screens."
+    },
+    {
+      "state": "memory/memory-off/dark",
+      "reason": "The check box shrinks to 9.5 px in its row."
+    },
+    {
+      "state": "memory/memory-off/light",
+      "reason": "The check box shrinks to 9.5 px in its row."
+    },
+    {
+      "state": "phone-size/notice/dark",
+      "reason": "The x glyph's line is 19 px against the web's 18."
+    },
+    {
+      "state": "phone-size/notice/light",
+      "reason": "The x glyph's line is 19 px against the web's 18."
+    },
+    {
+      "state": "phone-size/pending/dark",
+      "reason": "The x glyph's line is 19 px against the web's 18."
+    },
+    {
+      "state": "phone-size/pending/light",
+      "reason": "The x glyph's line is 19 px against the web's 18."
+    },
+    {
+      "state": "phone-size/split-pane/dark",
+      "reason": "The x glyph's line is 19 px against the web's 18."
+    },
+    {
+      "state": "phone-size/split-pane/light",
+      "reason": "The x glyph's line is 19 px against the web's 18."
+    },
+    {
+      "state": "settings/keyboard/dark",
+      "reason": "Known (docs/TESTING.md): Keyboard draws one group of bindings at a time; the engine cuts a script over its per-frame budget and 113 rows are over it."
+    },
+    {
+      "state": "settings/keyboard/light",
+      "reason": "Known (docs/TESTING.md): Keyboard draws one group of bindings at a time; the engine cuts a script over its per-frame budget and 113 rows are over it."
+    },
+    {
+      "state": "settings/notifications/dark",
+      "reason": "Known (docs/TESTING.md): the long Notifications page drifts up to 3 px down, as the engine sets line heights in half pixels."
+    },
+    {
+      "state": "settings/notifications/light",
+      "reason": "Known (docs/TESTING.md): the long Notifications page drifts up to 3 px down, as the engine sets line heights in half pixels."
+    },
+    {
+      "state": "start/workspace-long-name/dark",
+      "reason": "The path hint wraps to 2 lines, the web's to 3."
+    },
+    {
+      "state": "start/workspace-long-name/light",
+      "reason": "The path hint wraps to 2 lines, the web's to 3."
+    },
+    {
+      "state": "status/narrow-window/dark",
+      "reason": "GPUI rounds each text run's width up to a whole pixel."
+    },
+    {
+      "state": "status/narrow-window/light",
+      "reason": "GPUI rounds each text run's width up to a whole pixel."
+    },
+    {
+      "state": "status/usage/dark",
+      "reason": "GPUI rounds each text run's width up to a whole pixel."
+    },
+    {
+      "state": "status/usage/light",
+      "reason": "GPUI rounds each text run's width up to a whole pixel."
+    },
+    {
+      "state": "tabs/files-and-pages/dark",
+      "reason": "Needs the review and browser tabs in the strip."
+    },
+    {
+      "state": "tabs/files-and-pages/light",
+      "reason": "Needs the review and browser tabs in the strip."
+    },
+    {
+      "state": "files/image/dark",
+      "reason": "The header's path title is flex-1: natively it shares the row with two buttons (Quick Look, Open with Default App, the approved native media design) where the web has one Download link, so it is 146 px narrower; every other named element matches."
+    },
+    {
+      "state": "files/image/light",
+      "reason": "The header's path title is flex-1: natively it shares the row with two buttons (Quick Look, Open with Default App, the approved native media design) where the web has one Download link, so it is 146 px narrower; every other named element matches."
+    },
+    {
+      "state": "files/pdf-card/dark",
+      "reason": "The header's path title is flex-1: natively it shares the row with two buttons (Quick Look, Open with Default App, the approved native media design) where the web has one Download link, so it is 146 px narrower; every other named element matches."
+    },
+    {
+      "state": "files/pdf-card/light",
+      "reason": "The header's path title is flex-1: natively it shares the row with two buttons (Quick Look, Open with Default App, the approved native media design) where the web has one Download link, so it is 146 px narrower; every other named element matches."
+    }
+  ]
+}

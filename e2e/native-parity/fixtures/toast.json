@@ -1,0 +1,204 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "toast",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. In-app notifications (stock-ui/toast), top right, 320px wide, 12px from the window edges. The list is the store's `toasts`, worded by @perch/sdk `useNotifications()` (recorded in each output's sdk.notifications). Every toast has a 10 minute timeout so it stays up while it is measured (the real ones leave after 6 s, 10 s when blocked); the entry animation is switched off.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "states": [
+    {
+      "id": "done",
+      "title": "A session finished: its status mark, \"Codex finished\" and the session's title",
+      "patch": {
+        "toasts": [
+          {
+            "id": "t1",
+            "sessionId": "s-perch-2",
+            "title": "Fix terminal slash input",
+            "kind": "done",
+            "timeout": 600000
+          }
+        ]
+      }
+    },
+    {
+      "id": "blocked",
+      "title": "A session needs the person: its mark, Needs your attention and its title; a click runs the action",
+      "patch": {
+        "toasts": [
+          {
+            "id": "t2",
+            "sessionId": "s-perch-3",
+            "title": "Review agent mail",
+            "kind": "blocked",
+            "timeout": 600000,
+            "action": {
+              "command": "tab.select",
+              "args": {
+                "id": "s-perch-3"
+              }
+            }
+          }
+        ],
+        "sessions": {
+          "s-perch-3": {
+            "blocked": true
+          }
+        }
+      }
+    },
+    {
+      "id": "usage-alert",
+      "title": "A plan usage alert: no session, a yellow ring, the alert as the heading and its detail line",
+      "patch": {
+        "toasts": [
+          {
+            "id": "t3",
+            "sessionId": "usage",
+            "title": "Codex 5h limit at 93%",
+            "kind": "usage",
+            "timeout": 600000,
+            "level": "warning",
+            "body": "Resets in 42 minutes"
+          }
+        ]
+      }
+    },
+    {
+      "id": "mod-info",
+      "title": "A mod's notification with a mark of its own (a check) and an info level",
+      "patch": {
+        "toasts": [
+          {
+            "id": "t4",
+            "sessionId": "mod:deploy",
+            "title": "Deploy finished",
+            "kind": "usage",
+            "timeout": 600000,
+            "level": "info",
+            "icon": "✓",
+            "body": "perch.dev is live"
+          }
+        ]
+      }
+    },
+    {
+      "id": "mod-error",
+      "title": "A mod's error notification without a mark: a red ring",
+      "patch": {
+        "toasts": [
+          {
+            "id": "t5",
+            "sessionId": "mod:ci",
+            "title": "Build failed",
+            "kind": "usage",
+            "timeout": 600000,
+            "level": "error",
+            "body": "3 errors in perch-core"
+          }
+        ]
+      }
+    },
+    {
+      "id": "stacked",
+      "title": "Two toasts: the newest first, 8px apart",
+      "patch": {
+        "toasts": [
+          {
+            "id": "t1",
+            "sessionId": "s-perch-2",
+            "title": "Fix terminal slash input",
+            "kind": "done",
+            "timeout": 600000
+          },
+          {
+            "id": "t2",
+            "sessionId": "s-perch-3",
+            "title": "Review agent mail",
+            "kind": "blocked",
+            "timeout": 600000,
+            "action": {
+              "command": "tab.select",
+              "args": {
+                "id": "s-perch-3"
+              }
+            }
+          }
+        ],
+        "sessions": {
+          "s-perch-3": {
+            "blocked": true
+          }
+        }
+      }
+    },
+    {
+      "id": "over-limit",
+      "title": "Five toasts: the four newest are stacked, the oldest stays listed but is not drawn",
+      "patch": {
+        "toasts": [
+          {
+            "id": "t1",
+            "sessionId": "s-perch-2",
+            "title": "Fix terminal slash input",
+            "kind": "done",
+            "timeout": 600000
+          },
+          {
+            "id": "t2",
+            "sessionId": "s-perch-3",
+            "title": "Review agent mail",
+            "kind": "blocked",
+            "timeout": 600000,
+            "action": {
+              "command": "tab.select",
+              "args": {
+                "id": "s-perch-3"
+              }
+            }
+          },
+          {
+            "id": "t3",
+            "sessionId": "usage",
+            "title": "Codex 5h limit at 93%",
+            "kind": "usage",
+            "timeout": 600000,
+            "level": "warning",
+            "body": "Resets in 42 minutes"
+          },
+          {
+            "id": "t4",
+            "sessionId": "mod:deploy",
+            "title": "Deploy finished",
+            "kind": "usage",
+            "timeout": 600000,
+            "level": "info",
+            "icon": "✓",
+            "body": "perch.dev is live"
+          },
+          {
+            "id": "t5",
+            "sessionId": "mod:ci",
+            "title": "Build failed",
+            "kind": "usage",
+            "timeout": 600000,
+            "level": "error",
+            "body": "3 errors in perch-core"
+          }
+        ],
+        "sessions": {
+          "s-perch-3": {
+            "blocked": true
+          }
+        }
+      }
+    }
+  ]
+}

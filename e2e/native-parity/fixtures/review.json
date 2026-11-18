@@ -1,0 +1,392 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "review",
+  "note": "The review (stock-ui/review, `stock:review`) of workspace w-perch-main, in a review tab's pane (960x720), the box the app lays a tab's screen in; the native client places the same screen in its review tabs and the drawer's Git tab. Its data is the workspace's Git review as the store keeps it (`useGitReview`): `review` is the `WorkspaceGitReviewState` (status, diff, comments) that both the web's `useWorkspaceGitReviewStore` and the native window's Git store hold for the workspace; the actions answer nothing, so nothing loads over it. The diff is `DiffView`: the web's rows and Perch's native diff view, named row by row (file headers, hunk headers, lines with their comment threads). `selection` clicks the first line; `comment-thread` has one comment on src/sidebar.ts line 12 (new side).",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 960,
+    "height": 720
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {
+    "serverInfo": {
+      "type": "server.info",
+      "hostname": "studio",
+      "isSsh": false,
+      "platform": "macOS",
+      "capabilities": [
+        "git.commit",
+        "git.commit.preview",
+        "git.diff",
+        "git.discard",
+        "git.discard.preview",
+        "git.refs",
+        "git.stage",
+        "git.status",
+        "git.unstage",
+        "review.batch.preview",
+        "review.batch.send",
+        "review.create",
+        "review.delete",
+        "review.list",
+        "review.resolve",
+        "review.update",
+        "workspace.snapshot"
+      ]
+    }
+  },
+  "props": {
+    "workspaceId": "w-perch-main",
+    "review": {
+      "status": {
+        "workspaceId": "w-perch-main",
+        "root": "/Users/dev/code/perch",
+        "branch": "main",
+        "head": "4b92d71c",
+        "entries": [
+          {
+            "path": "src/sidebar.ts",
+            "index": "unmodified",
+            "worktree": "modified",
+            "staged": false,
+            "unstaged": true
+          },
+          {
+            "path": "docs/NOTES.md",
+            "index": "unmodified",
+            "worktree": "untracked",
+            "staged": false,
+            "unstaged": true
+          }
+        ],
+        "dirty": true
+      },
+      "statusState": "ready",
+      "diff": {
+        "workspaceId": "w-perch-main",
+        "target": {
+          "kind": "workingTree"
+        },
+        "files": [
+          {
+            "oldPath": "src/sidebar.ts",
+            "newPath": "src/sidebar.ts",
+            "status": "modified",
+            "isBinary": false,
+            "hunks": [
+              {
+                "oldStart": 10,
+                "oldCount": 5,
+                "newStart": 10,
+                "newCount": 6,
+                "header": "@@ -10,5 +10,6 @@ export function rows(state: State) {",
+                "lines": [
+                  {
+                    "kind": "context",
+                    "content": "  const sessions = state.sessions;",
+                    "oldLine": 10,
+                    "newLine": 10
+                  },
+                  {
+                    "kind": "deletion",
+                    "content": "  return sessions.sort(byName);",
+                    "oldLine": 11
+                  },
+                  {
+                    "kind": "addition",
+                    "content": "  // Attention first, then the person's own order.",
+                    "newLine": 11
+                  },
+                  {
+                    "kind": "addition",
+                    "content": "  return sessions.sort(byAttention);",
+                    "newLine": 12
+                  },
+                  {
+                    "kind": "context",
+                    "content": "}",
+                    "oldLine": 12,
+                    "newLine": 13
+                  },
+                  {
+                    "kind": "context",
+                    "content": "",
+                    "oldLine": 13,
+                    "newLine": 14
+                  },
+                  {
+                    "kind": "context",
+                    "content": "export function title(session: Session) {",
+                    "oldLine": 14,
+                    "newLine": 15
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "oldPath": "docs/NOTES.md",
+            "newPath": "docs/NOTES.md",
+            "status": "added",
+            "isBinary": false,
+            "hunks": [
+              {
+                "oldStart": 0,
+                "oldCount": 0,
+                "newStart": 1,
+                "newCount": 2,
+                "header": "@@ -0,0 +1,2 @@",
+                "lines": [
+                  {
+                    "kind": "addition",
+                    "content": "# Notes",
+                    "newLine": 1
+                  },
+                  {
+                    "kind": "addition",
+                    "content": "Sessions sort by attention.",
+                    "newLine": 2
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "hunkCount": 2,
+        "truncated": false,
+        "sourceRevision": "rev-7f3a91"
+      },
+      "diffState": "ready",
+      "comments": [],
+      "refs": [],
+      "actionState": "idle",
+      "batchDelivery": null,
+      "lastAgentTurn": null
+    }
+  },
+  "states": [
+    {
+      "id": "empty",
+      "title": "A clean tree: nothing to review",
+      "props": {
+        "review": {
+          "status": {
+            "workspaceId": "w-perch-main",
+            "root": "/Users/dev/code/perch",
+            "branch": "main",
+            "head": "4b92d71c",
+            "entries": [],
+            "dirty": false
+          },
+          "statusState": "ready",
+          "diff": {
+            "workspaceId": "w-perch-main",
+            "target": {
+              "kind": "workingTree"
+            },
+            "files": [],
+            "hunkCount": 0,
+            "truncated": false,
+            "sourceRevision": "rev-7f3a91"
+          },
+          "diffState": "ready",
+          "comments": [],
+          "refs": [],
+          "actionState": "idle",
+          "batchDelivery": null,
+          "lastAgentTurn": null
+        }
+      }
+    },
+    {
+      "id": "diff",
+      "title": "Two changed files, no comments"
+    },
+    {
+      "id": "selection",
+      "title": "The first line selected: the composer is shown",
+      "steps": [
+        {
+          "click": "[data-testid=\"git-diff-line\"]"
+        }
+      ]
+    },
+    {
+      "id": "comment-thread",
+      "title": "A comment under its line",
+      "props": {
+        "review": {
+          "status": {
+            "workspaceId": "w-perch-main",
+            "root": "/Users/dev/code/perch",
+            "branch": "main",
+            "head": "4b92d71c",
+            "entries": [
+              {
+                "path": "src/sidebar.ts",
+                "index": "unmodified",
+                "worktree": "modified",
+                "staged": false,
+                "unstaged": true
+              },
+              {
+                "path": "docs/NOTES.md",
+                "index": "unmodified",
+                "worktree": "untracked",
+                "staged": false,
+                "unstaged": true
+              }
+            ],
+            "dirty": true
+          },
+          "statusState": "ready",
+          "diff": {
+            "workspaceId": "w-perch-main",
+            "target": {
+              "kind": "workingTree"
+            },
+            "files": [
+              {
+                "oldPath": "src/sidebar.ts",
+                "newPath": "src/sidebar.ts",
+                "status": "modified",
+                "isBinary": false,
+                "hunks": [
+                  {
+                    "oldStart": 10,
+                    "oldCount": 5,
+                    "newStart": 10,
+                    "newCount": 6,
+                    "header": "@@ -10,5 +10,6 @@ export function rows(state: State) {",
+                    "lines": [
+                      {
+                        "kind": "context",
+                        "content": "  const sessions = state.sessions;",
+                        "oldLine": 10,
+                        "newLine": 10
+                      },
+                      {
+                        "kind": "deletion",
+                        "content": "  return sessions.sort(byName);",
+                        "oldLine": 11
+                      },
+                      {
+                        "kind": "addition",
+                        "content": "  // Attention first, then the person's own order.",
+                        "newLine": 11
+                      },
+                      {
+                        "kind": "addition",
+                        "content": "  return sessions.sort(byAttention);",
+                        "newLine": 12
+                      },
+                      {
+                        "kind": "context",
+                        "content": "}",
+                        "oldLine": 12,
+                        "newLine": 13
+                      },
+                      {
+                        "kind": "context",
+                        "content": "",
+                        "oldLine": 13,
+                        "newLine": 14
+                      },
+                      {
+                        "kind": "context",
+                        "content": "export function title(session: Session) {",
+                        "oldLine": 14,
+                        "newLine": 15
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "oldPath": "docs/NOTES.md",
+                "newPath": "docs/NOTES.md",
+                "status": "added",
+                "isBinary": false,
+                "hunks": [
+                  {
+                    "oldStart": 0,
+                    "oldCount": 0,
+                    "newStart": 1,
+                    "newCount": 2,
+                    "header": "@@ -0,0 +1,2 @@",
+                    "lines": [
+                      {
+                        "kind": "addition",
+                        "content": "# Notes",
+                        "newLine": 1
+                      },
+                      {
+                        "kind": "addition",
+                        "content": "Sessions sort by attention.",
+                        "newLine": 2
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "hunkCount": 2,
+            "truncated": false,
+            "sourceRevision": "rev-7f3a91"
+          },
+          "diffState": "ready",
+          "comments": [
+            {
+              "id": "comment-1",
+              "workspaceId": "w-perch-main",
+              "path": "src/sidebar.ts",
+              "base": {
+                "kind": "workingTree"
+              },
+              "baseRevision": "rev-7f3a91",
+              "side": "new",
+              "range": {
+                "start": 12,
+                "end": 12
+              },
+              "body": "Does byAttention keep pinned sessions on top?",
+              "anchor": {
+                "path": "src/sidebar.ts",
+                "side": "new",
+                "base": {
+                  "kind": "workingTree"
+                },
+                "baseRevision": "rev-7f3a91",
+                "range": {
+                  "start": 12,
+                  "end": 12
+                },
+                "before": [
+                  "  // Attention first, then the person's own order."
+                ],
+                "selected": [
+                  "  return sessions.sort(byAttention);"
+                ],
+                "after": [
+                  "}"
+                ]
+              },
+              "status": "unresolved",
+              "anchorConfidence": "exact",
+              "createdAt": 1799999700000,
+              "updatedAt": 1799999700000,
+              "version": 1
+            }
+          ],
+          "refs": [],
+          "actionState": "idle",
+          "batchDelivery": null,
+          "lastAgentTurn": null
+        }
+      }
+    }
+  ]
+}

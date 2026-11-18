@@ -8,7 +8,8 @@ import { useCallback, useSyncExternalStore } from "react";
 // ponytail: at most MAX keys, the least recently set without a live view dropped first; a byte budget would
 // replace the count if screens start keeping large values here.
 const MAX = 512;
-const values = new Map<string, unknown>();
+// On the native client a mod reload re-runs this module but keeps the script context, so the values live on it.
+const values: Map<string, unknown> = ((globalThis as { __perchResources?: Map<string, unknown> }).__perchResources ??= new Map());
 const listeners = new Map<string, Set<() => void>>();
 
 function touch(key: string, value: unknown) {

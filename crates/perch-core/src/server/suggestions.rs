@@ -128,6 +128,7 @@ pub(super) fn suggest(
         };
         items.push(Suggested {
             task,
+            name: entry["name"].as_str().map(str::to_string),
             agent: agent.to_string(),
             model,
             worktree: entry["worktree"].as_bool().unwrap_or(false),
@@ -157,6 +158,7 @@ pub(super) fn suggest_spawn(
     check_lead(app, caller)?;
     let item = Suggested {
         task: request.task,
+        name: request.name,
         agent: request.agent,
         model: request.model,
         worktree: request.worktree,
@@ -476,6 +478,7 @@ async fn start_one(
     };
     let picked = Suggested {
         task: row.task.clone(),
+        name: row.name.clone(),
         agent: chosen.agent.clone().unwrap_or_else(|| row.agent.clone()),
         model: match &chosen.model {
             Some(model) if model.is_empty() => None,
@@ -500,6 +503,7 @@ async fn start_one(
         agent: picked.agent.clone(),
         model: picked.model.clone(),
         task: picked.task.clone(),
+        name: picked.name.clone(),
         key: key.clone(),
         worktree: picked.worktree,
         quiet_after: None,
@@ -934,6 +938,7 @@ mod tests {
     fn suggested(task: &str) -> Suggested {
         Suggested {
             task: task.into(),
+            name: None,
             agent: "codex".into(),
             model: None,
             worktree: false,
@@ -1349,7 +1354,6 @@ mod tests {
             .unwrap();
         run.db.set_limits(crate::sub_sessions::RunLimits {
             live: 1,
-            total: 1,
             ..Default::default()
         });
         let (status, answer) = call(&run, "spawn", &run.lead_token, body("s2")).await;

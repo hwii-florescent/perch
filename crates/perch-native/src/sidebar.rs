@@ -9,16 +9,21 @@
 //! is ever marked exited.
 //!
 //! The rules mirror the web client's `attention.ts`, `statusView.ts`, `sidebarOrder.ts` and
-//! `navigation.ts`.
+//! `navigation.ts`. [`Model::store`] carries the facts themselves, from which [`navigation`]
+//! derives the web's `Navigation` and `Hosts` exactly as `navigation.ts` does (what native mods
+//! read); [`Model::hosts`] is the older, coarser tree the Rust sidebar view draws.
+
+pub mod navigation;
 
 use crate::settings::TerminalSettings;
 use perch_core::agent_fleet::TERMINAL_PROVIDER;
 use perch_core::protocol::{
     AttentionEvent, ProjectSummary, ServerMessage, SessionStatus, SessionSummary, SshHostEntry,
-    WorkspaceState, WorkspaceSummary,
+    WorkspaceState, WorkspaceSummary, WorktreeJob,
 };
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 /// The host id of the computer the core runs on.
 pub const LOCAL: &str = "local";
@@ -26,6 +31,10 @@ pub const LOCAL: &str = "local";
 const ATTENTION_CAPABILITY: &str = "attention.v1";
 /// Capability under which the core answers `workspace.snapshot`.
 const WORKSPACE_CAPABILITY: &str = "workspace.snapshot";
+/// The capability of a computer that lists the agents it can start (`agent.manifest.list`).
+pub const MANIFEST_CAPABILITY: &str = "agent.manifest.list";
+/// What a computer without that capability can start (the web's `AGENTS`).
+pub const KNOWN_AGENTS: [(&str, &str); 2] = [("claude", "Claude"), ("codex", "Codex")];
 /// Capability under which the core answers `workspace.pin`.
 const WORKSPACE_PIN_CAPABILITY: &str = "workspace.pin";
 
@@ -78,6 +87,20 @@ pub enum Alert {
     Done,
     /// A session is waiting on an answer.
     Blocked,
+    /// The core's usage alert (`usage.alert`): a plan limit is near or was reset. It is about no
+    /// session, so opening its toast only puts it away.
+    Usage,
+}
+
+/// The session id a usage alert's notification carries (the web's `USAGE_NOTIFICATION_ID`).
+pub const USAGE_NOTIFICATION: &str = "usage";
+
+/// The core's announcement that the terminal host stopped answering or answers again
+/// (`daemon.health`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Health {
+    pub healthy: bool,
+    pub problem: Option<String>,
 }
 
 /// How a toast is delivered (`toastDelivery`).
@@ -100,8 +123,8 @@ impl Toast {
     }
 }
 
-/// A session finished or needs the person while they are not looking at it: the app plays the
-/// sound and shows the toast. The follower only reports it; it never plays or shows anything.
+/// A session finished or needs the person while they are not looking at it, or the core's usage
+/// alert: the app plays the sound and posts the system notification. The follower only reports it; it never plays or shows anything.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Heard {
     pub alert: Alert,
@@ -112,16 +135,25 @@ pub struct Heard {
     pub sound: bool,
     pub file: Option<std::path::PathBuf>,
     pub toast: Toast,
+    /// A usage alert's detail line.
+    pub body: Option<String>,
 }
 
 impl Heard {
-    /// What the toast says.
-    pub fn text(&self) -> String {
-        let what = match self.alert {
-            Alert::Done => "finished",
-            Alert::Blocked => "needs you",
+    /// What the system notification says, as the Tauri app's: its title and its body.
+    pub fn system_note(&self) -> (String, String) {
+        let session = || {
+            if self.title.is_empty() {
+                "(untitled session)".to_string()
+            } else {
+                self.title.clone()
+            }
         };
-        format!("{} {what}", self.title)
+        match self.alert {
+            Alert::Done => ("Session finished".into(), session()),
+            Alert::Blocked => ("Session needs attention".into(), session()),
+            Alert::Usage => (self.title.clone(), self.body.clone().unwrap_or_default()),
+        }
     }
 }
 
@@ -195,29 +227,20 @@ pub struct ProjectView {
     pub sessions: Vec<SessionView>,
     /// The project's checkouts, when it has more than one (or a linked one).
     pub workspaces: Vec<WorkspaceView>,
+    /// The project has one plain checkout, which has no row of its own: there is nothing to fold
+    /// away, so its sessions are always listed (`singleWorkspaceOf` in the web sidebar).
+    pub single_checkout: bool,
     /// The most urgent state among every session of the project, `None` when it cannot be stated.
     pub top: Option<Attention>,
     /// How many sessions are in that state.
     pub top_count: usize,
 }
 
-/// Chats of one project inside a By status section.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct StatusCluster {
-    pub project_id: Option<String>,
-    pub name: String,
-    pub quickchat: bool,
-    pub sessions: Vec<SessionView>,
-}
-
-/// A By status section. `attention` is `None` for "Offline: last known", which claims no state.
-#[derive(Clone, Debug, PartialEq)]
-pub struct StatusSection {
-    pub attention: Option<Attention>,
-    pub title: String,
-    pub note: Option<String>,
-    pub count: usize,
-    pub clusters: Vec<StatusCluster>,
+impl ProjectView {
+    /// Whether the person can fold the project's rows away. The web's `collapsible`.
+    pub fn foldable(&self) -> bool {
+        !self.single_checkout
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -236,10 +259,6 @@ pub struct HostView {
     /// Whether a configured computer is turned on; `None` for this one.
     pub enabled: Option<bool>,
     pub projects: Vec<ProjectView>,
-    /// By status: sections in fixed order, each split by project.
-    pub status: Vec<StatusSection>,
-    /// Projects with no listed session, which By status lists last.
-    pub empty_projects: Vec<ProjectView>,
     /// Terminal first, then the agents the computer can start.
     pub providers: Vec<Provider>,
 }
@@ -266,13 +285,25 @@ pub struct Model {
     pub keys_file: Option<Value>,
     /// The terminal settings, once the core has sent them.
     pub terminal: Option<Box<TerminalSettings>>,
+    /// The facts as the core sent them, for [`navigation`].
+    pub store: Arc<navigation::Store>,
 }
 
 /// What `host.info` said about a remote computer.
-#[derive(Default)]
-struct HostFacts {
-    state: String,
-    error: Option<String>,
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HostFacts {
+    /// `connected`, `connecting`, `error` or `disabled`.
+    pub state: String,
+    pub error: Option<String>,
+}
+
+/// Where a computer's `workspace.snapshot` is (`workspaceSnapshotByHost`): asked for, answered,
+/// or lost with the computer (`error` says why).
+#[derive(Clone, Debug, PartialEq)]
+pub enum SnapshotState {
+    Loading,
+    Ready,
+    Error(String),
 }
 
 #[derive(Default)]
@@ -300,6 +331,12 @@ pub struct State {
     needs: HashSet<String>,
     needs_events: Vec<AttentionEvent>,
     providers: HashMap<String, Vec<Provider>>,
+    /// Per computer, the agents its manifests mark as the default pick or not (`isDefault`).
+    provider_defaults: HashMap<String, HashMap<String, bool>>,
+    /// The agent lists asked for and not answered yet, by request id: the computer asked.
+    provider_asks: HashMap<String, String>,
+    /// Per computer, an agent list asked for again or refused; absent once answered.
+    agent_lists: HashMap<String, navigation::AgentList>,
     /// The session the window shows, and the one kept in Done while it is read.
     viewing: Option<String>,
     viewed_dot: Option<(String, Option<Dot>)>,
@@ -307,11 +344,39 @@ pub struct State {
     sound_enabled: bool,
     window_active: bool,
     alerts: Vec<Heard>,
+    /// The terminal host's latest health announcement (`daemon.health`) not yet taken.
+    health: Option<Health>,
     /// Where the person's own sound files are: the folder that holds `mods/`.
     sounds_in: Option<std::path::PathBuf>,
     keybindings: BTreeMap<String, String>,
     keys_file: Option<Value>,
+    /// `programs.json` as the core checked it, while there is one.
+    programs: Option<Value>,
+    /// Sessions the core said it deleted, see [`navigation::Store::deleted`].
+    deleted: Vec<String>,
     terminal: Option<Box<TerminalSettings>>,
+    /// This computer as `server.info` names it: hostname, platform, reached over SSH.
+    server: Option<(String, String, bool)>,
+    /// The focused folder and branch (`status.update`).
+    status: Option<(String, String)>,
+    /// What the last `status.update` said of the agent's context window and cost.
+    usage: (Option<u64>, Option<f64>),
+    /// Plan usage as the web's `usePlanUsage` gives it (`usage.result`, `usage.redeemResult`):
+    /// `{usage, updatedAt, spend, redeemResult}`, null until the core first answers.
+    plan_usage: Value,
+    /// What each remote computer's `host.info` said it can do.
+    host_capabilities: HashMap<String, Vec<String>>,
+    snapshots: HashMap<String, SnapshotState>,
+    /// The core's settings as it sent them (`settings.current`), once it has.
+    settings: Option<Value>,
+    /// `settings.theme`, once the core has sent it.
+    theme: Option<String>,
+    /// `settings.emptyWorkspaceAgent`: the pane a new workspace starts with ("" for none).
+    empty_agent: Option<String>,
+    /// This computer's background worktree creates, as the last `worktree.jobs` listed them.
+    worktree_jobs: Vec<WorktreeJob>,
+    /// Counts the changes to the facts, so a [`navigation::Store`] compares cheaply.
+    revision: u64,
 }
 
 /// `statusDot.sessionDotState`: what the session itself reports, before the core's attention facts.
@@ -398,8 +463,12 @@ impl State {
         self.connected = true;
         self.offline_reason = None;
         self.host_facts.clear();
+        // Requests from before the drop are not answered on this connection.
+        self.provider_asks.clear();
+        self.agent_lists.clear();
         // A change seen against a list from before the drop would be a guess.
         self.listed = false;
+        self.revision += 1;
     }
 
     /// The socket is gone, or never came up (`reason`). Rows stay, with no state claimed.
@@ -407,6 +476,7 @@ impl State {
         self.connected = false;
         self.offline_reason = reason;
         self.core_url = None;
+        self.revision += 1;
     }
 
     /// The session the window shows. It is read: the core clears its Done mark when asked, and
@@ -414,6 +484,32 @@ impl State {
     pub fn view(&mut self, session_id: &str) {
         self.viewing = Some(session_id.to_string());
         self.track_viewed();
+        self.revision += 1;
+    }
+
+    /// The core's `usage.result`, received at `at` (ms since the epoch, the web's `Date.now()`).
+    pub fn usage_result(&mut self, accounts: Value, spend: Value, at: u64) {
+        let usage = self.plan_usage_mut();
+        usage["usage"] = accounts;
+        usage["spend"] = spend;
+        usage["updatedAt"] = json!(at);
+        self.revision += 1;
+    }
+
+    /// A redeem asked for: the last answer goes, as the web's `redeemUsageReset` clears it.
+    pub fn clear_redeem_result(&mut self) {
+        if !self.plan_usage.is_null() {
+            self.plan_usage["redeemResult"] = Value::Null;
+            self.revision += 1;
+        }
+    }
+
+    fn plan_usage_mut(&mut self) -> &mut Value {
+        if self.plan_usage.is_null() {
+            self.plan_usage =
+                json!({"usage": [], "updatedAt": 0, "spend": null, "redeemResult": null});
+        }
+        &mut self.plan_usage
     }
 
     pub fn viewing(&self) -> Option<&str> {
@@ -430,12 +526,48 @@ impl State {
         std::mem::take(&mut self.alerts)
     }
 
+    /// The terminal host's health, when the core announced a change since the last call.
+    pub fn take_health(&mut self) -> Option<Health> {
+        self.health.take()
+    }
+
     /// The frame that turns a configured computer on or off: its entry as the core sent it, with
     /// only `enabled` changed. `None` for this computer or one the core does not list.
     pub fn host_enabled_frame(&self, host_id: &str, enabled: bool) -> Option<Value> {
         let mut host = self.host_entries.iter().find(|h| h.id == host_id)?.clone();
         host.enabled = enabled;
         Some(json!({"type": "hosts.upsert", "host": host}))
+    }
+
+    /// The core was asked `request` under `request_id`: a computer's agent list is loading until
+    /// it answers (the web's `agentManifestsByHost[host].state`).
+    pub fn asked(&mut self, request: &Request, request_id: &str) {
+        if let Request::Providers(host) = request {
+            self.provider_asks
+                .insert(request_id.to_string(), host.clone());
+            self.agent_lists
+                .insert(host.clone(), navigation::AgentList::Loading);
+            self.revision += 1;
+        }
+    }
+
+    /// The order this window just asked the core to keep, taken at once as the web's store does
+    /// (`setWorkspaceOrder`), so the strip and the sidebar follow the move before the core's
+    /// broadcast confirms it. Absent lists keep what is stored.
+    pub fn set_order(
+        &mut self,
+        host_id: &str,
+        projects: Option<Vec<String>>,
+        sessions: Option<Vec<String>>,
+    ) {
+        let (stored_projects, stored_sessions) =
+            self.order.get(host_id).cloned().unwrap_or_default();
+        self.apply(&ServerMessage::WorkspaceOrder {
+            request_id: None,
+            host_id: host_id.to_string(),
+            projects: projects.unwrap_or(stored_projects),
+            sessions: sessions.unwrap_or(stored_sessions),
+        });
     }
 
     /// Fold one message from the core in. Returns what to ask for next.
@@ -446,12 +578,14 @@ impl State {
                 capabilities,
                 hostname,
                 platform,
+                is_ssh,
                 ..
             } => {
                 // An older core sends no attention events: only the sessions' own flags speak.
                 self.needs.clear();
                 self.needs_events.clear();
                 self.machine = Some(format!("{hostname} · {platform}"));
+                self.server = Some((hostname.clone(), platform.clone(), *is_ssh));
                 self.local_capabilities.clone_from(capabilities);
                 if has(capabilities, ATTENTION_CAPABILITY) {
                     asks.push(Request::Attention);
@@ -460,13 +594,63 @@ impl State {
                     asks.push(Request::Workspaces(LOCAL.into()));
                 }
             }
+            ServerMessage::StatusUpdate {
+                cwd,
+                branch,
+                context_tokens,
+                cost_usd,
+            } => {
+                self.status = Some((cwd.clone(), branch.clone()));
+                self.usage = (*context_tokens, *cost_usd);
+            }
+            ServerMessage::UsageResult { accounts, spend } => {
+                let at = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_millis() as u64);
+                self.usage_result(json!(accounts), json!(spend), at);
+            }
+            // As the web's store: told like a finished session, but about no session; a reset
+            // makes no sound.
+            ServerMessage::UsageAlert { kind, title, body } => {
+                let settings = self.terminal.as_deref();
+                let toast = settings.map_or(Toast::App, |t| Toast::parse(&t.toast_delivery));
+                let sound = self.sound_enabled && kind != "reset";
+                if sound || toast != Toast::Off {
+                    self.alerts.push(Heard {
+                        alert: Alert::Usage,
+                        session_id: USAGE_NOTIFICATION.into(),
+                        title: title.clone(),
+                        sound,
+                        file: self
+                            .sounds_in
+                            .as_deref()
+                            .zip(settings.map(|t| t.sound_blocked.as_str()))
+                            .and_then(|(folder, rel)| crate::sound::file_in(folder, rel)),
+                        toast,
+                        body: (!body.is_empty()).then(|| body.clone()),
+                    });
+                }
+            }
+            ServerMessage::DaemonHealth { healthy, problem } => {
+                self.health = Some(Health {
+                    healthy: *healthy,
+                    problem: problem.clone(),
+                });
+            }
+            ServerMessage::UsageRedeemResult { .. } => {
+                let result = serde_json::to_value(message).unwrap_or(Value::Null);
+                self.plan_usage_mut()["redeemResult"] = result;
+            }
             ServerMessage::SessionList { sessions } => {
                 self.sessions = sessions.clone();
                 self.listed = true;
             }
             ServerMessage::SessionUpdated { session } => self.session_updated(session),
             ServerMessage::SessionDeleted { session_id } => {
-                self.sessions.retain(|s| s.id != *session_id)
+                self.sessions.retain(|s| s.id != *session_id);
+                // ponytail: grows by one id per session ended while the window runs; trim if a
+                // window ever outlives many thousands.
+                self.deleted.push(session_id.clone());
             }
             ServerMessage::ProjectList {
                 host_id, projects, ..
@@ -497,6 +681,7 @@ impl State {
             } => {
                 self.workspaces.retain(|w| w.host_id != *host_id);
                 self.workspaces.extend(workspaces.iter().cloned());
+                self.snapshots.insert(host_id.clone(), SnapshotState::Ready);
             }
             ServerMessage::WorkspaceUpdated { workspace, .. } => {
                 match self.workspaces.iter_mut().find(|w| w.id == workspace.id) {
@@ -504,6 +689,7 @@ impl State {
                     None => self.workspaces.push(workspace.clone()),
                 }
             }
+            ServerMessage::WorktreeJobs { jobs } => self.worktree_jobs.clone_from(jobs),
             ServerMessage::WorkspaceOrder {
                 host_id,
                 projects,
@@ -534,6 +720,20 @@ impl State {
                         error: error.clone(),
                     },
                 );
+                // As the web's store: the capabilities this message names (none when it names
+                // none), and a computer that is not connected keeps its last inventory, marked
+                // as not current.
+                self.host_capabilities
+                    .insert(host_id.clone(), capabilities.clone().unwrap_or_default());
+                if state != "connected" {
+                    self.snapshots.insert(
+                        host_id.clone(),
+                        SnapshotState::Error(
+                            "Remote disconnected. Showing the last known workspace inventory."
+                                .into(),
+                        ),
+                    );
+                }
                 if state == "connected" && was.is_none_or(|was| was.state != "connected") {
                     asks.push(Request::Projects(host_id.clone()));
                     asks.push(Request::Providers(host_id.clone()));
@@ -546,24 +746,45 @@ impl State {
                 }
             }
             ServerMessage::SettingsCurrent { settings } => {
+                self.settings = serde_json::to_value(settings).ok();
                 self.sound_enabled = settings.sound_enabled;
+                self.theme = Some(settings.theme.clone());
+                self.empty_agent = Some(settings.empty_workspace_agent.clone());
                 self.keybindings.clone_from(&settings.keybindings);
                 self.terminal = Some(Box::new(TerminalSettings::from_wire(settings)));
             }
-            ServerMessage::ModsState { keys, folder, .. } => {
+            ServerMessage::ModsState {
+                keys,
+                programs,
+                folder,
+                ..
+            } => {
                 self.keys_file.clone_from(keys);
+                self.programs.clone_from(programs);
                 self.sounds_in = std::path::Path::new(folder).parent().map(Into::into);
             }
             ServerMessage::ModsChanged {} => asks.push(Request::Mods),
+            ServerMessage::Error {
+                message,
+                request_id: Some(id),
+                ..
+            } if self.provider_asks.contains_key(id) => {
+                let host = self.provider_asks.remove(id).unwrap_or_default();
+                self.agent_lists
+                    .insert(host, navigation::AgentList::Failed(message.clone()));
+            }
             ServerMessage::AgentManifestList {
-                host_id, manifests, ..
+                request_id,
+                host_id,
+                manifests,
+                ..
             } => {
+                self.provider_asks.remove(request_id);
                 let choices = manifests
                     .iter()
                     .filter(|m| {
                         m.available
                             && m.enabled != Some(false)
-                            && m.id != TERMINAL_PROVIDER
                             && m.supported_modes.iter().any(|mode| mode == "cli")
                             && m.capabilities.iter().any(|c| c == "interactiveTerminal")
                     })
@@ -572,12 +793,25 @@ impl State {
                         name: m.display_name.clone(),
                     })
                     .collect();
-                self.providers
-                    .insert(host_id.clone().unwrap_or_else(|| LOCAL.into()), choices);
+                let host = host_id.clone().unwrap_or_else(|| LOCAL.into());
+                let defaults = manifests
+                    .iter()
+                    .filter_map(|m| m.is_default.map(|d| (m.id.clone(), d)))
+                    .collect();
+                self.provider_defaults.insert(host.clone(), defaults);
+                self.agent_lists.remove(&host);
+                self.providers.insert(host, choices);
             }
             _ => return asks,
         }
         self.track_viewed();
+        for ask in &asks {
+            if let Request::Workspaces(host_id) = ask {
+                self.snapshots
+                    .insert(host_id.clone(), SnapshotState::Loading);
+            }
+        }
+        self.revision += 1;
         asks
     }
 
@@ -598,7 +832,7 @@ impl State {
                 let toast = settings.map_or(Toast::App, |t| Toast::parse(&t.toast_delivery));
                 let chosen = settings.map(|t| match alert {
                     Alert::Done => t.sound_done.as_str(),
-                    Alert::Blocked => t.sound_blocked.as_str(),
+                    _ => t.sound_blocked.as_str(),
                 });
                 if self.sound_enabled || toast != Toast::Off {
                     self.alerts.push(Heard {
@@ -612,6 +846,7 @@ impl State {
                             .zip(chosen)
                             .and_then(|(folder, rel)| crate::sound::file_in(folder, rel)),
                         toast,
+                        body: None,
                     });
                 }
             }
@@ -704,6 +939,45 @@ impl State {
             keybindings: self.keybindings.clone(),
             keys_file: self.keys_file.clone(),
             terminal: self.terminal.clone(),
+            store: Arc::new(self.store()),
+        }
+    }
+
+    /// The facts as they stand, for [`navigation`].
+    pub fn store(&self) -> navigation::Store {
+        let server = self.server.clone();
+        navigation::Store {
+            revision: self.revision,
+            connected: self.connected,
+            listed: self.listed,
+            hostname: server.as_ref().map(|s| s.0.clone()),
+            platform: server.as_ref().map(|s| s.1.clone()),
+            is_ssh: server.map(|s| s.2),
+            status: self.status.clone(),
+            context_tokens: self.usage.0,
+            cost_usd: self.usage.1,
+            plan_usage: self.plan_usage.clone(),
+            local_capabilities: self.local_capabilities.clone(),
+            host_capabilities: self.host_capabilities.clone(),
+            host_entries: self.host_entries.clone(),
+            host_states: self.host_facts.clone(),
+            snapshots: self.snapshots.clone(),
+            projects: self.projects.clone(),
+            workspaces: self.workspaces.clone(),
+            sessions: self.sessions.clone(),
+            order: self.order.clone(),
+            needs_events: self.needs_events.clone(),
+            viewing: self.viewing.clone(),
+            held: self.held.clone(),
+            settings: self.settings.clone(),
+            theme: self.theme.clone(),
+            empty_agent: self.empty_agent.clone(),
+            worktree_jobs: self.worktree_jobs.clone(),
+            providers: self.providers.clone(),
+            provider_defaults: self.provider_defaults.clone(),
+            agent_lists: self.agent_lists.clone(),
+            programs: self.programs.clone(),
+            deleted: self.deleted.clone(),
         }
     }
 
@@ -808,95 +1082,32 @@ impl State {
             views.push(self.project_view(None, other));
         }
 
-        let empty_projects = views
-            .iter()
-            .zip(&projects)
-            .filter(|(_, p)| !is_chats(p))
-            .filter(|(_, p)| {
-                !rows
-                    .iter()
-                    .any(|r| r.1.project_id.as_deref() == Some(&p.id))
-            })
-            .map(|(v, _)| v.clone())
-            .collect();
-
-        // By status: newest first, from the core's order reversed.
-        let mut newest: Vec<&SessionSummary> = rows.iter().map(|r| r.1).collect();
-        newest.sort_by_key(|s| std::cmp::Reverse(s.created_at));
-        let reversed: Vec<String> = session_order.iter().rev().cloned().collect();
-        let newest = order_by(newest, &reversed, |s| &s.id);
-        let by_session: HashMap<&str, &(Option<usize>, &SessionSummary, SessionView)> =
-            rows.iter().map(|r| (r.1.id.as_str(), r)).collect();
-        // Project headings in the sidebar's project order, Other last.
-        let clusters = |members: &[&SessionSummary]| -> Vec<StatusCluster> {
-            (0..projects.len())
-                .map(Some)
-                .chain([None])
-                .filter_map(|at| {
-                    let sessions: Vec<SessionView> = members
-                        .iter()
-                        .filter_map(|s| by_session.get(s.id.as_str()))
-                        .filter(|r| r.0 == at)
-                        .map(|r| r.2.clone())
-                        .collect();
-                    let project = at.map(|at| projects[at]);
-                    (!sessions.is_empty()).then(|| StatusCluster {
-                        project_id: project.map(|p| p.id.clone()),
-                        name: project.map_or_else(|| "Other".into(), project_name),
-                        quickchat: project.is_some_and(is_chats),
-                        sessions: nest_under_leads(sessions),
-                    })
-                })
-                .collect()
-        };
-        let status = if !reachable {
-            // What these were doing is unknown: shown once, as last known, never as Working.
-            let all: Vec<&SessionSummary> = newest.clone();
-            if all.is_empty() {
-                Vec::new()
-            } else {
-                vec![StatusSection {
-                    attention: None,
-                    title: "Offline: last known".into(),
-                    note: Some(if id == LOCAL {
-                        "Reconnecting…".to_string()
-                    } else {
-                        format!("{name}: {state}")
-                    }),
-                    count: all.len(),
-                    clusters: clusters(&all),
-                }]
-            }
-        } else {
-            [
-                Attention::NeedsYou,
-                Attention::Done,
-                Attention::Working,
-                Attention::Idle,
-            ]
-            .into_iter()
-            .filter_map(|wanted| {
-                let members: Vec<&SessionSummary> = newest
-                    .iter()
-                    .copied()
-                    .filter(|s| by_session[s.id.as_str()].2.attention == Some(wanted))
-                    .collect();
-                (!members.is_empty()).then(|| StatusSection {
-                    attention: Some(wanted),
-                    title: wanted.heading().into(),
-                    note: None,
-                    count: members.len(),
-                    clusters: clusters(&members),
-                })
-            })
-            .collect()
-        };
-
         let mut providers = vec![Provider {
             id: TERMINAL_PROVIDER.into(),
             name: "Terminal".into(),
         }];
-        providers.extend(self.providers.get(&id).cloned().unwrap_or_default());
+        let capabilities = if id == LOCAL {
+            Some(&self.local_capabilities)
+        } else {
+            self.host_capabilities.get(&id)
+        };
+        if capabilities.is_some_and(|c| has(c, MANIFEST_CAPABILITY)) {
+            // The core lists Terminal among its agents (the web's menus show it there); this
+            // list already starts with it.
+            providers.extend(
+                self.providers
+                    .get(&id)
+                    .into_iter()
+                    .flatten()
+                    .filter(|p| p.id != TERMINAL_PROVIDER)
+                    .cloned(),
+            );
+        } else {
+            providers.extend(KNOWN_AGENTS.iter().map(|(id, name)| Provider {
+                id: (*id).into(),
+                name: (*name).into(),
+            }));
+        }
         HostView {
             enabled: entry.map(|e| e.enabled),
             direct: entry.is_some_and(|e| e.mode == "direct"),
@@ -909,8 +1120,6 @@ impl State {
             state,
             reachable,
             projects: views,
-            status,
-            empty_projects,
             providers,
         }
     }
@@ -994,6 +1203,7 @@ impl State {
             favorite: project.is_some_and(|p| p.favorite),
             sessions: nest_under_leads(direct),
             workspaces,
+            single_checkout: single,
             top,
             top_count,
         }
@@ -1538,6 +1748,18 @@ mod tests {
     #[test]
     fn launch_choices_are_the_agents_the_core_lists() {
         let mut state = state();
+        // A core that does not list its agents offers the two every Perch knows.
+        let ids = |state: &State| -> Vec<String> {
+            state.model().hosts[0]
+                .providers
+                .iter()
+                .map(|p| p.id.clone())
+                .collect()
+        };
+        assert_eq!(ids(&state), ["terminal", "claude", "codex"]);
+        state.apply(&message(json!({
+            "type": "server.info", "hostname": "h", "isSsh": false, "platform": "macOS",
+            "capabilities": [MANIFEST_CAPABILITY]})));
         let manifest = |id: &str, available: bool, enabled: Value, modes: Value| {
             json!({"id": id, "displayName": id.to_uppercase(), "supportedModes": modes,
                    "resumability": "none", "capabilities": ["interactiveTerminal"],
@@ -1556,11 +1778,44 @@ mod tests {
         let model = state.model();
         let ids: Vec<_> = model.hosts[0].providers.iter().map(|p| &*p.id).collect();
         assert_eq!(ids, ["terminal", "claude"]);
+        // The React menus (tab "+", Cmd+T, the launcher) read the core's list, which keeps
+        // Terminal, as the web's `useAgentChoices`.
+        let listed: Vec<_> = model.store.providers[LOCAL]
+            .iter()
+            .map(|p| &*p.id)
+            .collect();
+        assert_eq!(listed, ["claude", "terminal"]);
         let row = &model.hosts[0].projects[0].sessions[0];
         assert_eq!(
             (row.provider.as_str(), row.provider_id.as_deref()),
             ("CLAUDE", Some("claude"))
         );
+    }
+
+    #[test]
+    fn an_agent_list_is_loading_while_asked_and_says_why_it_was_refused() {
+        use navigation::AgentList;
+        let mut state = state();
+        let lists = |state: &State| state.store().agent_lists;
+        state.asked(&Request::Projects(LOCAL.into()), "p");
+        assert!(lists(&state).is_empty(), "only agent lists are tracked");
+        state.asked(&Request::Providers(LOCAL.into()), "a");
+        state.asked(&Request::Providers("box".into()), "b");
+        assert_eq!(lists(&state)[LOCAL], AgentList::Loading);
+        state.apply(&message(
+            json!({"type": "agent.manifest.list", "requestId": "a", "manifests": []}),
+        ));
+        state.apply(&message(
+            json!({"type": "error", "requestId": "x", "message": "not an agent list"}),
+        ));
+        state.apply(&message(
+            json!({"type": "error", "requestId": "b", "message": "box is unreachable"}),
+        ));
+        let now = lists(&state);
+        assert!(!now.contains_key(LOCAL), "answered");
+        assert_eq!(now["box"], AgentList::Failed("box is unreachable".into()));
+        state.connect();
+        assert!(lists(&state).is_empty(), "a new connection asks again");
     }
 
     fn workspace(id: &str, project: &str, extra: Value) -> Value {
@@ -1647,6 +1902,51 @@ mod tests {
             depths,
             [("w1".into(), 0), ("w2".into(), 0), ("w4".into(), 1)]
         );
+    }
+
+    /// A session the core announces appears under its project at once, whatever the project's
+    /// checkouts are. The model holds no fold: whether the rows show is the view's (`Nav`).
+    #[test]
+    fn a_new_session_is_listed_under_its_project_with_the_foldability_the_web_gives_it() {
+        let rows = |state: &State| -> Vec<String> {
+            let project = &state.model().hosts[0].projects[0];
+            project
+                .sessions
+                .iter()
+                .chain(project.workspaces.iter().flat_map(|w| &w.sessions))
+                .map(|s| s.id.clone())
+                .collect()
+        };
+        // (checkouts the core lists for project `a`, whether the person can fold it)
+        let cases: [(Vec<Value>, bool); 3] = [
+            (vec![], true),
+            (vec![workspace("w1", "a", json!({}))], false),
+            (
+                vec![
+                    workspace("w1", "a", json!({})),
+                    workspace("w2", "a", json!({"parentWorkspaceId": "w1"})),
+                ],
+                true,
+            ),
+        ];
+        for (checkouts, foldable) in cases {
+            let mut state = state();
+            state.apply(&session_list(vec![]));
+            state.apply(&snapshot(checkouts.clone()));
+            state.apply(&updated(session(
+                "new",
+                LOCAL,
+                "a",
+                json!({"workspaceId": "w1"}),
+            )));
+            assert_eq!(rows(&state), ["new"], "{} checkouts", checkouts.len());
+            assert_eq!(
+                state.model().hosts[0].projects[0].foldable(),
+                foldable,
+                "{} checkouts",
+                checkouts.len()
+            );
+        }
     }
 
     #[test]
@@ -1749,84 +2049,6 @@ mod tests {
                 ("grand", false),
             ]
         );
-    }
-
-    #[test]
-    fn by_status_sorts_chats_by_state_then_project() {
-        let mut state = state();
-        state.apply(&project_list(
-            LOCAL,
-            vec![
-                project("a", LOCAL, "alpha"),
-                project("b", LOCAL, "beta"),
-                project("c", LOCAL, "empty"),
-                json!({"id": "q", "hostId": LOCAL, "name": "Chats", "path": "/home/.perch/scratch",
-                       "favorite": false, "createdAt": 0, "updatedAt": 0}),
-            ],
-        ));
-        state.apply(&session_list(vec![
-            session("old-idle", LOCAL, "a", json!({"createdAt": 1})),
-            session("new-idle", LOCAL, "a", json!({"createdAt": 9})),
-            session("run", LOCAL, "b", json!({"status": "running"})),
-            session("chat", LOCAL, "q", json!({"blocked": true})),
-            session("ask", LOCAL, "a", json!({"blocked": true})),
-            session(
-                "lead",
-                LOCAL,
-                "b",
-                json!({"status": "running", "createdAt": 3}),
-            ),
-            session(
-                "kid",
-                LOCAL,
-                "b",
-                json!({"status": "running", "parentSessionId": "lead", "createdAt": 4}),
-            ),
-        ]));
-        let model = state.model();
-        let host = &model.hosts[0];
-        let sections: Vec<_> = host
-            .status
-            .iter()
-            .map(|s| (s.title.as_str(), s.count))
-            .collect();
-        assert_eq!(sections, [("Needs you", 2), ("Working", 3), ("Idle", 2)]);
-        // Each section keeps its chats under their project, in the sidebar's order: Quickchat last.
-        let needs: Vec<_> = host.status[0]
-            .clusters
-            .iter()
-            .map(|c| (c.name.as_str(), ids(&c.sessions)))
-            .collect();
-        assert_eq!(
-            needs,
-            [
-                ("alpha", vec![("ask", false)]),
-                ("Quickchat", vec![("chat", false)])
-            ]
-        );
-        // Newest first within a project, a sub-session under its lead.
-        let idle = &host.status[2].clusters[0];
-        assert_eq!(
-            ids(&idle.sessions),
-            [("new-idle", false), ("old-idle", false)]
-        );
-        let working = &host.status[1].clusters[0];
-        assert_eq!(working.name, "beta");
-        assert_eq!(
-            ids(&working.sessions),
-            [("lead", false), ("kid", true), ("run", false)]
-        );
-        // Projects with no chat are listed last, so none goes missing.
-        let empty: Vec<_> = host.empty_projects.iter().map(|p| &*p.name).collect();
-        assert_eq!(empty, ["empty"]);
-
-        // A computer that cannot be reached claims no state: one section, as last known.
-        state.disconnect(None);
-        let host = &state.model().hosts[0];
-        assert_eq!(host.status.len(), 1);
-        assert_eq!(host.status[0].title, "Offline: last known");
-        assert_eq!(host.status[0].attention, None);
-        assert_eq!(host.status[0].count, 7);
     }
 
     #[test]
@@ -2147,6 +2369,62 @@ mod tests {
     }
 
     #[test]
+    fn a_usage_alert_is_told_like_a_finished_chat_but_a_reset_is_silent() {
+        let mut state = state();
+        state.apply(&settings(true, json!({})));
+        let alert = |kind: &str, body: &str| {
+            message(json!({"type": "usage.alert", "kind": kind,
+                "title": "Codex 5h limit at 93%", "body": body}))
+        };
+        state.apply(&alert("threshold", "Resets in 42 minutes"));
+        let heard = state.take_alerts();
+        assert_eq!(heard.len(), 1);
+        assert_eq!(
+            (heard[0].alert, heard[0].sound, heard[0].toast),
+            (Alert::Usage, true, Toast::App)
+        );
+        assert_eq!(heard[0].session_id, USAGE_NOTIFICATION);
+        assert_eq!(
+            heard[0].system_note(),
+            (
+                "Codex 5h limit at 93%".into(),
+                "Resets in 42 minutes".into()
+            )
+        );
+        state.apply(&alert("reset", ""));
+        let heard = state.take_alerts();
+        assert!(!heard[0].sound, "a reset makes no sound");
+        assert_eq!(heard[0].body, None, "an empty body is none");
+        assert_eq!(
+            heard[0].system_note(),
+            ("Codex 5h limit at 93%".into(), String::new())
+        );
+        // With sound and toasts off, nothing is due.
+        state.apply(&message(json!({"type": "settings.current", "settings":
+            {"defaultCwd": null, "soundEnabled": false, "toastDelivery": "off"}})));
+        state.apply(&alert("threshold", "x"));
+        assert!(state.take_alerts().is_empty());
+    }
+
+    #[test]
+    fn the_terminal_hosts_health_is_kept_until_taken() {
+        let mut state = state();
+        assert_eq!(state.take_health(), None);
+        state.apply(&message(json!({"type": "daemon.health", "healthy": false,
+            "problem": "No answer to a health check"})));
+        state.apply(&message(json!({"type": "daemon.health", "healthy": true})));
+        assert_eq!(
+            state.take_health(),
+            Some(Health {
+                healthy: true,
+                problem: None
+            }),
+            "the latest wins"
+        );
+        assert_eq!(state.take_health(), None, "taken once");
+    }
+
+    #[test]
     fn a_finished_or_blocked_chat_is_worth_a_sound_only_when_unseen() {
         let mut state = state();
         state.apply(&settings(true, json!({"global.sidebar": "cmd+shift+b"})));
@@ -2218,7 +2496,10 @@ mod tests {
             [(false, Toast::App)],
             "sound is off: the toast alone is due"
         );
-        assert_eq!(heard[0].text(), "s1 finished");
+        assert_eq!(
+            heard[0].system_note(),
+            ("Session finished".into(), "s1".into())
+        );
         assert_eq!(heard[0].session_id, "s1");
         // Toasts off as well: nothing is due.
         state.apply(&message(json!({"type": "settings.current", "settings":

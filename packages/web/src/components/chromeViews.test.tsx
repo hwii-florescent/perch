@@ -34,27 +34,54 @@ afterEach(() => { act(() => root.unmount()); host.remove(); });
 const scope = () => host.querySelector('[data-testid="session-list"]') ?? host;
 const get = (id: string) => (id.startsWith("workspace-session-") ? scope().querySelector(`[data-testid="${id}"]`) : null) ?? host.querySelector(`[data-testid="${id}"]`)!;
 
-it.each(["status", "project", "list", "scratchpad"])("%s sessions have one full-row selection and sibling close actions", (mode) => {
+it.each(["status", "project", "list", "scratchpad"])("%s sessions have one full-row selection and a sibling menu button", (mode) => {
   if (mode !== "status") storage.set("perch.sidebar.organize", mode === "list" ? "list" : "project");
   if (mode === "scratchpad") usePerchStore.setState({ workspaceProjects: [{ ...project, path: "/tmp/.perch/scratch" }] });
   act(() => root.render(<WorkspaceOverview />));
   const selected = get("workspace-session-first");
   const other = get("workspace-session-second");
-  const close = get("workspace-session-close-first");
+  const more = get("session-menu-button-first");
   expect(scope().querySelectorAll('[aria-current="page"]')).toHaveLength(1);
   expect(selected.getAttribute("aria-current")).toBe("page");
   expect(selected.className).not.toContain("bg-surface-1");
   expect(selected.parentElement!.className).toContain("bg-surface-1");
   expect(other.parentElement!.className).not.toMatch(/(^|\s)bg-surface-1/);
-  expect(close.parentElement).toBe(selected.parentElement);
-  expect(close.className).toContain("group-focus-within/row:opacity-100");
-  expect(close.className).toContain("[@media(hover:none)]:opacity-100");
+  expect(more.parentElement).toBe(selected.parentElement);
+  expect(more.className).toContain("group-focus-within/row:opacity-100");
+  expect(more.className).toContain("[@media(hover:none)]:opacity-100");
+  expect(more.className).toMatch(/(^|\s)opacity-100/);
+  expect(host.querySelector('[data-testid^="workspace-session-close-"]')).toBeNull();
   expect(get("workspace-entry-w")?.className ?? "").not.toMatch(/(^|\s)bg-surface-1/);
-  act(() => close.dispatchEvent(new MouseEvent("click", { bubbles: true })));
-  expect(requestCloseSession).toHaveBeenCalledWith("first");
+  // The button opens the row's own menu, where Close lives; it does not select the row.
+  act(() => more.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  expect(document.querySelector('[data-testid="tab-menu-close"]')).not.toBeNull();
   expect(select).not.toHaveBeenCalled();
   act(() => other.dispatchEvent(new MouseEvent("click", { bubbles: true })));
   expect(select).toHaveBeenCalledWith("second");
+});
+
+it("a lead folds its sub-sessions behind a chevron, keeps what needs you on show and remembers the fold", () => {
+  const family = [{ ...sessions[0]!, id: "lead" }, { ...sessions[1]!, id: "kid-a", parentSessionId: "lead" }, { ...sessions[1]!, id: "kid-b", parentSessionId: "lead", blocked: true }];
+  act(() => usePerchStore.setState({ sessions: family, sessionId: "lead" }));
+  act(() => root.render(<WorkspaceOverview />));
+  const row = (id: string) => get(`workspace-session-${id}`) as HTMLElement | null;
+  // Unfolded: the sub-sessions hang off an elbow each; only the active row (the lead) is filled, none at rest.
+  expect(row("kid-a")!.parentElement!.hasAttribute("data-sub-session")).toBe(true);
+  expect(host.querySelectorAll('[data-testid^="session-elbow-"]')).toHaveLength(2);
+  expect(row("lead")!.parentElement!.className).toContain("bg-surface-1");
+  expect(row("kid-a")!.parentElement!.className).not.toMatch(/(^|\s)bg-surface-[01](\s|$)/);
+  const fold = get("session-fold-lead")!;
+  expect(fold.getAttribute("aria-expanded")).toBe("true");
+  expect(get("session-fold-kid-a")).toBeNull();
+  act(() => fold.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  expect(row("kid-a")).toBeNull();
+  expect(row("kid-b")).toBeNull();
+  expect(get("session-fold-lead")!.getAttribute("aria-expanded")).toBe("false");
+  expect(get("session-rollup-lead")!.getAttribute("data-section")).toBe("needs");
+  expect(JSON.parse(storage.get("perch.sidebar.foldedSessions")!)).toEqual(["lead"]);
+  act(() => get("session-fold-lead")!.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+  expect(row("kid-b")).not.toBeNull();
+  expect(JSON.parse(storage.get("perch.sidebar.foldedSessions")!)).toEqual([]);
 });
 
 it("browser chrome uses SVG controls and only opens a page after an HTTP(S) address is submitted", () => {

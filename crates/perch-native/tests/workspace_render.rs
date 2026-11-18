@@ -1,20 +1,21 @@
 //! Draws the window offscreen with several sessions open and checks what it shows: tabs, a split
-//! with different content in each pane, the command palette, the terminal settings and an
+//! with different content in each pane, the terminal settings and an
 //! attention mark on a tab. Keys go through the window's own key path (`dispatch_keystroke`), so
 //! the dispatcher that runs before the terminal is what is tested. No window is created, shown or
 //! focused, and no core is involved: the terminals are fed what a core would send.
 
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use gpui::{
-    point, px, size, AppContext, HeadlessAppContext, Keystroke, Modifiers, MouseButton,
-    MouseDownEvent, MouseUpEvent, PlatformInput, Window, WindowHandle,
+    point, px, size, AppContext, EntityInputHandler, HeadlessAppContext, KeyDownEvent, Keystroke,
+    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, Window, WindowHandle,
 };
 use perch_native::client::{Command, Core, Update};
-use perch_native::sidebar::{Alert, Attention, Heard, Model, State, Toast};
+use perch_native::sidebar::{Model, State};
 use perch_native::terminal::attach::{FromCore, ToCore};
 use perch_native::terminal::clipboard::MemoryClipboard;
-use perch_native::terminal::{Status, TerminalView};
-use perch_native::ui::{tint, Workspace, SIDEBAR_WIDTH};
+use perch_native::terminal::links::Target;
+use perch_native::terminal::{Status, TerminalEvent, TerminalView};
+use perch_native::ui::{Workspace, SIDEBAR_WIDTH};
 use perch_native::workspace::TAB_BAR_HEIGHT;
 use serde_json::{json, Value};
 use std::rc::Rc;
@@ -31,6 +32,11 @@ fn model(sessions: &[(&str, Value)]) -> Model {
 
 /// [`model`] where the core also offers the agents named in `agents`.
 fn model_with_agents(sessions: &[(&str, Value)], agents: &[&str]) -> Model {
+    state_with_agents(sessions, agents).model()
+}
+
+/// The state [`model_with_agents`] shows, for a test that changes what the core says later.
+fn state_with_agents(sessions: &[(&str, Value)], agents: &[&str]) -> State {
     let manifests: Vec<Value> = std::iter::once("terminal")
         .chain(agents.iter().copied())
         .map(|id| {
@@ -64,7 +70,7 @@ fn model_with_agents(sessions: &[(&str, Value)], agents: &[&str]) -> Model {
     state.apply(&message(
         json!({"type": "session.list", "sessions": sessions}),
     ));
-    state.model()
+    state
 }
 
 struct Shot {
@@ -151,6 +157,8 @@ struct Harness {
     window: WindowHandle<Workspace>,
     /// What the terminals copy to and paste from; the real clipboard is never touched.
     clipboard: Rc<MemoryClipboard>,
+    /// The links the window was asked to open. None is ever handed to the system.
+    opened: Rc<std::cell::RefCell<Vec<Target>>>,
 }
 
 impl Harness {
@@ -171,12 +179,17 @@ impl Harness {
         );
         let clipboard = Rc::new(MemoryClipboard::default());
         let held = clipboard.clone();
+        let opened = Rc::new(std::cell::RefCell::new(Vec::new()));
+        let record = opened.clone();
         let window = cx
             .open_window(size(px(WIDTH), px(HEIGHT)), |_, cx| {
                 cx.new(|cx| {
                     Workspace::new(model, commands, cx)
                         .with_core(locate)
                         .with_clipboard(held)
+                        .with_opener(Rc::new(move |target| {
+                            record.borrow_mut().push(target.clone())
+                        }))
                 })
             })
             .unwrap();
@@ -184,6 +197,7 @@ impl Harness {
             cx,
             window,
             clipboard,
+            opened,
         }
     }
 
@@ -313,19 +327,13 @@ impl Harness {
         self.cx.run_until_parked();
     }
 
-    /// A named command, as a key or the palette runs it.
+    /// A named command, as a key or the Navigator runs it.
     fn run(&mut self, name: &str, args: Value) -> Result<(), String> {
         self.window
             .update(&mut self.cx, |ws, window, cx| {
                 ws.run_command(name, Some(&args), window, cx)
             })
             .unwrap()
-    }
-
-    fn type_text(&mut self, text: &str) {
-        for c in text.chars() {
-            self.press(&c.to_string());
-        }
     }
 
     fn ws<R>(&mut self, f: impl FnOnce(&Workspace) -> R) -> R {
@@ -375,7 +383,6 @@ fn filled(r: u8, g: u8, b: u8) -> String {
 fn two_tabs() {
     let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
     let area = SIDEBAR_WIDTH..WIDTH;
-    let bar = (0.0, TAB_BAR_HEIGHT);
 
     // Nothing open: no tab strip, a quiet main area.
     let empty = h.draw();
@@ -390,12 +397,8 @@ fn two_tabs() {
     // Only the tab on screen has a terminal laid out; the other is kept and not drawn.
     assert_eq!(h.shown(), ["bravo"]);
     assert_eq!(h.ws(|ws| ws.terminals().len()), 1);
-    let both = h.draw();
-    assert!(
-        both.bright(area.start, area.end, bar.0, bar.1) > 20,
-        "the active tab's title is drawn in the strip"
-    );
-    both.save("two-tabs");
+    // The strip itself is the stock `tabs` mod (`mods_chrome_window`); mods are off here.
+    h.draw().save("two-tabs");
 
     // The keys of the web's table switch tabs, and the window takes them before the terminal.
     assert!(h.press("cmd-1"), "tabs.jump1 is taken");
@@ -428,53 +431,6 @@ fn two_tabs() {
     assert_eq!(h.strip(), Vec::<String>::new());
     assert!(h.ws(|ws| ws.open().is_none()));
     println!("workspace_render: two tabs ok");
-}
-
-fn attention_on_a_tab() {
-    let tab_bar_dot = |h: &mut Harness, attention: Attention| {
-        h.draw()
-            .count(tint(attention).0, SIDEBAR_WIDTH, WIDTH, 0.0, TAB_BAR_HEIGHT)
-    };
-    let mut quiet = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
-    quiet.open("alpha");
-    quiet.open("bravo");
-    assert_eq!(
-        tab_bar_dot(&mut quiet, Attention::NeedsYou),
-        0,
-        "no tab needs you"
-    );
-
-    // alpha needs you while bravo is the tab being read: alpha's tab says so, in the strip.
-    let mut h = Harness::new(model(&[
-        ("alpha", json!({"blocked": true})),
-        ("bravo", json!({})),
-    ]));
-    h.open("alpha");
-    h.open("bravo");
-    assert!(
-        tab_bar_dot(&mut h, Attention::NeedsYou) > 10,
-        "the tab of a session that needs you has the red dot"
-    );
-    let marked = h.draw();
-    marked.save("attention");
-    let fill = marked.count(
-        tint(Attention::NeedsYou).1,
-        SIDEBAR_WIDTH,
-        WIDTH,
-        0.0,
-        TAB_BAR_HEIGHT,
-    );
-    assert!(fill > 30, "and its label ({fill} fill pixels)");
-    // The mark is live: when the core says the session is no longer waiting, it goes.
-    let settled = model(&[("alpha", json!({})), ("bravo", json!({}))]);
-    h.window
-        .update(&mut h.cx, |ws, _, cx| {
-            ws.sidebar()
-                .update(cx, |sidebar, cx| sidebar.apply(Update::Model(settled), cx))
-        })
-        .unwrap();
-    assert_eq!(tab_bar_dot(&mut h, Attention::NeedsYou), 0);
-    println!("workspace_render: attention mark ok");
 }
 
 fn a_split_shows_each_pane() {
@@ -567,83 +523,26 @@ fn a_split_shows_each_pane() {
     println!("workspace_render: split ok");
 }
 
-fn the_palette_lists_and_runs_commands() {
+fn a_clicked_link_reaches_the_windows_opener() {
     let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
     h.open("alpha");
     h.open("bravo");
-    let before = h.draw();
-    let overlay = |shot: &Shot| shot.count(0x1c1c1f, SIDEBAR_WIDTH, WIDTH, 0.0, HEIGHT);
-    assert!(!h.ws(|ws| ws.palette_open()));
-    assert!(h.press("cmd-p"), "global.navigator is taken");
-    assert!(h.ws(|ws| ws.palette_open()));
-    let open = h.draw();
-    open.save("palette");
-    assert!(
-        overlay(&open) > overlay(&before) + 20_000,
-        "the palette is drawn over the main area"
-    );
-    assert!(
-        open.bright(SIDEBAR_WIDTH + 100.0, WIDTH - 100.0, 40.0, 200.0) > 50,
-        "with its rows"
-    );
-
-    // Typing narrows it and does not reach the terminal; Enter runs the command.
-    h.type_text("restore");
-    assert!(h.press("enter"));
-    assert!(!h.ws(|ws| ws.palette_open()));
-    assert!(
-        !h.ws(|ws| ws.tabs().zoomed()),
-        "a lone pane has nothing to zoom"
-    );
-    assert_eq!(h.ws(|ws| ws.notice().map(str::to_string)), None);
-
-    // A session is a row too: going to it shows its tab.
-    h.press("cmd-p");
-    h.type_text("go to alpha");
-    h.press("enter");
-    assert_eq!(h.active().as_deref(), Some("alpha"));
-
-    // Escape and the same key close it; Enter on nothing does nothing.
-    h.press("cmd-p");
-    assert!(h.press("escape"));
-    assert!(!h.ws(|ws| ws.palette_open()));
-    h.press("cmd-p");
-    assert!(h.press("cmd-p"));
-    assert!(!h.ws(|ws| ws.palette_open()));
-    // The alternate key opens it outside a terminal only; in a terminal the program keeps cmd-k.
-    println!("workspace_render: palette ok");
-}
-
-fn terminal_settings_show_what_the_core_sent() {
-    let mut h = Harness::new(model(&[("alpha", json!({}))]));
-    h.open("alpha");
-    let before = h.draw();
-    assert!(h.press("cmd-,"), "global.settings is taken");
-    assert!(h.ws(|ws| ws.settings_open()));
-    let waiting = h.draw();
-    assert_ne!(before.raw, waiting.raw, "the panel is drawn");
-    // Once the core has sent the settings the panel shows them.
-    let mut with_settings = model(&[("alpha", json!({}))]);
-    with_settings.terminal = Some(Box::new(perch_native::settings::TerminalSettings {
-        scrollback: 4321,
-        login_shell: true,
-        ..Default::default()
-    }));
-    h.window
-        .update(&mut h.cx, |ws, _, cx| {
-            ws.sidebar().update(cx, |sidebar, cx| {
-                sidebar.apply(Update::Model(with_settings), cx)
+    h.draw();
+    let say = |h: &mut Harness, target: Target| {
+        h.window
+            .update(&mut h.cx, |ws, _, cx| {
+                let view = ws.terminal().expect("a terminal on screen").clone();
+                view.update(cx, |_, cx| cx.emit(TerminalEvent::OpenLink(target)))
             })
-        })
-        .unwrap();
-    let shown = h.draw();
-    shown.save("settings");
-    assert_ne!(waiting.raw, shown.raw);
-    // Login shell is on: its switch text is green; double quotes is off: dim.
-    assert!(shown.count(0x4caf6a, SIDEBAR_WIDTH, WIDTH, 0.0, HEIGHT) > 20);
-    assert!(h.press("cmd-,"), "the same key closes it");
-    assert!(!h.ws(|ws| ws.settings_open()));
-    println!("workspace_render: settings ok");
+            .unwrap();
+        h.cx.run_until_parked();
+    };
+    let url = Target::Url("https://example.com/docs".into());
+    let file = Target::File("/work/notes.txt".into());
+    say(&mut h, url.clone());
+    say(&mut h, file.clone());
+    assert_eq!(*h.opened.borrow(), [url, file]);
+    println!("workspace_render: link opener ok");
 }
 
 fn keys_json_and_chosen_keys_rule() {
@@ -711,6 +610,224 @@ fn editing_keys_reach_the_shell_through_the_window() {
     assert_eq!(typed(&mut rx), Vec::<Vec<u8>>::new());
 }
 
+/// What the core was asked to type, one entry per send.
+fn typed(rx: &mut UnboundedReceiver<ToCore>) -> Vec<Vec<u8>> {
+    asked(rx)
+        .into_iter()
+        .filter_map(|m| match m {
+            ToCore::Input(bytes) => Some(bytes),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A key press as macOS hands it over: GPUI's key path first, and, when that leaves the key
+/// unhandled, the system's text input, which inserts the event's own characters
+/// (`insertText:`). True when the key path took it.
+fn key_then_text(h: &mut Harness, keystroke: Keystroke, characters: &str, held: bool) -> bool {
+    let taken =
+        h.cx.update_window(h.window.into(), |_, window: &mut Window, cx| {
+            !window
+                .dispatch_event(
+                    PlatformInput::KeyDown(KeyDownEvent {
+                        keystroke,
+                        is_held: held,
+                        prefer_character_input: false,
+                    }),
+                    cx,
+                )
+                .propagate
+        })
+        .unwrap();
+    if !taken {
+        h.window
+            .update(&mut h.cx, |ws, window, cx| {
+                let view = ws.terminal().expect("a terminal on screen").clone();
+                view.update(cx, |v, cx| {
+                    v.replace_text_in_range(None, characters, window, cx)
+                })
+            })
+            .unwrap();
+    }
+    h.cx.run_until_parked();
+    taken
+}
+
+fn plain(key: &str, text: &str) -> Keystroke {
+    Keystroke {
+        modifiers: Modifiers::default(),
+        key: key.into(),
+        key_char: Some(text.into()),
+    }
+}
+
+/// The Navigator opens on the web's key, Command-P. Command-Shift-P is not bound in the web or
+/// here: the window leaves it to the terminal, which sends a Command chord nothing. A person who
+/// wants it chooses it in Settings or `keys.json`, and the window then runs the Navigator's
+/// command from a terminal that has the keyboard. No mod draws the Navigator here, so the window
+/// says so: that notice is how this sees the command ran.
+fn navigator_asked(h: &mut Harness) -> bool {
+    h.notice().is_some_and(|n| n.contains("Navigator"))
+}
+
+fn the_navigator_opens_on_the_webs_key() {
+    let mut h = Harness::new(model(&[("alpha", json!({}))]));
+    h.open("alpha");
+    h.draw();
+    let (mut rx, _core) = h.live();
+    h.draw();
+    typed(&mut rx);
+    assert!(!h.press("cmd-shift-p"), "nothing binds Command-Shift-P");
+    assert_eq!(h.notice(), None);
+    assert_eq!(
+        typed(&mut rx),
+        Vec::<Vec<u8>>::new(),
+        "and the shell gets nothing"
+    );
+    assert!(h.press("cmd-p"));
+    assert!(navigator_asked(&mut h));
+
+    for chosen in [
+        // Settings > Keyboard replaces the default key.
+        (Some(("global.navigator", "cmd+shift+p")), None),
+        // keys.json adds a key for the typed command.
+        (
+            None,
+            Some(json!({"global": {"cmd-shift-p": "app.palette"}})),
+        ),
+    ] {
+        let mut keyed = model(&[("alpha", json!({}))]);
+        if let Some((id, keys)) = chosen.0 {
+            keyed.keybindings.insert(id.into(), keys.into());
+        }
+        keyed.keys_file = chosen.1.clone();
+        let mut h = Harness::new(keyed);
+        h.open("alpha");
+        h.draw();
+        let (mut rx, _core) = h.live();
+        h.draw();
+        typed(&mut rx);
+        assert!(
+            h.press("cmd-shift-p"),
+            "{chosen:?}: the chosen key is taken"
+        );
+        assert!(navigator_asked(&mut h), "{chosen:?}");
+        assert_eq!(typed(&mut rx), Vec::<Vec<u8>>::new());
+    }
+    println!("workspace_render: navigator key ok");
+}
+
+/// `/` goes through the window's keymap and the terminal like any letter and types `/`, however
+/// it is spelled: the key itself, or a posted event whose key code GPUI reads as another key.
+fn a_slash_types_a_slash() {
+    let mut h = Harness::new(model(&[("alpha", json!({}))]));
+    h.open("alpha");
+    h.draw();
+    let (mut rx, _core) = h.live();
+    h.draw();
+    typed(&mut rx);
+    assert!(h.press("/"), "the window took /");
+    // Shift+1 as macOS reports it: the key it types, with Shift spent.
+    assert!(h.press("!"), "the window took Shift+1");
+    assert_eq!(typed(&mut rx), vec![b"/".to_vec(), b"!".to_vec()]);
+    // The key `/` as macOS reports it (code 44 on ABC), and as GPUI reports a posted `/` whose
+    // key code is 0.
+    key_then_text(&mut h, plain("/", "/"), "/", false);
+    key_then_text(&mut h, plain("a", "a"), "/", false);
+    assert_eq!(typed(&mut rx), vec![b"/".to_vec(), b"/".to_vec()]);
+    println!("workspace_render: slash ok");
+}
+
+/// GPUI builds a key's text from its key code, so a key event a program posts with its own
+/// characters on key code 0 reaches the key path as `a`. A plain key that only types its text
+/// is left to the text input, which reads the event's characters; everything the encoder spells
+/// differently (repeats, modified keys, a program that asked for every key as an escape code)
+/// stays on the key path.
+fn posted_characters_type_as_they_are() {
+    let mut h = Harness::new(model(&[("alpha", json!({}))]));
+    h.open("alpha");
+    h.draw();
+    let (mut rx, core) = h.live();
+    h.draw();
+    typed(&mut rx);
+    for posted in ["\u{e9}", "\u{65e5}", "Z", "?"] {
+        key_then_text(&mut h, plain("a", "a"), posted, false);
+        assert_eq!(typed(&mut rx), vec![posted.as_bytes().to_vec()], "{posted}");
+    }
+    // A real key types once, through the text input.
+    assert!(h.press("a"));
+    assert_eq!(typed(&mut rx), vec![b"a".to_vec()]);
+    // A held key repeats on the key path, so macOS's press-and-hold menu never takes it.
+    assert!(key_then_text(&mut h, plain("e", "e"), "e", true));
+    assert_eq!(typed(&mut rx), vec![b"e".to_vec()]);
+    // Option as Alt and Control stay on the key path.
+    let mut option = plain("x", "\u{2248}");
+    option.modifiers = Modifiers::alt();
+    assert!(key_then_text(&mut h, option, "\u{2248}", false));
+    let mut control = plain("c", "c");
+    control.modifiers = Modifiers::control();
+    control.key_char = None;
+    assert!(key_then_text(&mut h, control, "", false));
+    assert_eq!(typed(&mut rx), vec![b"\x1bx".to_vec(), b"\x03".to_vec()]);
+    // A program that asked for every key as an escape code (kitty `>9u`) gets the key's code.
+    core.unbounded_send(FromCore::Output("\x1b[>9u".into()))
+        .unwrap();
+    h.cx.run_until_parked();
+    assert!(key_then_text(&mut h, plain("a", "a"), "a", false));
+    assert_eq!(typed(&mut rx), vec![b"\x1b[97u".to_vec()]);
+    println!("workspace_render: posted characters ok");
+}
+
+/// A click lands where it is, with no pointer move before it and after typing: GPUI finds what is
+/// under the pointer from the click's own position. A pane of a split (a tab: `mods_chrome_window`).
+fn a_click_needs_no_move_before_it() {
+    let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
+    h.open("alpha");
+    h.open("bravo");
+    assert!(h.press("cmd-1"));
+    assert_eq!(h.active().as_deref(), Some("alpha"));
+    h.draw();
+
+    // A split: a click in the pane without the keyboard gives it the keyboard.
+    assert!(h.press("cmd-d"));
+    h.window
+        .update(&mut h.cx, |ws, _, cx| {
+            ws.sidebar().update(cx, |sidebar, cx| {
+                sidebar.apply(
+                    Update::Launched {
+                        host_id: "local".into(),
+                        session_id: "charlie".into(),
+                        provider: "terminal".into(),
+                    },
+                    cx,
+                )
+            })
+        })
+        .unwrap();
+    h.cx.run_until_parked();
+    h.draw();
+    assert_eq!(h.active().as_deref(), Some("charlie"));
+    h.press("x");
+    h.click(
+        SIDEBAR_WIDTH + 100.,
+        HEIGHT / 2.,
+        MouseButton::Left,
+        Modifiers::default(),
+    );
+    assert_eq!(h.active().as_deref(), Some("alpha"), "the left pane");
+    h.draw();
+    let left = h.ws(|ws| ws.terminal().cloned()).unwrap();
+    let focused = h
+        .window
+        .update(&mut h.cx, |_, window, cx| {
+            gpui::Focusable::focus_handle(&left, cx).is_focused(window)
+        })
+        .unwrap();
+    assert!(focused, "and its terminal the keyboard");
+
+    println!("workspace_render: click without a move ok");
+}
+
 fn terminal_commands_run_from_keys_and_the_palette() {
     let mut keyed = model(&[("alpha", json!({}))]);
     keyed
@@ -740,15 +857,11 @@ fn terminal_commands_run_from_keys_and_the_palette() {
     assert!(h.press("cmd-down"), "terminal.scrollBottom is taken");
     assert!(has(&mut h, "line 200"));
 
-    // A page at a time, from the palette.
-    h.press("cmd-p");
-    h.type_text("scroll up a page");
-    assert!(h.press("enter"));
+    // A page at a time, by the commands that have no key by default.
+    h.run("terminal.scrollPageUp", json!({})).unwrap();
     assert!(!has(&mut h, "line 200"), "a page up left the bottom");
     let paged = top(&mut h);
-    h.press("cmd-p");
-    h.type_text("scroll down a page");
-    h.press("enter");
+    h.run("terminal.scrollPageDown", json!({})).unwrap();
     assert!(has(&mut h, "line 200"), "and a page down came back");
     assert_ne!(paged, top(&mut h));
     assert_eq!(h.notice(), None);
@@ -856,10 +969,8 @@ fn the_size_is_taken_back_from_a_phone_for_one_terminal_or_all() {
     assert!(h.ws(|ws| ws.terminal().is_some()));
     h.open_as("c", Some("terminal"));
     assert!(h.view(|v| v.size_held_by_phone() && !v.offers_take_back()));
-    assert_eq!(
-        h.view(|v| v.note()).as_deref(),
-        Some("A phone sets this terminal's size")
-    );
+    // Without shared typing the web offers Take control, and the pane's chip says who types.
+    assert!(h.view(|v| !v.agent_control()["control"].is_null()));
     for which in 0..3 {
         say(
             &mut h,
@@ -868,10 +979,8 @@ fn the_size_is_taken_back_from_a_phone_for_one_terminal_or_all() {
         );
     }
     assert!(h.view(|v| v.offers_take_back()));
-    assert_eq!(
-        h.view(|v| v.note()).as_deref(),
-        Some("Your phone is sizing this terminal")
-    );
+    // The phone-size notice says it; the agent's chip says nothing.
+    assert!(h.view(|v| v.agent_control()["label"].is_null()));
     // The window sizes b: no choices, and neither command has anything to do there.
     h.open_as("b", Some("terminal"));
     assert!(!h.view(|v| v.size_held_by_phone() || v.offers_take_back()));
@@ -895,33 +1004,18 @@ fn the_size_is_taken_back_from_a_phone_for_one_terminal_or_all() {
     // The grant for c, which is not on screen, arrives: it tells the size it last fitted at
     // once, not when its tab comes back.
     say(&mut h, 2, info(true, false));
-    assert_eq!(asked(&mut rxs[2]), vec![ToCore::Resize(94, 31)]);
+    assert_eq!(asked(&mut rxs[2]), vec![ToCore::Resize(91, 29)]);
     say(&mut h, 2, info(false, true));
 
-    // The pane's own buttons: the second of the two asks the window to take back all.
+    // The pane's choices are the phone-size stock screen's, which runs these same commands.
     h.open_as("a", Some("terminal"));
-    h.draw();
-    h.click(
-        WIDTH - 12. - 30.,
-        HEIGHT - 8. - 9.,
-        MouseButton::Left,
-        Modifiers::default(),
-    );
-    assert_eq!(taken(&mut rxs[0]), vec![ToCore::TakeSize]);
-    assert_eq!(taken(&mut rxs[2]), vec![ToCore::TakeSize]);
-    assert_eq!(taken(&mut rxs[1]), vec![]);
-    h.click(
-        WIDTH - 12. - 140.,
-        HEIGHT - 8. - 9.,
-        MouseButton::Left,
-        Modifiers::default(),
-    );
-    assert_eq!(taken(&mut rxs[0]), vec![ToCore::TakeControl]);
-
     // Once the core says this window has the size, the choices go and the commands refuse.
     say(&mut h, 0, info(true, false));
     assert!(!h.view(|v| v.offers_take_back()));
-    assert_eq!(h.view(|v| v.note()), None, "the owner is told nothing");
+    assert!(
+        h.view(|v| v.agent_control()["label"].is_null()),
+        "the owner is told nothing"
+    );
     println!("workspace_render: take back ok");
 }
 
@@ -1062,7 +1156,12 @@ fn tabs_out_of_sight_are_parked_beyond_twelve() {
     for name in &names[1..14] {
         assert!(attached(&mut h, name), "{name} is kept");
     }
-    assert_eq!(h.ws(|ws| ws.tabs().strip().len()), 14, "no tab was closed");
+    // Every session of the workspace has a tab; the one never shown has no terminal attached.
+    assert_eq!(h.ws(|ws| ws.tabs().strip().len()), 15, "no tab was closed");
+    assert!(
+        !attached(&mut h, "s14"),
+        "a tab never shown attaches nothing"
+    );
 
     // Showing it attaches it again, and now the one unseen longest is parked.
     h.open("s00");
@@ -1077,60 +1176,25 @@ fn tabs_out_of_sight_are_parked_beyond_twelve() {
     println!("workspace_render: parked tabs ok");
 }
 
-/// A right-click in a pane opens the pane menu there, a click on an entry runs it on that pane,
-/// and a click elsewhere or any key closes it.
+/// A right-click in a pane asks for the pane menu there. No mod draws it here, so the window says
+/// so; the stock menu's own behaviour is `mods_floating_window`'s.
 fn the_pane_menu_opens_on_right_click() {
     let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
     h.open("alpha");
     h.draw();
-    let (x, y) = (SIDEBAR_WIDTH + 300., 200.);
-    let plain = Modifiers::default();
-    assert_eq!(h.ws(|ws| ws.menu_labels()), None);
-    h.click(x, y, MouseButton::Right, plain);
-    let before = h.draw();
-    before.save("pane-menu");
-    let labels = h.ws(|ws| ws.menu_labels()).expect("the menu is open");
-    assert_eq!(labels[0], "Copy");
-    assert!(labels.contains(&"Split right") && labels.contains(&"Close"));
-    assert!(
-        !labels.contains(&"Stop the terminal"),
-        "a view that cannot stop its shell does not offer to"
-    );
-    assert!(
-        !labels.contains(&"Zoom pane"),
-        "a lone pane has nothing to zoom"
-    );
-    assert!(
-        before.count(0x1c1c1f, x, x + 150., y, y + 100.) > 2000,
-        "the menu is drawn where it was asked"
-    );
-
-    // An entry runs on the pane: Find opens the find bar of that terminal.
-    let find = labels.iter().position(|l| l.starts_with("Find")).unwrap();
-    assert!(!h.view(|v| v.find_open()));
+    assert_eq!(h.notice(), None);
     h.click(
-        x + 20.,
-        y + 4. + 28. * find as f32 + 14.,
-        MouseButton::Left,
-        plain,
+        SIDEBAR_WIDTH + 300.,
+        200.,
+        MouseButton::Right,
+        Modifiers::default(),
     );
-    assert_eq!(
-        h.ws(|ws| ws.menu_labels()),
-        None,
-        "choosing closes the menu"
-    );
-    assert!(h.view(|v| v.find_open()), "Find ran on the clicked pane");
-
-    // A click elsewhere closes it without running anything; so does a key (Escape is only that).
-    h.click(x, y, MouseButton::Right, plain);
-    assert!(h.ws(|ws| ws.menu_labels()).is_some());
-    h.click(x + 400., y + 200., MouseButton::Left, plain);
-    assert_eq!(h.ws(|ws| ws.menu_labels()), None);
+    assert!(h.notice().is_some_and(|n| n.contains("pane menu")));
     println!("workspace_render: pane menu ok");
 }
 
-/// `terminal.peek` shows a session's terminal over the window with no tab of its own; park puts
-/// it away; keep makes it a tab; show goes to a session's tab, opening one.
+/// `terminal.peek` shows a session's terminal over the window without going to its tab; park puts
+/// it away; keep goes to its tab; show goes to a session's tab, opening one.
 fn a_peek_is_a_terminal_over_the_window() {
     let mut h = Harness::new(model(&[
         ("alpha", json!({})),
@@ -1147,7 +1211,11 @@ fn a_peek_is_a_terminal_over_the_window() {
         h.ws(|ws| ws.peeked().map(str::to_string)).as_deref(),
         Some("bravo")
     );
-    assert_eq!(h.strip(), ["alpha"], "a peek has no tab");
+    assert_eq!(
+        h.ws(|ws| ws.tabs().shown()),
+        ["alpha"],
+        "a peek is not a tab on screen"
+    );
     assert_ne!(plain.raw, peeking.raw, "the peek is drawn");
     let shown = h
         .window
@@ -1166,6 +1234,16 @@ fn a_peek_is_a_terminal_over_the_window() {
         h.run("terminal.park", json!({})).is_err(),
         "nothing left to put away"
     );
+    // A tab out of sight whose terminal was warm before the peek keeps it after.
+    h.run("tab.select", json!({"id": "bravo"})).unwrap();
+    h.run("tab.select", json!({"id": "alpha"})).unwrap();
+    assert!(h.ws(|ws| ws.view("bravo").is_some()), "bravo is warm");
+    h.run("terminal.peek", json!({"id": "bravo"})).unwrap();
+    h.run("terminal.park", json!({})).unwrap();
+    assert!(
+        h.ws(|ws| ws.view("bravo").is_some()),
+        "a warm tab stays warm after a peek"
+    );
     // A second peek of the same session puts it away too.
     h.run("terminal.peek", json!({"id": "bravo"})).unwrap();
     h.run("terminal.peek", json!({"id": "bravo"})).unwrap();
@@ -1173,75 +1251,27 @@ fn a_peek_is_a_terminal_over_the_window() {
     // A click outside closes it.
     h.run("terminal.peek", json!({"id": "bravo"})).unwrap();
     h.draw();
+    // Over the main card's corner, past the sidebar card and its gutters.
     h.click(
-        SIDEBAR_WIDTH + 2.,
+        SIDEBAR_WIDTH + 20.,
         HEIGHT - 4.,
         MouseButton::Left,
         Modifiers::default(),
     );
     assert_eq!(h.ws(|ws| ws.peeked().map(str::to_string)), None);
-    // Keep turns it into a tab and goes there.
+    // Keep goes to its tab.
     h.run("terminal.peek", json!({"id": "bravo"})).unwrap();
     h.run("terminal.keep", json!({"id": "bravo"})).unwrap();
     assert_eq!(h.ws(|ws| ws.peeked().map(str::to_string)), None);
-    assert_eq!(h.strip(), ["alpha", "bravo"]);
+    assert_eq!(h.strip(), ["alpha", "bravo", "charlie"]);
     assert_eq!(h.active().as_deref(), Some("bravo"));
-    // Show opens a tab for a session that has none, and goes to one that has.
+    // Show goes to a session's tab.
     h.run("terminal.show", json!({"id": "charlie"})).unwrap();
     assert_eq!(h.active().as_deref(), Some("charlie"));
     h.run("terminal.show", json!({"id": "alpha"})).unwrap();
     assert_eq!(h.active().as_deref(), Some("alpha"));
     assert!(h.run("terminal.show", json!({"id": "nothing"})).is_err());
     println!("workspace_render: peek ok");
-}
-
-/// A toast says which session finished or needs the person, goes by itself after a while, and a
-/// click on it opens that session. Nothing is played or sent to the system here.
-fn a_toast_names_the_session_and_opens_it() {
-    let mut h = Harness::new(model(&[("alpha", json!({})), ("bravo", json!({}))]));
-    h.open("alpha");
-    let plain = h.draw();
-    let heard = |alert: Alert| Heard {
-        alert,
-        session_id: "bravo".into(),
-        title: "bravo".into(),
-        sound: true,
-        file: None,
-        toast: Toast::App,
-    };
-    h.window
-        .update(&mut h.cx, |ws, _, cx| ws.toast(heard(Alert::Blocked), cx))
-        .unwrap();
-    let shown = h.draw();
-    shown.save("toast");
-    assert_ne!(plain.raw, shown.raw, "the toast is drawn");
-    assert_eq!(
-        h.ws(|ws| ws.toast_text().map(str::to_string)).as_deref(),
-        Some("bravo needs you")
-    );
-
-    // A click opens the session and takes the toast away.
-    h.click(
-        WIDTH - 40.,
-        TAB_BAR_HEIGHT + 30.,
-        MouseButton::Left,
-        Modifiers::default(),
-    );
-    assert_eq!(h.active().as_deref(), Some("bravo"));
-    assert_eq!(h.ws(|ws| ws.toast_text().map(str::to_string)), None);
-
-    // Left alone, it goes by itself; a newer one replaces an older.
-    h.window
-        .update(&mut h.cx, |ws, _, cx| ws.toast(heard(Alert::Done), cx))
-        .unwrap();
-    assert_eq!(
-        h.ws(|ws| ws.toast_text().map(str::to_string)).as_deref(),
-        Some("bravo finished")
-    );
-    h.cx.advance_clock(std::time::Duration::from_secs(9));
-    h.cx.run_until_parked();
-    assert_eq!(h.ws(|ws| ws.toast_text().map(str::to_string)), None);
-    println!("workspace_render: toast ok");
 }
 
 fn asked(rx: &mut UnboundedReceiver<ToCore>) -> Vec<ToCore> {
@@ -1253,9 +1283,10 @@ fn ends(rx: &mut UnboundedReceiver<ToCore>) -> usize {
     asked(rx).iter().filter(|m| **m == ToCore::End).count()
 }
 
-/// Closing a tab ends its session as the web does: a terminal at once, an agent after a second
-/// close while the warning is on (and a shell with an agent typed into it counts as one), at once
-/// when it is off. The ask is taken back after a while.
+/// Closing a tab ends its session as the web does: a terminal at once, an agent only through the
+/// close guard while the warning is on (and a shell with an agent typed into it counts as one), at
+/// once when it is off. No mod draws the close guard here, so an agent is not ended and the window
+/// says so; the stock close guard's answers are `mods_floating_window`'s.
 fn closing_a_tab_ends_its_session() {
     let sessions = [
         ("plain", json!({"cliProviderId": "terminal"})),
@@ -1286,28 +1317,13 @@ fn closing_a_tab_ends_its_session() {
     for id in ["agent", "typed"] {
         h.open_as(id, None);
         h.draw();
-        let (mut rx, core) = h.live();
-        assert_eq!(h.run("tabs.close", json!({})), Ok(()));
-        assert_eq!(ends(&mut rx), 0, "{id}: the first close only asks");
-        assert!(h.notice().unwrap().starts_with("Closing ends"), "{id}");
-        assert!(h.ws(|ws| ws.tabs().contains(id)));
-        if id == "typed" {
-            // Left alone, the ask is taken back, and the next close asks again.
-            h.cx.advance_clock(std::time::Duration::from_secs(9));
-            h.cx.run_until_parked();
-            assert_eq!(h.notice(), None);
+        let (mut rx, _core) = h.live();
+        for _ in 0..2 {
             assert_eq!(h.run("tabs.close", json!({})), Ok(()));
-            assert_eq!(ends(&mut rx), 0, "{id}: it asks again");
+            assert_eq!(ends(&mut rx), 0, "{id}: not ended without the close guard");
+            assert!(h.notice().unwrap().contains("confirmation"), "{id}");
+            assert!(h.ws(|ws| ws.tabs().contains(id)));
         }
-        assert_eq!(h.run("tabs.close", json!({})), Ok(()));
-        assert_eq!(ends(&mut rx), 1, "{id}: the second ends");
-        assert!(
-            h.ws(|ws| ws.tabs().contains(id)),
-            "{id}: until the core says"
-        );
-        core.unbounded_send(FromCore::Ended).unwrap();
-        h.cx.run_until_parked();
-        assert!(!h.ws(|ws| ws.tabs().contains(id)), "{id}");
     }
 
     // With the warning off an agent ends at once; a core that does not confirm it keeps the tab.
@@ -1334,16 +1350,12 @@ fn closing_a_tab_ends_its_session() {
     println!("workspace_render: close ok");
 }
 
-/// A tab that only watches a session another view controls, and one with no attached terminal,
-/// leave the view and send nothing: the session keeps running.
+/// A tab that only watches a session another view controls leaves the view and sends nothing: the
+/// session keeps running. One with no attached terminal has no connection to end over, so the
+/// main connection asks the core to delete the session, as the web does, and the tab goes when
+/// the core says it is gone.
 fn a_tab_that_cannot_end_its_session_is_put_away() {
-    let mut h = Harness::new(model(&[
-        ("watched", json!({"cliProviderId": "claude"})),
-        (
-            "blank",
-            json!({"cliProviderId": null, "currentProviderId": "terminal"}),
-        ),
-    ]));
+    let mut h = Harness::new(model(&[("watched", json!({"cliProviderId": "claude"}))]));
     h.open_as("watched", None);
     h.draw();
     let (mut rx, core) = h.live();
@@ -1360,11 +1372,46 @@ fn a_tab_that_cannot_end_its_session_is_put_away() {
     assert!(!h.ws(|ws| ws.tabs().contains("watched")));
     assert!(h.notice().unwrap().contains("Another view controls"));
 
+    let (commands, mut sent) = unbounded();
+    let mut facts = state_with_agents(
+        &[(
+            "blank",
+            json!({"cliProviderId": null, "currentProviderId": "terminal"}),
+        )],
+        &[],
+    );
+    let mut h = Harness::build(facts.model(), Some(commands), || {
+        Err(anyhow::anyhow!("no core in this test"))
+    });
     h.open_as("blank", None);
     h.draw();
     assert_eq!(h.run("tabs.close", json!({})), Ok(()));
-    assert!(!h.ws(|ws| ws.tabs().contains("blank")));
-    assert!(h.notice().unwrap().contains("not attached"));
+    let asked: Vec<Command> = std::iter::from_fn(|| sent.try_recv().ok()).collect();
+    assert!(
+        asked
+            .iter()
+            .any(|c| matches!(c, Command::DeleteSession { session_id } if session_id == "blank")),
+        "the core is asked to delete it: {asked:?}"
+    );
+    assert!(
+        h.ws(|ws| ws.tabs().contains("blank")),
+        "the tab waits for the core"
+    );
+    facts.apply(&message(
+        json!({"type": "session.deleted", "sessionId": "blank"}),
+    ));
+    let model = facts.model();
+    h.window
+        .update(&mut h.cx, |ws, _, cx| {
+            ws.sidebar()
+                .update(cx, |sidebar, cx| sidebar.apply(Update::Model(model), cx))
+        })
+        .unwrap();
+    h.cx.run_until_parked();
+    assert!(
+        !h.ws(|ws| ws.tabs().contains("blank")),
+        "and goes when it says the session is deleted"
+    );
 }
 
 /// A session the core deletes closes its tab whenever the news comes: after the wait for it ran
@@ -1420,54 +1467,136 @@ fn a_deleted_session_closes_its_tab_whenever_the_core_says_so() {
     println!("workspace_render: deleted session ok");
 }
 
-/// The pane menu stops a terminal's process only on a second, explicit click.
-fn stopping_a_terminal_from_the_pane_menu_asks_first() {
-    let mut h = Harness::new(model(&[("alpha", json!({"cliProviderId": "claude"}))]));
-    h.open_as("alpha", None);
-    h.draw();
-    let (mut rx, _core) = h.live();
-    let (x, y) = (SIDEBAR_WIDTH + 300., 200.);
-    let plain = Modifiers::default();
-    h.click(x, y, MouseButton::Right, plain);
-    h.draw();
-    let labels = h.ws(|ws| ws.menu_labels()).expect("the menu is open");
-    let stop = labels
-        .iter()
-        .position(|l| *l == "Stop the terminal")
+/// Every session of the workspace has a tab, sub-sessions too, as the web's strip lists them:
+/// oldest first, behind the tabs already there, leaving the keyboard where it is.
+fn sub_sessions_open_beside_their_lead() {
+    let terminal = |parent: Option<&str>| match parent {
+        Some(p) => json!({"cliProviderId": "terminal", "parentSessionId": p}),
+        None => json!({"cliProviderId": "terminal"}),
+    };
+    let mut h = Harness::new(model(&[
+        ("lead", terminal(None)),
+        ("k1", terminal(Some("lead"))),
+        ("loose", terminal(None)),
+    ]));
+    h.open("lead");
+    h.open("loose");
+    h.open("lead");
+    let strip = |h: &mut Harness| h.ws(|ws| ws.tabs().strip().to_vec());
+    assert_eq!(
+        strip(&mut h),
+        ["lead", "k1", "loose"],
+        "every session of the workspace has a tab"
+    );
+    assert_eq!(
+        h.ws(|ws| ws.tabs().active().map(str::to_string)),
+        Some("lead".into())
+    );
+
+    // The lead spawns another: its tab opens in the order the core's list gives (oldest first), and
+    // the lead keeps the keyboard; so does a session of this workspace whose lead is elsewhere.
+    let more = model(&[
+        ("lead", terminal(None)),
+        ("k1", terminal(Some("lead"))),
+        ("loose", terminal(None)),
+        ("k2", terminal(Some("lead"))),
+        ("k3", terminal(Some("elsewhere"))),
+    ]);
+    h.window
+        .update(&mut h.cx, |ws, _, cx| {
+            ws.sidebar()
+                .update(cx, |sidebar, cx| sidebar.apply(Update::Model(more), cx))
+        })
         .unwrap();
-    // Rows are about 30 pixels tall; the click lands in the middle of the entry.
-    let item = (x + 20., y + 4. + 30. * stop as f32 + 15.);
-    h.click(item.0, item.1, MouseButton::Left, plain);
-    h.draw();
-    let labels = h.ws(|ws| ws.menu_labels()).expect("still open");
-    assert_eq!(labels[stop], "Stop \u{2014} confirm");
-    assert!(
-        !asked(&mut rx).contains(&ToCore::Kill),
-        "the first click stops nothing"
-    );
-    // A click elsewhere takes the question back; asking again starts over.
-    h.click(x + 400., y + 200., MouseButton::Left, plain);
-    assert_eq!(h.ws(|ws| ws.menu_labels()), None);
-    h.click(x, y, MouseButton::Right, plain);
-    h.draw();
+    h.cx.run_until_parked();
+    assert_eq!(strip(&mut h), ["lead", "k1", "loose", "k2", "k3"]);
     assert_eq!(
-        h.ws(|ws| ws.menu_labels()).unwrap()[stop],
-        "Stop the terminal"
+        h.ws(|ws| ws.tabs().active().map(str::to_string)),
+        Some("lead".into())
     );
-    h.click(item.0, item.1, MouseButton::Left, plain);
+
+    // A sub-session's tab closed without ending it (this window only watches it) stays closed
+    // while the workspace's sessions change, until it is picked again.
+    h.open("k1");
     h.draw();
-    assert!(!asked(&mut rx).contains(&ToCore::Kill));
-    h.click(item.0, item.1, MouseButton::Left, plain);
+    let (_rx, core) = h.live();
+    core.unbounded_send(FromCore::Attached {
+        replay: String::new(),
+        input: false,
+        resize: false,
+        agent: None,
+    })
+    .unwrap();
+    h.cx.run_until_parked();
+    assert_eq!(h.run("tabs.close", json!({})), Ok(()));
+    h.open("lead");
+    h.window
+        .update(&mut h.cx, |ws, _, cx| {
+            ws.sidebar().update(cx, |_, cx| cx.notify())
+        })
+        .unwrap();
+    h.cx.run_until_parked();
     assert_eq!(
-        h.ws(|ws| ws.menu_labels()),
-        None,
-        "choosing closes the menu"
+        strip(&mut h),
+        ["lead", "loose", "k2", "k3"],
+        "put away, it stays away"
     );
-    assert!(
-        asked(&mut rx).contains(&ToCore::Kill),
-        "the second click stops it"
+    h.open("k1");
+    assert!(h.ws(|ws| ws.tabs().contains("k1")), "picked, it opens");
+    println!("workspace_render: sub-session tabs ok");
+}
+
+/// Showing any session of a workspace first gives it the workspace's whole strip, oldest first: a
+/// sub-session picked on a fresh window brings its lead, its siblings and the rest; the lead then
+/// changes nothing.
+fn a_sub_session_shown_first_opens_its_family() {
+    let terminal = |parent: Option<&str>, created: u64| match parent {
+        Some(p) => json!({"cliProviderId": "terminal", "parentSessionId": p, "createdAt": created}),
+        None => json!({"cliProviderId": "terminal", "createdAt": created}),
+    };
+    let mut h = Harness::new(model(&[
+        ("k2", terminal(Some("lead"), 3)),
+        ("lead", terminal(None, 1)),
+        ("k3", terminal(Some("lead"), 4)),
+        ("k1", terminal(Some("lead"), 2)),
+        ("loose", terminal(None, 5)),
+    ]));
+    h.open("k2");
+    let family = ["lead", "k1", "k2", "k3", "loose"];
+    assert_eq!(h.ws(|ws| ws.tabs().strip().to_vec()), family);
+    assert_eq!(
+        h.ws(|ws| ws.tabs().active().map(str::to_string)),
+        Some("k2".into()),
+        "the one picked keeps the keyboard"
     );
-    println!("workspace_render: stop confirm ok");
+    h.open("lead");
+    assert_eq!(h.ws(|ws| ws.tabs().strip().to_vec()), family);
+    println!("workspace_render: family opens from a sub-session ok");
+}
+
+/// The sub-sessions of a lead open in the order the workspace's strip (and the sidebar's family)
+/// lists them, whatever order the core's list comes in, and a sub-session of another workspace (a
+/// Quickchat chat) never joins the lead's tabs.
+fn sub_session_tabs_follow_the_strip_order() {
+    let terminal = |parent: Option<&str>, created: u64, cwd: &str| match parent {
+        Some(p) => json!({"cliProviderId": "terminal", "parentSessionId": p,
+                          "createdAt": created, "cwd": cwd}),
+        None => json!({"cliProviderId": "terminal", "createdAt": created, "cwd": cwd}),
+    };
+    let mut h = Harness::new(model(&[
+        ("k3", terminal(Some("lead"), 4, "/work")),
+        ("chat", terminal(Some("lead"), 5, "/scratch")),
+        ("lead", terminal(None, 1, "/work")),
+        ("k1", terminal(Some("lead"), 2, "/work")),
+        ("k2", terminal(Some("lead"), 3, "/work")),
+    ]));
+    h.open("lead");
+    assert_eq!(
+        h.ws(|ws| ws.tabs().strip().to_vec()),
+        ["lead", "k1", "k2", "k3"],
+        "oldest first as the strip lists them, and no tab for the other workspace's chat"
+    );
+    println!("workspace_render: sub-session tab order ok");
 }
 
 /// A session with no recorded launch provider is not attached under a guessed one.
@@ -1527,14 +1656,18 @@ fn a_blank_session_offers_the_launch_choices() {
     h.open_as("blank", None);
     h.draw();
     assert!(h.ws(|ws| ws.open().is_some_and(|o| o.blank)));
-    let (choosing, status, note) = h.view(|v| (v.choosing(), v.status().clone(), v.note()));
+    let (choosing, status, control) =
+        h.view(|v| (v.choosing(), v.status().clone(), v.agent_control()));
     assert!(choosing);
     assert_eq!(
         status,
         Status::Detached,
         "nothing is attached before a choice"
     );
-    assert!(note.is_some_and(|n| n.contains("Choose")));
+    assert!(
+        control["label"].is_null(),
+        "the choices stand in for the agent's chip"
+    );
     // The choices are the launch list, the terminal first: Down moves to the agent after it and
     // Enter starts this session with it.
     assert!(h.press("down"));
@@ -1589,27 +1722,101 @@ fn a_blank_session_offers_the_launch_choices() {
     println!("workspace_render: blank session choices ok");
 }
 
+/// Two windows on one core (this one and the Tauri app's): the active window sizes the terminals
+/// it shows, taking the size from the other window, and hands it back when it is no longer active,
+/// so one window ever holds it. A phone's hold is never taken this way.
+fn the_active_window_sizes_its_terminals_and_hands_the_size_back() {
+    use perch_core::agent_fleet::AgentState;
+    use perch_native::terminal::attach::AgentInfo;
+    let info = |resize: bool, resize_on_device: bool| {
+        FromCore::Agent(AgentInfo {
+            state: AgentState::Idle,
+            input: true,
+            resize,
+            input_elsewhere: false,
+            resize_on_device,
+        })
+    };
+    let leases = |rx: &mut UnboundedReceiver<ToCore>| -> Vec<ToCore> {
+        std::iter::from_fn(|| rx.try_recv().ok())
+            .filter(|m| !matches!(m, ToCore::Resize(..)))
+            .collect()
+    };
+    let mut h = Harness::new(model(&[("a", json!({"cliProviderId": "terminal"}))]));
+    h.open_as("a", Some("terminal"));
+    h.draw();
+    let (mut rx, tx) = h.live();
+    let say = |h: &mut Harness, message: FromCore| {
+        tx.unbounded_send(message).unwrap();
+        h.cx.run_until_parked();
+    };
+    // The other window on this computer took the size.
+    say(&mut h, info(false, false));
+    leases(&mut rx);
+    // This window becomes active: it takes the size, once while the answer is on its way.
+    h.view(|v| v.window_active(true));
+    h.view(|v| v.window_active(true));
+    assert_eq!(leases(&mut rx), vec![ToCore::TakeSize]);
+    say(&mut h, info(true, false));
+    // It is no longer active: it gives the size up for the other window.
+    h.view(|v| v.window_active(false));
+    assert_eq!(leases(&mut rx), vec![ToCore::GiveSize]);
+    say(&mut h, info(false, false));
+    h.view(|v| v.window_active(false));
+    assert_eq!(leases(&mut rx), vec![], "nothing held, nothing given");
+    // A take on its way when the connection drops is not answered: attached again, the window
+    // takes the size on the new connection.
+    h.view(|v| v.window_active(true));
+    assert_eq!(leases(&mut rx), vec![ToCore::TakeSize]);
+    say(&mut h, FromCore::Disconnected("the core went away".into()));
+    say(
+        &mut h,
+        FromCore::Attached {
+            replay: String::new(),
+            input: true,
+            resize: false,
+            agent: None,
+        },
+    );
+    h.view(|v| v.window_active(true));
+    assert_eq!(
+        leases(&mut rx),
+        vec![ToCore::TakeSize],
+        "asked again after attaching"
+    );
+    say(&mut h, info(false, false));
+    // A phone holds it: becoming active does not take it (the phone-size notice offers that).
+    say(&mut h, info(false, true));
+    h.view(|v| v.window_active(true));
+    assert_eq!(leases(&mut rx), vec![]);
+    println!("workspace_render: active window sizes ok");
+}
+
 fn main() {
+    the_navigator_opens_on_the_webs_key();
+    a_slash_types_a_slash();
+    posted_characters_type_as_they_are();
+    a_click_needs_no_move_before_it();
     a_blank_session_offers_the_launch_choices();
     closing_a_tab_ends_its_session();
     a_tab_that_cannot_end_its_session_is_put_away();
     a_session_with_no_launch_provider_is_not_attached();
     a_deleted_session_closes_its_tab_whenever_the_core_says_so();
-    stopping_a_terminal_from_the_pane_menu_asks_first();
-    a_toast_names_the_session_and_opens_it();
+    sub_sessions_open_beside_their_lead();
+    sub_session_tabs_follow_the_strip_order();
+    a_sub_session_shown_first_opens_its_family();
     the_pane_menu_opens_on_right_click();
     a_peek_is_a_terminal_over_the_window();
     tabs_out_of_sight_are_parked_beyond_twelve();
     zoom_scales_the_terminals();
     two_tabs();
-    attention_on_a_tab();
     a_split_shows_each_pane();
-    the_palette_lists_and_runs_commands();
-    terminal_settings_show_what_the_core_sent();
+    a_clicked_link_reaches_the_windows_opener();
     keys_json_and_chosen_keys_rule();
     editing_keys_reach_the_shell_through_the_window();
     terminal_commands_run_from_keys_and_the_palette();
     the_size_is_taken_back_from_a_phone_for_one_terminal_or_all();
+    the_active_window_sizes_its_terminals_and_hands_the_size_back();
     kept_tabs_are_hidden_not_dropped();
     println!("workspace_render: ok");
 }

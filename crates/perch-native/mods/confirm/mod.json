@@ -1,0 +1,5 @@
+{
+  "name": "Confirmation",
+  "description": "The web app's stock confirmation and the close guard that asks through it, unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

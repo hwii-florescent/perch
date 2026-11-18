@@ -1,0 +1,52 @@
+{
+  "props": {
+    "id": "s-infra-1",
+    "x": 120,
+    "y": 300,
+    "extraItems": [
+      {
+        "label": "Move down",
+        "testId": "workspace-session-move-down-s-infra-1"
+      }
+    ]
+  },
+  "menu": [
+    {
+      "testId": "tab-menu-rename",
+      "text": "Rename tab"
+    },
+    {
+      "testId": "tab-menu-split-right",
+      "text": "Split right with new terminal"
+    },
+    {
+      "testId": "tab-menu-split-below",
+      "text": "Split below with new terminal"
+    },
+    {
+      "divider": true
+    },
+    {
+      "testId": null,
+      "text": "Show an open tab beside this one"
+    },
+    {
+      "testId": "tab-split-with-s-infra-2",
+      "text": "Show beside Audit open ports"
+    },
+    {
+      "divider": true
+    },
+    {
+      "testId": "workspace-session-move-down-s-infra-1",
+      "text": "Move down"
+    },
+    {
+      "divider": true
+    },
+    {
+      "testId": "tab-menu-close",
+      "text": "Close tab"
+    }
+  ]
+}

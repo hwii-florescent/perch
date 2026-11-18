@@ -138,31 +138,31 @@ async function expectNoPageOverflow(page: Page): Promise<void> {
 }
 
 async function expectWholeDiffScrollable(diff: Locator): Promise<void> {
+  // The diff scrolls down; each file scrolls sideways on its own, with its own scrollbar (GitHub's Files changed).
   const metrics = await diff.evaluate((element) => ({
     overflowX: getComputedStyle(element).overflowX,
-    scrollWidth: element.scrollWidth,
-    clientWidth: element.clientWidth,
+    bodies: Array.from(element.querySelectorAll<HTMLElement>('[data-testid="git-diff-file-body"]'))
+      .map((body) => ({ overflowX: getComputedStyle(body).overflowX, scrollWidth: body.scrollWidth, clientWidth: body.clientWidth })),
     codeOverflowX: Array.from(element.querySelectorAll('[data-testid="git-diff-line"] code'))
       .map((code) => getComputedStyle(code).overflowX),
   }));
-  expect(metrics.overflowX, "the diff is not the horizontal scroll surface").toBe("auto");
-  expect(metrics.scrollWidth, "long diff lines do not overflow the file viewport").toBeGreaterThan(metrics.clientWidth);
+  expect(metrics.overflowX, "the diff itself does not scroll sideways").toBe("hidden");
+  expect(metrics.bodies.every((body) => body.overflowX === "auto"), "each file is its own horizontal scroll surface").toBe(true);
+  expect(metrics.bodies.some((body) => body.scrollWidth > body.clientWidth), "a long line overflows its file's viewport").toBe(true);
   expect(metrics.codeOverflowX.every((value) => value === "visible"), "individual lines scroll horizontally").toBe(true);
-  // Scrolling right must end at the longest line: the scrollable width may not grow as the view is scrolled.
+  // Scrolling a file right must end at its longest line: the scrollable width may not grow as it is scrolled.
   const widths = await diff.evaluate(async (element) => {
+    const body = Array.from(element.querySelectorAll<HTMLElement>('[data-testid="git-diff-file-body"]')).find((b) => b.scrollWidth > b.clientWidth);
     const seen: number[] = [];
-    for (let step = 0; step < 6; step += 1) {
-      element.scrollLeft = element.scrollWidth;
+    for (let step = 0; body && step < 6; step += 1) {
+      body.scrollLeft = body.scrollWidth;
       await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
-      seen.push(element.scrollWidth);
+      seen.push(body.scrollWidth);
     }
-    element.scrollLeft = 0;
+    if (body) body.scrollLeft = 0;
     return seen;
   });
-  expect(new Set(widths).size, `the diff keeps growing while scrolled right: ${widths.join(", ")}`).toBe(1);
-  // Every file's block is as wide as the widest line of any file, so no file's rows end short of the scroll end.
-  const articleWidths = await diff.locator(":scope > div > article").evaluateAll((articles) => articles.map((article) => Math.round(article.getBoundingClientRect().width)));
-  expect(new Set(articleWidths).size, `file blocks differ in width: ${articleWidths.join(", ")}`).toBe(1);
+  expect(new Set(widths).size, `the file keeps growing while scrolled right: ${widths.join(", ")}`).toBe(1);
 }
 
 test("populated surfaces stay usable at narrow panes, wide desktop and phone width", async ({ page, context }, testInfo) => {
@@ -223,7 +223,12 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     await openWorkspaceTool(page, workspaceId, "gitReview");
     const review = page.getByTestId("workspace-git-review");
     await expect(review).toBeVisible({ timeout: 15000 });
+    // Narrow, the review shows the diff or the changes list, toggled from its header.
+    await expect(page.getByTestId("git-diff")).toBeVisible({ timeout: 20000 });
+    const listShown = await page.getByTestId("git-status").isVisible();
+    if (!listShown) await page.getByTestId("git-rail-toggle").click();
     await expect(page.getByTestId("git-status")).toContainText("changed path", { timeout: 20000 });
+    if (!listShown) await page.getByTestId("git-rail-toggle").click();
     const diff = page.getByTestId("git-diff");
     const filePicker = page.getByTestId("git-diff-file-select");
     await expect(diff).toContainText("modified sentinel", { timeout: 20000 });
@@ -235,13 +240,11 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     await expect(diff).toContainText("modified sentinel");
     await expectWholeDiffScrollable(diff);
     // Wrap lines: the long line breaks at the pane and nothing scrolls sideways; turned off, it scrolls again.
-    await page.getByRole("button", { name: /^Options/ }).click();
-    await page.getByLabel("Wrap lines").check();
+    await page.getByRole("button", { name: "Wrap lines" }).click();
     await expect(diff).toContainText("modified sentinel");
     const wrapped = await diff.evaluate((element) => ({ scrollWidth: element.scrollWidth, clientWidth: element.clientWidth }));
     expect(wrapped.scrollWidth, "wrapped lines still scroll sideways").toBeLessThanOrEqual(wrapped.clientWidth + 1);
-    await page.getByLabel("Wrap lines").uncheck();
-    await page.getByRole("button", { name: /^Options/ }).click();
+    await page.getByRole("button", { name: "Wrap lines" }).click();
     await expectWholeDiffScrollable(diff);
     await page.screenshot({ path: path.join(shots, "git-narrow-desktop.png"), fullPage: false });
     expect(await clippedControls(review), "Git review controls clipped at a narrow pane width").toEqual([]);
@@ -321,7 +324,7 @@ test("populated surfaces stay usable at narrow panes, wide desktop and phone wid
     // The drawer's width is the app root's `--tools-width` (its card reads it): set it there, not on the drawer inside.
     await page.locator('[style*="--tools-width"]').first().evaluate((element: HTMLElement) => element.style.setProperty("--tools-width", "760px"));
     // Wide: the changes list is a rail beside the diff (never folded), and the diff gets most of the pane.
-    await expect(page.getByTestId("git-status").getByRole("list", { name: "Changed paths" })).toBeVisible();
+    await expect(page.getByTestId("git-status").getByRole("tree", { name: "Changed paths" })).toBeVisible();
     await expect(page.getByTestId("git-diff-file-select")).toBeVisible();
     const wideDiff = await page.getByTestId("git-diff").boundingBox();
     const wideReview = await review.boundingBox();

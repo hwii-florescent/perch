@@ -1,0 +1,5 @@
+{
+  "name": "Navigator",
+  "description": "The web app's stock Navigator (the command palette), unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

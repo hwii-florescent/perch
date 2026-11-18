@@ -1,0 +1,286 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "folder-browser",
+  "note": "The folder picker (stock-ui/folder-browser) as the sidebar's Add project dialog holds it: in the dialog panel (the panel fill, 16 px of padding, 30 rem wide, so the browser is 448 px wide) under that dialog's name and host fields, which belong to the `dialog` screen and are not drawn here. The reference is the browser's own box: 480x416, the panel fill with the padding. Props are `FolderBrowserProps`; the host lists a folder through `browse(path?)` and the harness answers from the fixture's `tree` (path to `{parent, entries}`; folders only, `isGitRepo` gives the git badge), with `home` the folder it lists when the host remembers none; `loading` makes it never answer. The folder the browser opens at is the last one used on the host, which it keeps in the browser's localStorage (`perch.dirBrowser.lastPath.<host>`), set by each state's `view.lastPath`. Going into a folder, the filter and the Type path mode are the screen's own state, reached with `steps` (the harness first waits until the listing is drawn, as a person acts only once it is). 'Use this folder' and the keys (`directory.use`: Cmd+Enter and the alternative) call `onUseFolder`, a no-op here. The list is 60 to 260 px high (about ten 25 px rows) and scrolls past that.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 480,
+    "height": 416
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "props": {
+    "hostId": "local",
+    "home": "/Users/dev",
+    "tree": {
+      "/": {
+        "entries": [
+          {
+            "name": "Applications",
+            "path": "/Applications",
+            "isGitRepo": false
+          },
+          {
+            "name": "Library",
+            "path": "/Library",
+            "isGitRepo": false
+          },
+          {
+            "name": "System",
+            "path": "/System",
+            "isGitRepo": false
+          },
+          {
+            "name": "Users",
+            "path": "/Users",
+            "isGitRepo": false
+          },
+          {
+            "name": "opt",
+            "path": "/opt",
+            "isGitRepo": false
+          },
+          {
+            "name": "private",
+            "path": "/private",
+            "isGitRepo": false
+          },
+          {
+            "name": "usr",
+            "path": "/usr",
+            "isGitRepo": false
+          }
+        ]
+      },
+      "/Users/dev": {
+        "parent": "/Users",
+        "entries": [
+          {
+            "name": "Desktop",
+            "path": "/Users/dev/Desktop",
+            "isGitRepo": false
+          },
+          {
+            "name": "Documents",
+            "path": "/Users/dev/Documents",
+            "isGitRepo": false
+          },
+          {
+            "name": "Downloads",
+            "path": "/Users/dev/Downloads",
+            "isGitRepo": false
+          },
+          {
+            "name": "code",
+            "path": "/Users/dev/code",
+            "isGitRepo": false
+          },
+          {
+            "name": "dotfiles",
+            "path": "/Users/dev/dotfiles",
+            "isGitRepo": true
+          },
+          {
+            "name": "notes",
+            "path": "/Users/dev/notes",
+            "isGitRepo": true
+          }
+        ]
+      },
+      "/Users/dev/code": {
+        "parent": "/Users/dev",
+        "entries": [
+          {
+            "name": "api-server",
+            "path": "/Users/dev/code/api-server",
+            "isGitRepo": true
+          },
+          {
+            "name": "api-server-wt",
+            "path": "/Users/dev/code/api-server-wt",
+            "isGitRepo": false
+          },
+          {
+            "name": "archive",
+            "path": "/Users/dev/code/archive",
+            "isGitRepo": false
+          },
+          {
+            "name": "dotfiles",
+            "path": "/Users/dev/code/dotfiles",
+            "isGitRepo": true
+          },
+          {
+            "name": "experiments",
+            "path": "/Users/dev/code/experiments",
+            "isGitRepo": false
+          },
+          {
+            "name": "infra-notes",
+            "path": "/Users/dev/code/infra-notes",
+            "isGitRepo": false
+          },
+          {
+            "name": "perch",
+            "path": "/Users/dev/code/perch",
+            "isGitRepo": true
+          },
+          {
+            "name": "perch-wt",
+            "path": "/Users/dev/code/perch-wt",
+            "isGitRepo": false
+          },
+          {
+            "name": "playground",
+            "path": "/Users/dev/code/playground",
+            "isGitRepo": false
+          },
+          {
+            "name": "scratch-site",
+            "path": "/Users/dev/code/scratch-site",
+            "isGitRepo": true
+          },
+          {
+            "name": "terminal-ui",
+            "path": "/Users/dev/code/terminal-ui",
+            "isGitRepo": true
+          },
+          {
+            "name": "the-nested-workspace-checkout-of-the-feature-branch",
+            "path": "/Users/dev/code/the-nested-workspace-checkout-of-the-feature-branch",
+            "isGitRepo": false
+          },
+          {
+            "name": "website",
+            "path": "/Users/dev/code/website",
+            "isGitRepo": true
+          },
+          {
+            "name": "zig-notes",
+            "path": "/Users/dev/code/zig-notes",
+            "isGitRepo": false
+          }
+        ]
+      }
+    }
+  },
+  "states": [
+    {
+      "id": "home",
+      "title": "Opened at the last folder used (the home folder): the breadcrumb, the up arrow, the filter, six subfolders with the git badge on two, and Use this folder; the filter is focused",
+      "view": {
+        "lastPath": "/Users/dev"
+      }
+    },
+    {
+      "id": "nested",
+      "title": "A folder with fourteen subfolders (one with a very long name) after clicking 'code': the list is cut at 260 px and scrolls; the breadcrumb is Users / dev / code with the last one in the text colour",
+      "view": {
+        "lastPath": "/Users/dev"
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"dir-browser-entry-code\"]"
+        }
+      ]
+    },
+    {
+      "id": "nested-scrolled",
+      "title": "The same folder with the wheel turned 60 px over the list: the list moves under its top edge and nothing else does (the breadcrumb, the filter and Use this folder stay)",
+      "view": {
+        "lastPath": "/Users/dev"
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"dir-browser-entry-code\"]"
+        },
+        {
+          "scroll": {
+            "selector": "[data-testid=\"dir-browser\"] div.overflow-y-auto",
+            "y": 60
+          }
+        }
+      ]
+    },
+    {
+      "id": "filtered",
+      "title": "'pe' typed in that folder: only the subfolders whose name contains it",
+      "view": {
+        "lastPath": "/Users/dev/code"
+      },
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"dir-browser-filter\"]",
+            "text": "pe"
+          }
+        }
+      ]
+    },
+    {
+      "id": "no-match",
+      "title": "A filter nothing matches: 'No subfolders'",
+      "view": {
+        "lastPath": "/Users/dev/code"
+      },
+      "steps": [
+        {
+          "type": {
+            "selector": "[data-testid=\"dir-browser-filter\"]",
+            "text": "zzzq"
+          }
+        }
+      ]
+    },
+    {
+      "id": "root",
+      "title": "At the root: the up arrow is disabled (40%) and the breadcrumb is a single slash",
+      "view": {
+        "lastPath": "/"
+      }
+    },
+    {
+      "id": "loading",
+      "title": "The host has not answered: 'Loading...' and Use this folder disabled, no breadcrumb path",
+      "view": {
+        "lastPath": "/Users/dev"
+      },
+      "props": {
+        "loading": true
+      }
+    },
+    {
+      "id": "type-path",
+      "title": "Type path pressed: the browse rows give way to a path field with its placeholder and Use this path, disabled while the field is empty; the toggle reads Browse",
+      "view": {
+        "lastPath": "/Users/dev"
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"dir-browser-mode-toggle\"]"
+        }
+      ]
+    },
+    {
+      "id": "type-path-filled",
+      "title": "A path typed: Use this path is enabled",
+      "view": {
+        "lastPath": "/Users/dev"
+      },
+      "steps": [
+        {
+          "click": "[data-testid=\"dir-browser-mode-toggle\"]"
+        },
+        {
+          "type": {
+            "selector": "[data-testid=\"project-path-input\"]",
+            "text": "/srv/infra/nightly-jobs"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "props": {
+    "ac": {
+      "agent": "claude",
+      "label": "Agent unavailable",
+      "connected": true,
+      "pending": false,
+      "retry": true,
+      "control": null,
+      "error": "claude: command not found",
+      "ended": null,
+      "state": {
+        "controlling": false,
+        "shared": false,
+        "writable": false,
+        "phone": false
+      }
+    }
+  }
+}

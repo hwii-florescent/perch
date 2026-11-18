@@ -6,11 +6,11 @@ import type { AttentionEvent, SessionSummary } from "@perch/shared";
 
 vi.mock("../ws", () => ({ socket: { send: vi.fn(), connect: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
 vi.mock("./NewSessionPopover", () => ({ NewSessionPopover: () => null }));
-vi.mock("../keybinds", () => ({ useNestShortcutHints: () => [] }));
+vi.mock("../keybinds", () => ({ useNestShortcutHints: () => [], shortcutLabel: () => null }));
 vi.mock("../closeGuard", () => ({ requestCloseSession: vi.fn() }));
 const { usePerchStore } = await import("../store");
 const { useAttention } = await import("../attention");
-const { WorkspaceOverview } = await import("../stock-ui/sidebar/overview");
+const { WorkspaceOverview, SIDEBAR_SETTINGS_EVENT } = await import("../stock-ui/sidebar/overview");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root;
@@ -130,6 +130,21 @@ it("lists agents only: a plain terminal stays a tab, one running an agent is lis
   act(() => (document.querySelector('[data-testid="workspace-show-terminals"]') as HTMLElement).click());
   expect(get("workspace-session-shell")).not.toBeNull();
   expect(storage.get("perch.sidebar.showTerminals")).toBe("1");
+});
+
+it("reads its settings again when the host says they changed elsewhere", () => {
+  storage.set("perch.sidebar.showTerminals", "0");
+  usePerchStore.setState({ sessions: [chat("agent"), chat("shell", { cliProviderId: "terminal" })] });
+  act(() => root.render(<WorkspaceOverview />));
+  expect(get("workspace-session-shell")).toBeNull();
+  storage.set("perch.sidebar.showTerminals", "1");
+  expect(get("workspace-session-shell")).toBeNull();
+  act(() => { window.dispatchEvent(new Event(SIDEBAR_SETTINGS_EVENT)); });
+  expect(get("workspace-session-shell")).not.toBeNull();
+  storage.set("perch.sidebar.showTerminals", "0");
+  act(() => { window.dispatchEvent(new Event(SIDEBAR_SETTINGS_EVENT)); });
+  expect(get("workspace-session-shell")).toBeNull();
+  expect(get("workspace-session-agent")).not.toBeNull();
 });
 
 it.each(["project", "status", "list"])("%s always lists Quickchat terminals, regardless of Show terminals", (mode) => {

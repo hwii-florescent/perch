@@ -1,0 +1,480 @@
+{
+  "props": {
+    "open": true
+  },
+  "keybindings": [
+    {
+      "keys": "⌘P",
+      "description": "Open Navigator",
+      "group": "global"
+    },
+    {
+      "keys": "⌘K",
+      "description": "Open Navigator (outside terminals)",
+      "group": "global"
+    },
+    {
+      "keys": "⌘,",
+      "description": "Open Settings",
+      "group": "global"
+    },
+    {
+      "keys": "⌘/",
+      "description": "Open this keybind help",
+      "group": "global"
+    },
+    {
+      "keys": "⌘B",
+      "description": "Toggle sidebar",
+      "group": "global"
+    },
+    {
+      "keys": "⇧⌘B",
+      "description": "Toggle the right drawer (files and Git)",
+      "group": "global"
+    },
+    {
+      "keys": "⇧⌘U",
+      "description": "Show the sidebar and open the next chat that needs you",
+      "group": "global"
+    },
+    {
+      "keys": "⌘=",
+      "description": "Zoom in",
+      "group": "global"
+    },
+    {
+      "keys": "⇧⌘=",
+      "description": "Zoom in (the + key)",
+      "group": "global"
+    },
+    {
+      "keys": "⌘-",
+      "description": "Zoom out",
+      "group": "global"
+    },
+    {
+      "keys": "⌘0",
+      "description": "Reset zoom",
+      "group": "global"
+    },
+    {
+      "keys": "⌘T",
+      "description": "New tab (pick a harness) in this workspace",
+      "group": "tabs"
+    },
+    {
+      "keys": "⌘W",
+      "description": "Close the focused pane, file or tab (agents ask first)",
+      "group": "tabs"
+    },
+    {
+      "keys": "⇧⌘T",
+      "description": "New session: pick a project, then an agent, terminal or file",
+      "group": "tabs"
+    },
+    {
+      "keys": "⌥⌘Enter",
+      "description": "Keep the preview tab open (make it a regular tab)",
+      "group": "tabs"
+    },
+    {
+      "keys": "⌘1…8",
+      "description": "Jump to tab 1…8",
+      "group": "tabs"
+    },
+    {
+      "keys": "⌘9",
+      "description": "Jump to the last tab",
+      "group": "tabs"
+    },
+    {
+      "keys": "⇧⌘]",
+      "description": "Next tab",
+      "group": "tabs"
+    },
+    {
+      "keys": "⇧⌘[",
+      "description": "Previous tab",
+      "group": "tabs"
+    },
+    {
+      "keys": "⌃-",
+      "description": "Back to where you were",
+      "group": "tabs"
+    },
+    {
+      "keys": "⌃⇧-",
+      "description": "Forward",
+      "group": "tabs"
+    },
+    {
+      "keys": "⌃⇧↑",
+      "description": "Previous workspace",
+      "group": "nests"
+    },
+    {
+      "keys": "⌃⇧↓",
+      "description": "Next workspace",
+      "group": "nests"
+    },
+    {
+      "keys": "⌃⇧1…9",
+      "description": "Jump to workspace 1…9",
+      "group": "nests"
+    },
+    {
+      "keys": "⌘N",
+      "description": "New workspace (worktree)",
+      "group": "nests"
+    },
+    {
+      "keys": "⌘O",
+      "description": "Add project",
+      "group": "nests"
+    },
+    {
+      "keys": "⇧⌘N",
+      "description": "New quickchat",
+      "group": "nests"
+    },
+    {
+      "keys": "⌘D",
+      "description": "Split right",
+      "group": "panes"
+    },
+    {
+      "keys": "⇧⌘D",
+      "description": "Split down",
+      "group": "panes"
+    },
+    {
+      "keys": "⌘[",
+      "description": "Previous pane",
+      "group": "panes"
+    },
+    {
+      "keys": "⌘]",
+      "description": "Next pane",
+      "group": "panes"
+    },
+    {
+      "keys": "⇧⌘Enter",
+      "description": "Zoom / restore the focused pane",
+      "group": "panes"
+    },
+    {
+      "keys": "⌥⌘←",
+      "description": "Focus the pane to the left",
+      "group": "panes"
+    },
+    {
+      "keys": "⌥⌘→",
+      "description": "Focus the pane to the right",
+      "group": "panes"
+    },
+    {
+      "keys": "⌥⌘↑",
+      "description": "Focus the pane above",
+      "group": "panes"
+    },
+    {
+      "keys": "⌥⌘↓",
+      "description": "Focus the pane below",
+      "group": "panes"
+    },
+    {
+      "keys": "⌘F",
+      "description": "Find in the terminal",
+      "group": "terminal"
+    },
+    {
+      "keys": "⌘K",
+      "description": "Clear the terminal (screen and scrollback)",
+      "group": "terminal"
+    },
+    {
+      "keys": "⌘↑",
+      "description": "Scroll to the top",
+      "group": "terminal"
+    },
+    {
+      "keys": "⌘↓",
+      "description": "Scroll to the bottom",
+      "group": "terminal"
+    },
+    {
+      "keys": "⇧⌘↑",
+      "description": "Jump to the previous command",
+      "group": "terminal"
+    },
+    {
+      "keys": "⇧⌘↓",
+      "description": "Jump to the next command",
+      "group": "terminal"
+    },
+    {
+      "keys": "⌘S",
+      "description": "Save file",
+      "group": "editor"
+    },
+    {
+      "keys": "⌘F",
+      "description": "Find in file",
+      "group": "editor"
+    },
+    {
+      "keys": "⌥⌘F",
+      "description": "Replace in file",
+      "group": "editor"
+    },
+    {
+      "keys": "⇧⌘F",
+      "description": "Replace in file (alternate)",
+      "group": "editor"
+    },
+    {
+      "keys": "F3",
+      "description": "Next file match (while Find is open)",
+      "group": "editor"
+    },
+    {
+      "keys": "⇧F3",
+      "description": "Previous file match (while Find is open)",
+      "group": "editor"
+    },
+    {
+      "keys": "⌘G",
+      "description": "Next file match (alternate)",
+      "group": "editor"
+    },
+    {
+      "keys": "⇧⌘G",
+      "description": "Previous file match (alternate)",
+      "group": "editor"
+    },
+    {
+      "keys": "⌃G",
+      "description": "Go to line",
+      "group": "editor"
+    },
+    {
+      "keys": "⌃J",
+      "description": "Next Navigator result",
+      "group": "navigator"
+    },
+    {
+      "keys": "⌃N",
+      "description": "Next Navigator result (alternate)",
+      "group": "navigator"
+    },
+    {
+      "keys": "⌃K",
+      "description": "Previous Navigator result",
+      "group": "navigator"
+    },
+    {
+      "keys": "⌃P",
+      "description": "Previous Navigator result (alternate)",
+      "group": "navigator"
+    },
+    {
+      "keys": "⌘Enter",
+      "description": "Use this folder",
+      "group": "directory"
+    },
+    {
+      "keys": "⌃Enter",
+      "description": "Use this folder (alternate)",
+      "group": "directory"
+    },
+    {
+      "keys": "⇧/",
+      "description": "Open keybind help (outside inputs)",
+      "group": "global"
+    },
+    {
+      "keys": "⌃Space",
+      "description": "Leader prefix (then a follow-up key)",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, G",
+      "description": "Open Navigator",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, ⇧/",
+      "description": "Open this keybind help",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, B",
+      "description": "Toggle sidebar",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, S",
+      "description": "Open Settings",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, N",
+      "description": "Next tab",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, P",
+      "description": "Previous tab",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, X",
+      "description": "Close the focused pane, file or tab (agents ask first)",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, V",
+      "description": "Split right",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, ⇧-",
+      "description": "Split down",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, Z",
+      "description": "Zoom / restore the focused pane",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, O",
+      "description": "Next pane",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, H",
+      "description": "Focus the pane to the left",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, J",
+      "description": "Focus the pane below",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, K",
+      "description": "Focus the pane above",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, L",
+      "description": "Focus the pane to the right",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, 1…9",
+      "description": "Jump to tab 1…9",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, W",
+      "description": "Next project's most recent session",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, ⇧W",
+      "description": "Open this project's worktree menu",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, C",
+      "description": "New session in this project",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, ⇧]",
+      "description": "Swap with the next pane",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, ⇧=",
+      "description": "Grow the focused pane",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, -",
+      "description": "Shrink the focused pane",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, ⇧H",
+      "description": "Swap pane left",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, R, H",
+      "description": "Resize pane left (shrink)",
+      "group": "resize"
+    },
+    {
+      "keys": "⌃Space, ⇧J",
+      "description": "Swap pane down",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, R, J",
+      "description": "Resize pane down (shrink)",
+      "group": "resize"
+    },
+    {
+      "keys": "⌃Space, ⇧K",
+      "description": "Swap pane up",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, R, K",
+      "description": "Resize pane up (grow)",
+      "group": "resize"
+    },
+    {
+      "keys": "⌃Space, ⇧L",
+      "description": "Swap pane right",
+      "group": "leader"
+    },
+    {
+      "keys": "⌃Space, R, L",
+      "description": "Resize pane right (grow)",
+      "group": "resize"
+    },
+    {
+      "keys": "⌃Space, R",
+      "description": "Enter resize mode (Escape or timeout exits)",
+      "group": "leader"
+    },
+    {
+      "keys": "Esc",
+      "description": "Close any open overlay or keyboard mode",
+      "group": "global"
+    },
+    {
+      "keys": "↑ / ↓",
+      "description": "Move selection in Navigator",
+      "group": "navigator"
+    },
+    {
+      "keys": "⌘C / ⌘V",
+      "description": "Copy / paste",
+      "group": "terminal"
+    }
+  ],
+  "steps": [
+    {
+      "type": {
+        "selector": "[data-testid=\"keybind-help-search\"]",
+        "text": "split"
+      }
+    }
+  ]
+}

@@ -312,6 +312,7 @@ async function tabsWork(page: Page, owner: string, a: string, b: string, name: s
 /** Two sessions shown side by side: each tiled pane has a header from `owner`'s copy, and its expand leaves the split. */
 async function paneHeadersWork(page: Page, owner: string, a: string, b: string) {
   await page.getByTestId(`tab-${b}`).click({ button: "right" });
+  await page.getByTestId("tab-menu-show-beside").click();
   await page.getByTestId(`tab-split-with-${a}`).click();
   await expect(page.getByTestId("split-canvas")).toHaveAttribute("data-split", "2", { timeout: 15000 });
   for (const id of [a, b]) await expect(page.locator(`[data-testid="mod-view-${owner}"] [data-testid="pane-header-${id}"]`)).toBeVisible({ timeout: 15000 });
@@ -375,6 +376,7 @@ test("the status bar, tabs and pane headers run from stock packages; a clone cho
     .toEqual([...stockOrder].reverse());
   await expect(page.locator('[data-testid="mod-view-e2e-my-status"]').getByTestId("status-connection")).toHaveAttribute("aria-label", "Linked", { timeout: 15000 });
   await page.getByTestId(`tab-${b}`).click({ button: "right" });
+  await page.getByTestId("tab-menu-show-beside").click();
   await page.getByTestId(`tab-split-with-${a}`).click();
   await page.getByTestId(`e2e-pane-menu-${a}`).click();
   await expect(page.getByTestId("tab-split-menu")).toBeVisible();
@@ -559,7 +561,7 @@ test("a sidebar copy regroups the sessions by agent, then project, with pins fir
       ['from "./icons.js";', 'from "./icons.js";\nimport { AgentGroups } from "./agents.js";'],
       ['list: "In one list" };', 'list: "In one list", agent: "By agent" };'],
       ['saved === "status" || saved === "list" ? saved', 'saved === "status" || saved === "list" || saved === "agent" ? saved'],
-      ['(organize === "list" ? listView : statusView)', '(organize === "agent" ? _jsx(AgentGroups, { sessions: nav.sessions, row: (session, nested) => sessionRow(session, [], "list", nested, "list") }) : organize === "list" ? listView : statusView)'],
+      ['(organize === "list" ? listView : statusView)', '(organize === "agent" ? _jsx(AgentGroups, { sessions: nav.sessions, row: (session, nested) => sessionRow(session, [], "list", "list", "", { nested }) }) : organize === "list" ? listView : statusView)'],
     ]) {
       expect(text).toContain(from);
       text = text.replace(from, to);
@@ -1280,7 +1282,11 @@ test("Settings > Mods never runs the person's copy, and on a phone it puts Perch
   markRoot("e2e-my-select", "testId", "data-e2e-select");
   await page.reload({ waitUntil: "networkidle" });
   const settings = async (section: string) => {
-    if (!(await page.getByTestId("settings-modal").count())) await page.getByTestId("settings-gear").click();
+    if (!(await page.getByTestId("settings-modal").count())) {
+      // On a phone the gear sits in the session switcher's foot.
+      if (!(await page.getByTestId("settings-gear").isVisible())) await page.getByTestId("mobile-switch").click();
+      await page.getByTestId("settings-gear").click();
+    }
     await expect(page.getByTestId("settings-modal")).toBeVisible({ timeout: 10000 });
     if (await page.getByTestId("settings-back").isVisible()) await page.getByTestId("settings-back").click();
     await page.getByTestId(`settings-nav-${section}`).click();
@@ -1354,12 +1360,16 @@ test("an agent with only the perch command clones the status bar, puts it in pla
     "perch mod dom e2e-agent-status > dom-2.txt",
     "perch mod do app.settings",
   ].join("\n") + "\n");
+  // A shell's agent gets its identity when it is typed there (the shim hands a typed `pi` to `perch __launch`), so the
+  // scripted agent is a stand-in `pi` found after the shim; it runs the script and has no other behavior.
+  fs.mkdirSync(path.join(work, "bin"));
+  fs.writeFileSync(path.join(work, "bin", "pi"), `#!/bin/sh\nexec sh '${work}/agent.sh'\n`, { mode: 0o755 });
   try {
     await page.goto("/", { waitUntil: "networkidle" });
     await startChat(page, "terminal");
     await expect(page.locator('[data-testid="mod-view-stock:status"]').getByTestId("status-host")).toHaveText("Local", { timeout: 15000 });
     await page.getByTestId("persistent-agent-terminal").locator(".xterm-helper-textarea")
-      .pressSequentially(`sh '${work}/agent.sh' > '${work}/out.txt' 2>&1; echo $? > '${work}/exit.txt'\n`);
+      .pressSequentially(`PATH="\${PATH%%:*}:${work}/bin:$PATH" pi > '${work}/out.txt' 2>&1; echo $? > '${work}/exit.txt'\n`);
     await expect.poll(() => fs.existsSync(path.join(work, "exit.txt")), { timeout: 120_000 }).toBe(true);
     const read = (file: string) => fs.readFileSync(path.join(work, file), "utf8");
     expect(read("exit.txt").trim(), read("out.txt")).toBe("0");
@@ -1614,7 +1624,11 @@ test("a Settings page runs from its stock package; a clone in its place keeps th
   page.on("pageerror", (error) => console.log("PAGEERROR", error.message));
   await page.goto("/", { waitUntil: "networkidle" });
   const settings = async (section: string) => {
-    if (!(await page.getByTestId("settings-modal").count())) await page.getByTestId("settings-gear").click();
+    if (!(await page.getByTestId("settings-modal").count())) {
+      // On a phone the gear sits in the session switcher's foot.
+      if (!(await page.getByTestId("settings-gear").isVisible())) await page.getByTestId("mobile-switch").click();
+      await page.getByTestId("settings-gear").click();
+    }
     await expect(page.getByTestId("settings-modal")).toBeVisible({ timeout: 10000 });
     if (await page.getByTestId("settings-back").isVisible()) await page.getByTestId("settings-back").click();
     await page.getByTestId(`settings-nav-${section}`).click();

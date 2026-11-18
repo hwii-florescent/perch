@@ -1,0 +1,16 @@
+{
+  "statusLine": {
+    "connected": true,
+    "hostId": "local",
+    "sessionId": "s-perch-1",
+    "cwd": "/Users/dev/code/perch-wt/ghostty-spike/crates/perch-native/src/terminal/render/glyph-cache",
+    "branch": "spike/ghostty-terminal-renderer-with-a-very-long-branch-name"
+  },
+  "planUsage": {
+    "usage": [],
+    "updatedAt": 0,
+    "spend": null,
+    "redeemResult": null
+  },
+  "zoom": 1
+}

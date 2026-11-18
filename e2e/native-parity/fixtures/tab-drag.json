@@ -1,0 +1,223 @@
+{
+  "schema": "perch-native-parity-fixture/1",
+  "screen": "tab-drag",
+  "note": "Floating screen: it is drawn through a portal into the page body and placed against the window, so the reference is the whole default 1280x800 window on the app's backdrop and every box is in window coordinates. What a tab drag shows while it is in flight (stock-ui/tab-drag, drawn by the tab strip's TabDragLayer from `useTabDrag`): a transparent sheet over the whole window (so nothing under it reacts), a ghost of the dragged tab off the tab strip, and, over a pane, that pane dimmed and the half a split would take highlighted with its label. The drag itself (`beginTabDrag`: pointer tracking, the reorder on the strip, which side of a pane is nearest, whether the split is allowed) is not drawn here; the harness is given its result as the screen's input: the pointer `x, y`, `overStrip`, the grab offset `grab` (where on the tab it was held), the `tab` whose own markup is the ghost (the harness draws the real tab strip out of sight and copies that tab exactly as `beginTabDrag` does, the way the app's ghost looks like the strip's tab), the `pane` box under the pointer and its `zone` (null: that pane cannot take the tab). The half's box is `zoneBox(pane, zone)`, the same function the app uses. Each output's sdk.props.drag is the `drag` the screen was handed, with the ghost's markup. The pane boxes are in window coordinates and are the single pane of the shown workspace (the main card's canvas below the 44 px strip: left 256, top 52, 1016x716) or the halves of it when split (505 px wide, 6 px gap); the harness draws no panes under the layer, as the layer does not depend on what is under it. The highlight's own animation (a 0.14 s fade-in then a 1.2 s pulse) is switched off for the capture; the highlight slides between sides in 150 ms in the app.",
+  "dataFrom": "sidebar",
+  "size": {
+    "width": 1280,
+    "height": 800
+  },
+  "window": {
+    "width": 1280,
+    "height": 800
+  },
+  "data": {},
+  "props": {
+    "drag": {
+      "id": "s-perch-2",
+      "label": "Fix terminal slash input",
+      "tab": "s-perch-2",
+      "grab": {
+        "dx": 60,
+        "dy": 14
+      },
+      "x": 764,
+      "y": 420,
+      "overStrip": false,
+      "pane": null,
+      "zone": null
+    }
+  },
+  "states": [
+    {
+      "id": "over-strip",
+      "title": "The pointer is still on the tab strip: the tabs slide and the dragged tab follows the pointer there, so this layer draws nothing visible (an invisible sheet only)",
+      "props": {
+        "drag": {
+          "id": "s-perch-2",
+          "label": "Fix terminal slash input",
+          "tab": "s-perch-2",
+          "grab": {
+            "dx": 60,
+            "dy": 14
+          },
+          "x": 600,
+          "y": 30,
+          "overStrip": true,
+          "pane": null,
+          "zone": null
+        }
+      }
+    },
+    {
+      "id": "ghost-only",
+      "title": "Off the strip over the middle of a pane or off any pane (a drop here does nothing): only the ghost of the tab, held 60 px in and 14 px down from its corner, with a shadow",
+      "props": {
+        "drag": {
+          "id": "s-perch-2",
+          "label": "Fix terminal slash input",
+          "tab": "s-perch-2",
+          "grab": {
+            "dx": 60,
+            "dy": 14
+          },
+          "x": 764,
+          "y": 420,
+          "overStrip": false,
+          "pane": null,
+          "zone": null
+        }
+      }
+    },
+    {
+      "id": "zone-right",
+      "title": "Over the right side of the one pane: that pane dimmed, its right half highlighted in the accent with 'Split right'",
+      "props": {
+        "drag": {
+          "id": "s-perch-2",
+          "label": "Fix terminal slash input",
+          "tab": "s-perch-2",
+          "grab": {
+            "dx": 60,
+            "dy": 14
+          },
+          "x": 1150,
+          "y": 420,
+          "overStrip": false,
+          "pane": {
+            "left": 256,
+            "top": 52,
+            "width": 1016,
+            "height": 716
+          },
+          "zone": "right"
+        }
+      }
+    },
+    {
+      "id": "zone-left",
+      "title": "Over the left side: the left half and 'Split left'",
+      "props": {
+        "drag": {
+          "id": "s-perch-2",
+          "label": "Fix terminal slash input",
+          "tab": "s-perch-2",
+          "grab": {
+            "dx": 60,
+            "dy": 14
+          },
+          "x": 340,
+          "y": 420,
+          "overStrip": false,
+          "pane": {
+            "left": 256,
+            "top": 52,
+            "width": 1016,
+            "height": 716
+          },
+          "zone": "left"
+        }
+      }
+    },
+    {
+      "id": "zone-up",
+      "title": "Over the top: the upper half and 'Split above'",
+      "props": {
+        "drag": {
+          "id": "s-perch-2",
+          "label": "Fix terminal slash input",
+          "tab": "s-perch-2",
+          "grab": {
+            "dx": 60,
+            "dy": 14
+          },
+          "x": 764,
+          "y": 120,
+          "overStrip": false,
+          "pane": {
+            "left": 256,
+            "top": 52,
+            "width": 1016,
+            "height": 716
+          },
+          "zone": "up"
+        }
+      }
+    },
+    {
+      "id": "zone-down",
+      "title": "Over the bottom: the lower half and 'Split below'",
+      "props": {
+        "drag": {
+          "id": "s-perch-2",
+          "label": "Fix terminal slash input",
+          "tab": "s-perch-2",
+          "grab": {
+            "dx": 60,
+            "dy": 14
+          },
+          "x": 764,
+          "y": 700,
+          "overStrip": false,
+          "pane": {
+            "left": 256,
+            "top": 52,
+            "width": 1016,
+            "height": 716
+          },
+          "zone": "down"
+        }
+      }
+    },
+    {
+      "id": "split-pane",
+      "title": "The canvas is already split in two: over the lower part of the right pane (505 px wide), only that pane's lower half is taken",
+      "props": {
+        "drag": {
+          "id": "s-perch-2",
+          "label": "Fix terminal slash input",
+          "tab": "s-perch-2",
+          "grab": {
+            "dx": 60,
+            "dy": 14
+          },
+          "x": 1020,
+          "y": 700,
+          "overStrip": false,
+          "pane": {
+            "left": 767,
+            "top": 52,
+            "width": 505,
+            "height": 716
+          },
+          "zone": "down"
+        }
+      }
+    },
+    {
+      "id": "blocked",
+      "title": "A pane that cannot take the tab (the split has no room): the pane dimmed and a muted box over it, 'This split can't take that tab', no accent",
+      "props": {
+        "drag": {
+          "id": "s-perch-2",
+          "label": "Fix terminal slash input",
+          "tab": "s-perch-2",
+          "grab": {
+            "dx": 60,
+            "dy": 14
+          },
+          "x": 1100,
+          "y": 200,
+          "overStrip": false,
+          "pane": {
+            "left": 767,
+            "top": 52,
+            "width": 505,
+            "height": 355
+          },
+          "zone": null
+        }
+      }
+    }
+  ]
+}

@@ -103,8 +103,9 @@ test("Files and Git share the drawer shell across every theme without making can
               const diff = surface.getByTestId("git-diff");
               await diff.evaluate((el) => { el.scrollTop = 200; });
               await expect.poll(() => diff.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-              // Only review comments/composers stick horizontally; compare/status controls are separate flex scroll regions.
-              expect(await surface.evaluate((el) => [...el.querySelectorAll("*")].filter((node) => getComputedStyle(node).position === "sticky").every((node) => getComputedStyle(node).top === "auto"))).toBe(true);
+              // Review comments/composers stick horizontally; only each file's header (`article > header`) also pins to the top
+              // of the diff on purpose. Compare/status controls are separate flex scroll regions.
+              expect(await surface.evaluate((el) => [...el.querySelectorAll("*")].filter((node) => getComputedStyle(node).position === "sticky" && !node.matches("article > header")).every((node) => getComputedStyle(node).top === "auto"))).toBe(true);
             }
             await page.screenshot({ animations: "disabled", path: testInfo.outputPath(`drawer-${theme}-${tab}-${glass ? "glass" : "opaque"}.png`) });
           }
@@ -398,6 +399,7 @@ test("tiled pane controls, tab menus and pane shortcuts all act on the visible t
     await expect(canvas).toHaveAttribute("data-split", "0");
     expect(await strip(page)).toEqual([`tab-${first}`, `tab-${second}`]);
     await page.getByTestId(`tab-${first}`).click({ button: "right" });
+    await page.getByTestId("tab-menu-show-beside").click();
     await page.getByTestId(`tab-split-with-${second}`).click();
     await expect(canvas).toHaveAttribute("data-split", "2");
     await page.getByTestId(`tab-${second}`).click({ button: "right" });
@@ -406,6 +408,7 @@ test("tiled pane controls, tab menus and pane shortcuts all act on the visible t
 
     // A split shortcut creates a real terminal tab in this workspace, not a hidden shell.
     await page.getByTestId(`tab-${first}`).click({ button: "right" });
+    await page.getByTestId("tab-menu-show-beside").click();
     await page.getByTestId(`tab-split-with-${second}`).click();
     await page.keyboard.press("Meta+Shift+d");
     await expect(canvas).toHaveAttribute("data-split", "3", { timeout: 20000 });
@@ -448,6 +451,7 @@ test("tabs split side by side under one strip", async ({ page }, testInfo) => {
 
     // Split the file beside the terminal from the file tab's menu.
     await page.getByTestId(fileTab).click({ button: "right" });
+    await page.getByTestId("tab-menu-show-beside").click();
     await page.getByTestId(`tab-split-with-${sessionId}`).click();
     await expect(canvas).toHaveAttribute("data-split", "2");
 
@@ -470,6 +474,7 @@ test("tabs split side by side under one strip", async ({ page }, testInfo) => {
 
     // Add the review as a third pane, then drag the first divider.
     await page.getByTestId(reviewTab).click({ button: "right" });
+    await page.getByTestId("tab-menu-show-beside").click();
     await page.getByTestId(`tab-split-with-${sessionId}`).click();
     await expect(canvas).toHaveAttribute("data-split", "3");
     const divider = await box(page, "split-divider-0");
@@ -526,6 +531,7 @@ test("returning to a project restores its selected resource and split", async ({
     const a = await openAll(page, rootA);
     const canvas = page.getByTestId("split-canvas");
     await page.getByTestId(a.fileTab).click({ button: "right" });
+    await page.getByTestId("tab-menu-show-beside").click();
     await page.getByTestId(`tab-split-with-${a.sessionId}`).click();
     await expect(canvas).toHaveAttribute("data-split", "2");
     expect(await activeTab(page)).toBe(a.fileTab);
@@ -580,6 +586,7 @@ test("a viewer with no local tabs gets its strip and split back from the core", 
     const a = await openAll(page, root);
     const canvas = page.getByTestId("split-canvas");
     await page.getByTestId(a.fileTab).click({ button: "right" });
+    await page.getByTestId("tab-menu-show-beside").click();
     await page.getByTestId(`tab-split-with-${a.sessionId}`).click();
     await expect(canvas).toHaveAttribute("data-split", "2");
     await page.getByTestId(a.reviewTab).dragTo(page.getByTestId(a.terminalTab));
@@ -643,6 +650,7 @@ test("switching workspace inside the save delay still saves the split left behin
     await page.locator(`[data-testid="workspace-entry-${a.workspaceId}"] .workspace-entry__button`).first().click();
     await expect.poll(() => strip(page)).toEqual([a.terminalTab, a.fileTab, a.reviewTab]);
     await page.getByTestId(a.fileTab).click({ button: "right" });
+    await page.getByTestId("tab-menu-show-beside").click();
     await page.getByTestId(`tab-split-with-${a.sessionId}`).click();
     // Leave A at once, before the 400 ms debounce fires.
     await page.locator(`[data-testid^="workspace-entry-"]:not([data-testid="workspace-entry-${a.workspaceId}"]) .workspace-entry__button`).first().click();
@@ -668,6 +676,7 @@ test("two windows of one browser are two viewers with their own layouts", async 
   try {
     const a = await openAll(page, root);
     await page.getByTestId(a.fileTab).click({ button: "right" });
+    await page.getByTestId("tab-menu-show-beside").click();
     await page.getByTestId(`tab-split-with-${a.sessionId}`).click();
     await expect(page.getByTestId("split-canvas")).toHaveAttribute("data-split", "2");
     await page.getByTestId(a.terminalTab).click(); // the terminal, not the file, is what is selected
@@ -738,6 +747,7 @@ test("a reload restores the selected file, and keyboard focus selects a split pa
 
     // Split the file beside the terminal; focus moved by keyboard (no click) selects that pane.
     await page.getByTestId(a.fileTab).click({ button: "right" });
+    await page.getByTestId("tab-menu-show-beside").click();
     await page.getByTestId(`tab-split-with-${a.sessionId}`).click();
     await expect(page.getByTestId("split-canvas")).toHaveAttribute("data-split", "2");
     await expect.poll(() => activeTab(page)).toBe(a.fileTab);
@@ -787,6 +797,7 @@ test("a window resumes its own terminal, not the one another window chose last",
     const other = await startChat(page, "terminal", root);
     await page.getByTestId(a.terminalTab).click();
     await page.getByTestId(a.fileTab).click({ button: "right" });
+    await page.getByTestId("tab-menu-show-beside").click();
     await page.getByTestId(`tab-split-with-${a.sessionId}`).click();
     await expect(page.getByTestId("split-canvas")).toHaveAttribute("data-split", "2");
     await page.getByTestId(a.terminalTab).click(); // the terminal, not the file, is what is selected

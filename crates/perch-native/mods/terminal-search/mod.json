@@ -1,0 +1,5 @@
+{
+  "name": "Terminal find",
+  "description": "The web app's stock find bar over a terminal, unchanged, drawn natively through the React runtime.",
+  "runtime": "react"
+}

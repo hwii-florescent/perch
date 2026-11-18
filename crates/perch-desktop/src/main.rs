@@ -195,8 +195,15 @@ fn main() {
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<std::net::SocketAddr>();
 
     // This app's webview is the core's only local client, so its credential stays in memory:
-    // never a file, never an environment variable (`LocalUi::in_process`).
-    let local_ui = perch_core::local_ui::LocalUi::in_process();
+    // never a file, never an environment variable (`LocalUi::in_process`). Opt-in for trying the
+    // native client beside this app: `PERCH_SHARE_CORE=1` makes the core publish its token in the
+    // 0600 `core.json`, as a headless core does, so perch-native attaches to this same core.
+    // ponytail: a launch variable, not a setting; it goes away with the Tauri app.
+    let local_ui = if std::env::var_os("PERCH_SHARE_CORE").is_some_and(|v| v == "1") {
+        perch_core::local_ui::LocalUi::standalone()
+    } else {
+        perch_core::local_ui::LocalUi::in_process()
+    };
 
     // Spawn the core server on the background runtime.
     let web_dist_dir_clone = web_dist_dir.clone();

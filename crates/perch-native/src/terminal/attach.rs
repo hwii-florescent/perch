@@ -32,6 +32,8 @@ pub enum ToCore {
     TakeControl,
     /// Take only the size, from whichever view or phone holds it.
     TakeSize,
+    /// Give the size up, so another view sizes the shell.
+    GiveSize,
     /// End the shell. Needs the input lease.
     Kill,
     /// End the session, from this connection, which holds the keyboard: the core refuses to end
@@ -51,6 +53,53 @@ pub enum ToCore {
         extension: &'static str,
         bytes: Vec<u8>,
     },
+    /// Put a request (a Context Bridge send) to the core on this connection, which holds the
+    /// agent's input lease: from any other connection the core refuses it as another view's.
+    /// Its request id is added here; the core's answer goes to `reply`, and is dropped unanswered
+    /// when the connection goes.
+    Request {
+        frame: serde_json::Value,
+        reply: Reply,
+    },
+}
+
+type Answer = futures::channel::oneshot::Sender<Result<serde_json::Value, String>>;
+
+/// Where the answer to a [`ToCore::Request`] goes. Equal only to itself.
+#[derive(Clone)]
+pub struct Reply(std::sync::Arc<std::sync::Mutex<Option<Answer>>>);
+
+impl Reply {
+    pub fn new() -> (
+        Self,
+        futures::channel::oneshot::Receiver<Result<serde_json::Value, String>>,
+    ) {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        (
+            Self(std::sync::Arc::new(std::sync::Mutex::new(Some(tx)))),
+            rx,
+        )
+    }
+
+    fn answer(&self, outcome: Result<serde_json::Value, String>) {
+        if let Some(tx) = self.0.lock().unwrap().take() {
+            let _ = tx.send(outcome);
+        }
+    }
+}
+
+impl PartialEq for Reply {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for Reply {}
+
+impl std::fmt::Debug for Reply {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Reply")
+    }
 }
 
 /// What the core says about the terminal.
@@ -246,6 +295,8 @@ async fn run(
     let mut shared = false;
     // The session this connection asked the core to end, until the core answers.
     let mut ending = false;
+    // Requests put on this connection, by request id, until the core answers.
+    let mut asked: std::collections::HashMap<String, Reply> = Default::default();
     let dropped = loop {
         tokio::select! {
             message = connection.next() => match message {
@@ -278,6 +329,15 @@ async fn run(
                         break None;
                     }
                 }
+                Ok(message) if crate::client::answer_of(&message)
+                    .is_some_and(|(id, _)| asked.contains_key(id)) =>
+                {
+                    if let Some((id, outcome)) = crate::client::answer_of(&message) {
+                        if let Some(reply) = asked.remove(id) {
+                            reply.answer(outcome);
+                        }
+                    }
+                }
                 Ok(message) => match end_answer(&message, &session_id, ending) {
                     Some(EndAnswer::Ended) => {
                         let _ = events.unbounded_send(FromCore::Ended);
@@ -307,11 +367,11 @@ async fn run(
                     Some(ToCore::Resize(cols, rows)) => {
                         connection.terminal_resize(&terminal, cols, rows).await
                     }
-                    Some(taking @ (ToCore::TakeControl | ToCore::TakeSize)) => {
-                        let taken = if taking == ToCore::TakeControl {
-                            connection.take_control(&mut terminal).await
-                        } else {
-                            connection.take_resize(&mut terminal).await
+                    Some(taking @ (ToCore::TakeControl | ToCore::TakeSize | ToCore::GiveSize)) => {
+                        let taken = match taking {
+                            ToCore::TakeControl => connection.take_control(&mut terminal).await,
+                            ToCore::TakeSize => connection.take_resize(&mut terminal).await,
+                            _ => connection.release_resize(&mut terminal).await,
                         };
                         if taken.is_ok()
                             && events.unbounded_send(FromCore::Agent(AgentInfo::of(&terminal))).is_err()
@@ -321,6 +381,12 @@ async fn run(
                         taken
                     }
                     Some(ToCore::Kill) => connection.terminal_kill(&terminal).await,
+                    Some(ToCore::Request { mut frame, reply }) => {
+                        let id = connection.request_id();
+                        frame["requestId"] = serde_json::Value::from(id.clone());
+                        asked.insert(id, reply);
+                        connection.send(frame).await
+                    }
                     Some(ToCore::End) => {
                         ending = true;
                         connection.delete_session(&session_id).await

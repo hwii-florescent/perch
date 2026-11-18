@@ -8,6 +8,11 @@
 //!   run in order once the core has been heard from: `open <session id>` shows that session as a
 //!   tab, `split right|down` starts a terminal beside the focused one, `pause <ms>` waits.
 //!   Blank lines and lines starting with `#` are skipped.
+//! - Files, review and browser steps: `files <workspace id>` shows that workspace's files,
+//!   `file <workspace id> <path> [preview]` opens a file (relative to the workspace) as a tab,
+//!   `review <workspace id>` opens its review, `browser <http(s) url>` opens a browser pane, and
+//!   `close [<tab id>]` closes that tab or the focused one. Each is carried out by its own function
+//!   below; until the feature behind it is built, that function reports the step as missing.
 //!
 //! The terminal never asks the system which Option key is down in this mode (it sees none), so a
 //! run does not depend on the real keyboard.
@@ -20,11 +25,37 @@ use std::time::{Duration, Instant};
 const STEP_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL: Duration = Duration::from_millis(100);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Step {
     Open(String),
     Split(Direction),
     Pause(Duration),
+    Files {
+        workspace: String,
+    },
+    File {
+        workspace: String,
+        path: String,
+        preview: bool,
+    },
+    Review {
+        workspace: String,
+    },
+    Browser {
+        url: String,
+    },
+    Close {
+        tab: Option<String>,
+    },
+    /// Measurement: run a workspace command with optional JSON arguments.
+    Command {
+        name: String,
+        args: Option<serde_json::Value>,
+    },
+    /// Measurement: patch the sidebar's view settings (`setSidebarSettings`).
+    Sidebar(serde_json::Value),
+    /// Measurement: resize the window to this many points.
+    Resize(f32, f32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,6 +137,51 @@ pub fn parse_script(text: &str) -> Result<Vec<Step>, String> {
                     .parse()
                     .map(|ms| Step::Pause(Duration::from_millis(ms)))
                     .map_err(|_| format!("pause takes milliseconds, not {ms:?}")),
+                ["files", workspace] => Ok(Step::Files {
+                    workspace: workspace.to_string(),
+                }),
+                ["file", workspace, path, rest @ ..] if matches!(rest, [] | ["preview"]) => {
+                    Ok(Step::File {
+                        workspace: workspace.to_string(),
+                        path: path.to_string(),
+                        preview: !rest.is_empty(),
+                    })
+                }
+                ["review", workspace] => Ok(Step::Review {
+                    workspace: workspace.to_string(),
+                }),
+                ["browser", url] if url.starts_with("http://") || url.starts_with("https://") => {
+                    Ok(Step::Browser {
+                        url: url.to_string(),
+                    })
+                }
+                ["browser", url] => Err(format!("browser takes an http(s) address, not {url:?}")),
+                ["command", name, ..] => {
+                    let rest = line.splitn(3, char::is_whitespace).nth(2).map(str::trim);
+                    let args = rest
+                        .filter(|r| !r.is_empty())
+                        .map(serde_json::from_str)
+                        .transpose()
+                        .map_err(|e| format!("command arguments are JSON: {e}"))?;
+                    Ok(Step::Command {
+                        name: name.to_string(),
+                        args,
+                    })
+                }
+                ["resize", wh] => parse_size(wh).map(|(w, h)| Step::Resize(w, h)),
+                ["sidebar", ..] => {
+                    let rest = line
+                        .split_once(char::is_whitespace)
+                        .map(|x| x.1)
+                        .unwrap_or("");
+                    serde_json::from_str(rest)
+                        .map(Step::Sidebar)
+                        .map_err(|e| format!("sidebar takes a JSON patch: {e}"))
+                }
+                ["close"] => Ok(Step::Close { tab: None }),
+                ["close", tab] => Ok(Step::Close {
+                    tab: Some(tab.to_string()),
+                }),
                 _ => Err(format!("not a step: {line:?}")),
             }
         })
@@ -116,13 +192,51 @@ pub fn parse_script(text: &str) -> Result<Vec<Step>, String> {
 /// not happen within [`STEP_TIMEOUT`] ends the process with status 1.
 pub async fn run(steps: Vec<Step>, window: WindowHandle<Workspace>, cx: &mut AsyncApp) {
     for (number, step) in steps.iter().enumerate() {
+        if !matches!(step, Step::Pause(_)) {
+            eprintln!(
+                "perf-step t={:.1} n={} {step:?}",
+                gpui::perf_log::now_ms(),
+                number + 1
+            );
+        }
         let done = match step {
+            Step::Command { name, args } => {
+                let result = window.update(cx, |workspace, window, cx| {
+                    workspace.run_command(name, args.as_ref(), window, cx)
+                });
+                if !matches!(result, Ok(Ok(()))) {
+                    eprintln!("perch-native-test: command {name} said {result:?}");
+                }
+                true
+            }
+            Step::Resize(w, h) => window
+                .update(cx, |_, window, _| {
+                    window.resize(gpui::size(gpui::px(*w), gpui::px(*h)))
+                })
+                .is_ok(),
+            Step::Sidebar(patch) => cx.update(|cx| {
+                let perch = cx.global::<perch_native::mods::WindowMods>().perch.clone();
+                let mut settings = perch.sidebar();
+                let ok = settings.patch(patch).is_ok();
+                perch.set_sidebar(settings);
+                perch.flush(cx);
+                ok
+            }),
             Step::Pause(wait) => {
                 cx.background_executor().timer(*wait).await;
                 true
             }
             Step::Open(id) => open(id, window, cx).await,
             Step::Split(direction) => split(*direction, window, cx).await,
+            Step::Files { workspace } => show_files(workspace, window, cx).await,
+            Step::File {
+                workspace,
+                path,
+                preview,
+            } => open_file(workspace, path, *preview, window, cx).await,
+            Step::Review { workspace } => open_review(workspace, window, cx).await,
+            Step::Browser { url } => open_browser(url, window, cx).await,
+            Step::Close { tab } => close_tab(tab.as_deref(), window, cx).await,
         };
         if !done {
             eprintln!(
@@ -192,6 +306,215 @@ async fn split(direction: Direction, window: WindowHandle<Workspace>, cx: &mut A
     started && until(cx, |cx| shown(window, cx).len() > before).await
 }
 
+// The openers for files, review and browser steps, each its feature's.
+
+/// `files <workspace id>`: that workspace's files are shown.
+async fn show_files(workspace: &str, window: WindowHandle<Workspace>, cx: &mut AsyncApp) -> bool {
+    use perch_native::files::store::Load;
+    let asked = window.update(cx, |ws, _, cx| ws.show_files(workspace, cx));
+    asked.is_ok()
+        && until(cx, |cx| {
+            window
+                .read_with(cx, |ws, _| {
+                    ws.files()
+                        .tree(workspace, "")
+                        .is_some_and(|t| t.state == Load::Ready)
+                })
+                .unwrap_or(false)
+        })
+        .await
+}
+
+/// `file <workspace id> <path> [preview]`: the file is open as a tab (a preview tab if asked) and
+/// its content is drawn.
+async fn open_file(
+    workspace: &str,
+    path: &str,
+    preview: bool,
+    window: WindowHandle<Workspace>,
+    cx: &mut AsyncApp,
+) -> bool {
+    use perch_native::files::store::DocState;
+    let id = format!("{workspace}\n{path}");
+    let asked = window.update(cx, |ws, _, cx| ws.open_file(workspace, path, preview, cx));
+    asked.is_ok()
+        && until(cx, |cx| {
+            window
+                .read_with(cx, |ws, _| {
+                    ws.tabs().shown().contains(&id)
+                        && ws
+                            .files()
+                            .document(workspace, path)
+                            .is_some_and(|d| d.state == DocState::Ready)
+                })
+                .unwrap_or(false)
+        })
+        .await
+}
+
+/// `review <workspace id>`: the workspace's review is open in a tab with its status and diff loaded. Done
+/// when both are in the window's Git store and the screen has not failed; once the screen has
+/// rendered (the window drew), also when a diff with files has its rows in the native diff view.
+async fn open_review(workspace: &str, window: WindowHandle<Workspace>, cx: &mut AsyncApp) -> bool {
+    use perch_native::git::store::LoadState;
+    let offered = until(cx, |cx| {
+        window
+            .read_with(cx, |ws, cx| {
+                let model = ws.sidebar().read(cx).model();
+                perch_native::git::can_take(model.connected, &model.store, workspace)
+            })
+            .unwrap_or(false)
+    })
+    .await;
+    let opened = offered
+        && window
+            .update(cx, |ws, _, cx| ws.open_review(workspace, cx))
+            .is_ok();
+    if !opened {
+        return false;
+    }
+    // The review asks for its status and diff when it first renders, which needs a frame; a hidden
+    // window, or any window while the display sleeps, gets none. The step asks for the same (the
+    // working tree, as the review opens) through the window's Git store, so the review's data is
+    // in memory either way; its diff view is made, and checked, once the screen has rendered.
+    cx.update(|cx| {
+        if let Some(git) = perch_native::git::host(cx) {
+            git.run(
+                workspace,
+                |s, ready, out| s.refresh_status(workspace, ready, out),
+                cx,
+            );
+            git.run(
+                workspace,
+                |s, ready, out| {
+                    let target = perch_core::source_control::DiffTarget::WorkingTree;
+                    s.load_diff(workspace, target, None, true, false, 3, ready, out)
+                },
+                cx,
+            );
+        }
+    });
+    let drawn = until(cx, |cx| {
+        let failed = window
+            .update(cx, |ws, _, cx| {
+                ws.screen_error(
+                    &format!(
+                        "review#{}",
+                        perch_native::workspace::review_tab_id(workspace)
+                    ),
+                    cx,
+                )
+            })
+            .ok()
+            .flatten();
+        if let Some(error) = failed {
+            eprintln!("perch-native-test: the review screen failed: {error}");
+            return false;
+        }
+        cx.update(|cx| {
+            let Some(git) = perch_native::git::host(cx) else {
+                return false;
+            };
+            let review = git.review(workspace);
+            if review.status_state != LoadState::Ready || review.diff_state != LoadState::Ready {
+                return false;
+            }
+            let files = review.diff.as_ref().map_or(0, |d| d.files.len());
+            let view = cx
+                .try_global::<perch_native::mods::WindowMods>()
+                .and_then(|mods| mods.diffs.views_of(workspace).into_iter().next());
+            view.is_none_or(|view| files == 0 || view.read(cx).rows().rows.len() > files)
+        })
+    })
+    .await;
+    if !drawn {
+        // Which part never came: the store's loads, or the diff view the screen places.
+        cx.update(|cx| {
+            let review = perch_native::git::host(cx).map(|git| git.review(workspace));
+            let view = cx
+                .try_global::<perch_native::mods::WindowMods>()
+                .and_then(|mods| mods.diffs.views_of(workspace).into_iter().next())
+                .map(|view| view.read(cx).rows().rows.len());
+            eprintln!(
+                "perch-native-test: review: status {:?}, diff {:?} ({:?}), diff view rows {view:?}",
+                review.as_ref().map(|r| r.status_state),
+                review.as_ref().map(|r| r.diff_state),
+                review
+                    .as_ref()
+                    .and_then(|r| r.diff_error.clone().or(r.status_error.clone())),
+            );
+        });
+    }
+    drawn
+}
+
+/// `browser <url>`: a browser pane shows the page.
+async fn open_browser(url: &str, window: WindowHandle<Workspace>, cx: &mut AsyncApp) -> bool {
+    // A workspace must be known (the core's lists) before a tab can be opened in it.
+    let args = serde_json::json!({ "url": url });
+    let opened = until(cx, |cx| {
+        window
+            .update(cx, |workspace, window, cx| {
+                workspace
+                    .run_command("browser.open", Some(&args), window, cx)
+                    .is_ok()
+            })
+            .unwrap_or(false)
+    })
+    .await;
+    // The page is made where its pane is drawn. A window that gets no display frames (hidden, or the display
+    // asleep) never draws on its own, so draw one each time it is looked at, until the page lives.
+    opened
+        && until(cx, |cx| {
+            let _ = gpui::AppContext::update_window(cx, window.into(), |_, window, cx| {
+                let _ = window.draw(cx);
+            });
+            window
+                .read_with(cx, |workspace, _| {
+                    let tab = workspace
+                        .tabs()
+                        .shown()
+                        .iter()
+                        .any(|id| perch_native::workspace::is_browser_tab(id));
+                    let live = workspace
+                        .browser_pages()
+                        .is_some_and(|pages| pages.borrow().live_views() > 0);
+                    tab && live
+                })
+                .unwrap_or(false)
+        })
+        .await
+}
+
+/// `close [<tab id>]`: that tab, or the focused one, is closed and gone from the strip.
+async fn close_tab(tab: Option<&str>, window: WindowHandle<Workspace>, cx: &mut AsyncApp) -> bool {
+    let Some(id) = tab.map(str::to_string).or_else(|| {
+        window
+            .read_with(cx, |workspace, _| {
+                workspace.tabs().active().map(str::to_string)
+            })
+            .ok()
+            .flatten()
+    }) else {
+        return false;
+    };
+    let args = serde_json::json!({ "id": id });
+    let closed = window
+        .update(cx, |workspace, window, cx| {
+            workspace
+                .run_command("tabs.close", Some(&args), window, cx)
+                .is_ok()
+        })
+        .unwrap_or(false);
+    closed
+        && until(cx, |cx| {
+            window
+                .read_with(cx, |workspace, _| !workspace.tabs().contains(&id))
+                .unwrap_or(false)
+        })
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,8 +550,66 @@ mod tests {
 
     #[test]
     fn a_step_that_is_not_understood_is_refused() {
-        for bad in ["open", "open a b", "split left", "pause soon", "dance"] {
+        for bad in [
+            "open",
+            "open a b",
+            "split left",
+            "pause soon",
+            "dance",
+            "files",
+            "file w",
+            "file w a.rs pinned",
+            "review",
+            "browser file:///etc/hosts",
+            "browser",
+            "close a b",
+        ] {
             assert!(parse_script(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn parses_file_review_browser_close_steps() {
+        let steps = parse_script(
+            "files w1; file w1 src/main.rs; file w1 README.md preview\nreview w1\nbrowser http://127.0.0.1:9/page.html; close; close t-2",
+        )
+        .unwrap();
+        let file = |path: &str, preview| Step::File {
+            workspace: "w1".into(),
+            path: path.into(),
+            preview,
+        };
+        assert_eq!(
+            steps,
+            [
+                Step::Files {
+                    workspace: "w1".into()
+                },
+                file("src/main.rs", false),
+                file("README.md", true),
+                Step::Review {
+                    workspace: "w1".into()
+                },
+                Step::Browser {
+                    url: "http://127.0.0.1:9/page.html".into()
+                },
+                Step::Close { tab: None },
+                Step::Close {
+                    tab: Some("t-2".into())
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_browser_step_without_http_url() {
+        for url in [
+            "file:///etc/hosts",
+            "perch://x",
+            "127.0.0.1:9",
+            "javascript:alert(1)",
+        ] {
+            assert!(parse_script(&format!("browser {url}")).is_err(), "{url}");
         }
     }
 

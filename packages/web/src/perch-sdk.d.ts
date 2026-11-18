@@ -23,7 +23,8 @@ declare module "@perch/sdk" {
    * the start screen, the editor menu, the terminal's find bar, the slash popover (`SlashPopover`), Split with
    * session and the phone-size notice (their props types); 1.10 the phone's own screens (`stock:mobile-*`), the shell
    * toolbar, the agent terminal's controls, the dock's tab and group actions and the browser toolbar (their props
-   * types), and `glassClass`, `tapButtonClass`, `GearIcon`, `PlusIcon`, `EllipsisIcon`.
+   * types), and `glassClass`, `tapButtonClass`, `GearIcon`, `PlusIcon`, `EllipsisIcon`; 1.11 `Submenu`; 1.12 the
+   * review's diff (`DiffView`); 1.13 `tip`.
    */
   export const version: string;
 
@@ -732,6 +733,17 @@ declare module "@perch/sdk" {
   export function beginReorderDrag(event: import("react").PointerEvent, options: ReorderDragOptions): void;
   /** A menu row's classes (`danger` red). */
   export function menuItemClass(options?: { danger?: boolean }): string;
+  /** A menu row that opens a list of choices beside the menu, as a native menu's submenu: on hover, a click, Right
+   * arrow, Enter or Space; Up and Down move in it, Left arrow or Escape close it. `side` is where it opens (the
+   * caller knows where its menu sits), `up` opens it upward from the row, `maxHeight` makes it scroll. */
+  export function Submenu(props: {
+    label: string;
+    items: { key: string; label: string; testId?: string; onSelect: () => void }[];
+    testId?: string;
+    side?: "right" | "left";
+    up?: boolean;
+    maxHeight?: number;
+  }): import("react").ReactElement;
   /** A glyph button at the end of a list row (⋯, +, ×), shown on hover of its `group/ph` (`project`) or `group/row`
    * (`session`) row, on focus and on touch; `always` always. */
   export function rowActionClass(options?: { reveal?: "always" | "project" | "session"; tone?: "default" | "danger"; className?: string }): string;
@@ -884,6 +896,56 @@ declare module "@perch/sdk" {
   }
   /** A React hook: workspace `workspaceId`'s review. */
   export function useGitReview(workspaceId: string): GitReview;
+  /** 1.12: `DiffView`'s props. The diff and its comments are the review's (`useGitReview`), read by `workspaceId`;
+   * the props are view state, and what the person does comes back through the callbacks. */
+  export interface DiffViewProps {
+    workspaceId: string;
+    /** One file of the diff; every file when absent or not in the diff. */
+    path?: string;
+    wrap: boolean;
+    /** How a change is laid out: by the view's width (`auto`, the default), one line per row, or the old side beside
+     * the new. Only a diff with a `splitLayout` property of `true` (the native client's) honours it. */
+    layout?: "auto" | "unified" | "split";
+    selection: { path: string; side: ReviewSide; start: number; end: number } | null;
+    /** The comment being edited in its thread, and the field's text. */
+    editingCommentId: string | null;
+    editingBody: string;
+    /** Scrolls to this file's header; a new `seq` asks again for the same file. */
+    reveal?: { path: string; seq: number } | null;
+    /** The new comment's text. With `onSubmitComment`, the comment's field opens under the selection's last line
+     * while lines are selected (`git-comment-composer`, `git-comment-body`). */
+    commentBody?: string;
+    /** Where the comment goes (the session chosen in the review header), shown beside the add button. */
+    commentTarget?: string;
+    onCommentBody?(text: string): void;
+    onSubmitComment?(): void;
+    onCancelComment?(): void;
+    /** Ask agent about the selected lines; offered when given. */
+    onAskLines?(): void;
+    /** Files folded to their header; pressing a header's path asks to fold or unfold it. */
+    collapsed?: string[];
+    onToggleCollapsed?(path: string): void;
+    /** Files marked viewed; with `onToggleViewed` each file header has a Viewed box. */
+    viewed?: string[];
+    onToggleViewed?(path: string): void;
+    /** A line was clicked or chosen with Enter/Space; `extend` with Shift. */
+    onSelectLine(path: string, side: ReviewSide, line: number, extend: boolean): void;
+    /** A line's `＋`. */
+    onAddComment(path: string, side: ReviewSide, line: number): void;
+    /** A file header's Ask agent; the button is shown only when this is given. */
+    onAskAgent?(path: string): void;
+    onEditComment(comment: ReviewComment): void;
+    onEditBody(text: string): void;
+    onSaveEdit(comment: ReviewComment): void;
+    onCancelEdit(): void;
+    /** Resolve, or Reopen a resolved comment. */
+    onResolve(comment: ReviewComment): void;
+    onDelete(comment: ReviewComment): void;
+    className?: string;
+  }
+  /** 1.12: the review's diff, its own scroll surface (`git-diff`): a header per file and hunk, a row per line with
+   * the `＋` and the selection, the comment threads under their lines. The native client draws it natively. */
+  export function DiffView(props: DiffViewProps): ReactElement;
 
   /** One session's terminal (an agent, a sub-session or a shell) as this page knows it. */
   export interface TerminalRecord {
@@ -1137,6 +1199,8 @@ declare module "@perch/sdk" {
   export function assetKind(mediaType: string | undefined): "image" | "video" | "audio" | "pdf" | "archive" | undefined;
   /** The key a person has bound to a command (`editor.save`), as Perch shows it; null when none. */
   export function shortcutLabel(command: string): string | null;
+  /** `label` with the key bound to `command` after it (`"Save (⌘S)"`), for a button's `title`; `label` alone when none is. */
+  export function tip(label: string, command: string): string;
 
   // -------------------------------------------------------------------------------------------------------------
   // 1.5: the native chat. The transcript is the core's projection of the CLI's own history (Rust `native_ui`); the

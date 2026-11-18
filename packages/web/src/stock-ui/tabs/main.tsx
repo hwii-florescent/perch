@@ -20,7 +20,7 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import {
   AgentIcon, beginTabDrag, cn, NewFilePrompt, NewSessionMenu, PageIcon, runCommand, segmentClass, Slot, startSession, TabDragLayer, TabMenu,
-  tabStateClass, openBrowserTab, openFileTab, useNewTabRequest, useWorkspaceTabs, type TabInfo, type TabState,
+  tabStateClass, tip, openBrowserTab, openFileTab, useNewTabRequest, useWorkspaceTabs, type TabInfo, type TabState,
 } from "@perch/sdk";
 import { BrowserIcon, FileIcon, ReviewIcon, TabCloseIcon } from "./icons";
 
@@ -155,7 +155,7 @@ export default function TabBar() {
           type="button"
           className={closeButton(state)}
           data-testid={`tab-close-${tab.id}`}
-          title="Close session"
+          title={tip("Close session", "tabs.close")}
           aria-label={`Close ${tab.label}`}
           onClick={() => runCommand("tab.close", { id: tab.id })}
         >
@@ -179,7 +179,7 @@ export default function TabBar() {
         type="button"
         className={cn(segmentClass(), `w-7 shrink-0 justify-center text-[0.8rem] leading-none ${FOCUS}`, TAB_SHAPE(tabShape))}
         data-testid="tab-new"
-        title="New session in this workspace"
+        title={tip("New session in this workspace", "tabs.new")}
         aria-label="New session in this workspace"
         onClick={handleNewClick}
       >

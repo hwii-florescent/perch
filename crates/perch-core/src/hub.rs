@@ -1351,6 +1351,7 @@ impl HubManager {
             ServerMessage::StatusUpdate { .. }
             | ServerMessage::UsageResult { .. }
             | ServerMessage::UsageAlert { .. }
+            | ServerMessage::DaemonHealth { .. }
             | ServerMessage::UsageRedeemResult { .. } => {
                 // Per-host; we don't relay these in v1 (usage is local-only).
             }

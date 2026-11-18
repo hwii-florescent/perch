@@ -483,7 +483,7 @@ UI rows from step 0 continue between slices.
    makes `perch list` the caller's run (decided); the daemon list becomes `perch daemon list`.
 4. **Spawn, list, stop and reports. Done 2026-11-06**:
    `perch spawn|list|stop`, parent link (`sessions.parent_session_id`) and `sub_sessions`
-   records, limits (4 live, 8 total, depth 1; since 2026-11-08 per-run settings, no person-turn rule) admitted in one
+   records, limits (4 live, depth 1; since 2026-11-08 per-run settings, no person-turn rule) admitted in one
    transaction before anything starts, an idempotency key, stop confirmed by perchd, reports
    as labelled claims with a last-message fallback, bare `list`/`serve`/`connect` aliases
    gone, `perch guide` extended. Live: a haiku lead spawned a haiku child, read its report and
@@ -602,7 +602,7 @@ estimated 231 MB for the Tauri app, whose idle figure of 146 MB was the only one
   setting that is not a terminal setting, notifications, pairing a phone, updates.
 - **Before it can replace Tauri on macOS:** a pass by a person on a lit screen (drawing cost, IME, focus,
   the hand-off end to end); packaging, signing and the release workflow with Zig; layout restore; tab
-  drag, tab menu and closed-tab history; the terminal rows still open in the parity checklist; then the
+  drag, tab menu and closed-tab history; the terminal rows still open in the [parity checklist](../plans/261113-0037-native-terminal-fixes-and-mod-engine/terminal-parity-checklist.md); then the
   Tauri-only list above, starting with the editor (a spike showed `gpui-component` can draw and edit a
   highlighted file).
 - **End goal for files and Git:** at least what VS Code does, in the native window. Until that is built

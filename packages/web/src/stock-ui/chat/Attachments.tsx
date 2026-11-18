@@ -52,7 +52,7 @@ export function Attachments({ items, onRemove }: { items: ComposerImage[]; onRem
       ? <ImageTile key={item.id} item={item} file={item.file} onRemove={() => onRemove(item.id)} />
       : <li key={item.id} className="flex max-w-[14rem] items-center gap-1.5 rounded-ui bg-surface-1 py-0.5 pr-1 pl-2 text-[0.78rem] text-subtext-0">
         <span className="min-w-0 truncate" title={item.path}>{item.name}</span>
-        <button type="button" className="cursor-pointer bg-transparent px-1 text-subtext-0 [border:none] hover:text-fg" aria-label={`Remove ${item.name}`} onClick={() => onRemove(item.id)}>×</button>
+        <button type="button" className="cursor-pointer bg-transparent px-1 text-subtext-0 [border:none] hover:text-fg" aria-label={`Remove ${item.name}`} title={`Remove ${item.name}`} onClick={() => onRemove(item.id)}>×</button>
       </li>)}
   </ul>;
 }

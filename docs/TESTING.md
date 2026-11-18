@@ -427,10 +427,41 @@ assertions match with `contains`, not equality.
 cargo test -p perch-native            # everything below
 cargo test -p perch-native --lib      # state reduction, actions, frames, launch correlation and reconnect against a stand-in core, hand-off URL; tab and split model, key resolution, command palette filtering, terminal settings
 cargo test -p perch-native --test sidebar_render    # headless GPUI render of the sidebar (project and By status views, nested rows); no window opens
-cargo test -p perch-native --test workspace_render  # the window drawn offscreen: tabs, a split with different content in each pane, the palette, the terminal settings, attention on a tab, keys.json and chosen keys
+cargo test -p perch-native --test workspace_render  # the window drawn offscreen: tabs, a split with different content in each pane, the palette, attention on a tab, keys.json and chosen keys
+cargo test -p perch-native --test workspace_shell   # the window shell: backdrop, rounded cards, 44 px heads, toggles, the drawer and its tabs, column handles; PERCH_NATIVE_SHOT_DIR=dir saves the four states as PNGs (compare with `PARITY_SCREENS=window npm run parity:web` in e2e, which is not in the default list)
+cargo test -p perch-native --test mods_chrome_screens_window  # the stock screens in the real window, offscreen; Settings: Cmd+, opens the web's page, a Keyboard binding changed there changes what the window does for that key, Escape clears the search, then closes
+cargo test -p perch-native --test context_bridge_window  # Context Bridge in the real window against an isolated core: the terminal selection's Ask agent menu (not the pane menu), the dialog's preview by the core, one send on the target terminal's own connection (a plain shell, which the core refuses; no agent runs), a second send refused, the Files entry's Ask agent
+PERCH_PARITY_SCREENS=settings cargo test -p perch-native --test mods_chrome_capture  # draws the named screens (default: all) in both themes into e2e/artifacts-native-parity/native for `node e2e/native-parity/compare.mjs`
+cargo test -p perch-native --test files_drawer      # the drawer's Files tab in a window of 12 projects and 44 sessions: one explorer commit cut past its script budget, busy sessions, the drawer closed and opened; the rows must come back; then a file's editor commit is cut and must start afresh without a change to its files (the mods are watched as the app's, no poll) (PERCH_DRAWER_SHOTS=dir saves a frame that has none)
+cargo test --release -p perch-native --test files_markdown_window  # the owner's steps with docs/ARCHITECTURE.md and the 106 KB docs/UI-UX-DIRECTION.md: open from the drawer, scroll, Preview, scroll, Source, clicks, Preview and Source again, close, drawer closed and opened; no copy of Files may be stopped or fail (PERCH_MD_FILES=a,b picks documents, PERCH_MD_SHOTS=dir saves every step)
+cargo test -p perch-native --test files_drawer_core # the same drawer against a real core: a clone of this repository, plain shells printing in it
 cargo test -p perch-native --test terminal_session  # a real core as a child process
 cargo test -p perch-native --test workspace_session # two shells in a split against a real core, and the settings round trip
 ```
+
+The React runtime's own tests (`npm run test:mods-runtime`) compare its descriptions with the web's drawing of the
+same screens, so they need the web references first: `(cd e2e && npm ci && npx playwright install webkit && npm run
+parity:web)` writes `e2e/artifacts-native-parity/web/` (headless WebKit, about a minute; ignored by git). Without
+them the comparing tests are skipped with that reason; `PERCH_REQUIRE_REFERENCES=1` makes them fail instead (a gate
+run). The host modules the bundle imports (`perch`, `perch-markdown`, ...) exist only in the window: the tests stub
+every one the bundle's files import (`stubHostModules` in `test/support.mjs`), so a new one needs no test change.
+
+A Markdown file's Preview is drawn by the window's Markdown engine (`src/files/markdown.rs`, gpui-base's `TextView`), not by runtime elements: the runtime has no inline formatting, so a sentence with inline code could not wrap, and a long document was more script than a call may take. Its parity state is `files/markdown-preview`; the preview's box is gated, its text is compared by pixels only. Known difference: a table fills the column (the web's is as wide as its content).
+
+Settings (`mods/settings`) is the web's page on the React runtime, saving through the core. Its parity states are
+`e2e/native-parity/fixtures/settings.json` (web side: `PARITY_SCREENS=settings npm run parity:web` in `e2e`). Known
+differences the gate reports: Keyboard draws one group of bindings at a time (the engine cuts a script that runs over its
+per-frame budget, and 113 rows do), and the long Notifications page drifts up to 3 px below the window's edge (the engine
+sets line heights in half pixels). Permissions and Mods are "Open in Perch" hand-offs.
+
+The gate (`node e2e/native-parity/compare.mjs --web-dir e2e/artifacts-native-parity/web --native-dir
+e2e/artifacts-native-parity/native`) exits 1 on any failing state that `e2e/native-parity/accepted-failures.json` does not
+list (by `screen/state/theme`, each with its reason), and on a listed state that now passes, so the list only shrinks.
+A name marked `font` (the file editor's `editor-text`, drawn by the editor engine natively and by CodeMirror on the
+web) has its font family, size, weight and line height gated too, and so does every element the web draws in the monospace stack (`ui-monospace`, SF Mono in WebKit): a mod draws it as `.AppleSystemUIFontMonospaced`, and a native element left in Menlo fails. Add a state to the list only with the reason it is accepted; `npm run parity:selftest` in `e2e` tests these rules.
+It also fails every state of the state list (`e2e/native-parity/screens.json` and each screen's fixture states, both
+themes; `PARITY_SCREENS` for a part) that has no web reference, which cannot be accepted: make the references in the
+checkout under test with `npm run parity:web` rather than copying another worktree's set, which misses newer states.
 
 Run `cargo test` for this package on its own: building `perch-core` together with GPUI changes how
 `serde_json` orders keys and fails three unrelated core tests. `cargo test --workspace` hits the same
@@ -443,7 +474,20 @@ three failures for the same reason.
 - `scripts/measure-native-memory.sh` measures the footprint of the native client and the Tauri app in
   four states with scratch state. It opens real windows, so it uses `PERCH_NATIVE_TEST=1` (the window is
   ordered in without the keyboard and the app is never activated; `test_mode.rs`) and
-  `PERCH_DESKTOP_TEST=1`. Read its header before running it.
+  `PERCH_DESKTOP_TEST=1`. Read its header before running it. `--apps native --states a,t,e,f,g,h` adds the
+  native client's Files tree, open file, review, browser pane and closed pane (fixtures and a loopback page made
+  in the scratch directory) and exits 1 when a state is over its budget; the budgets are in
+  `scripts/native-memory-budgets.py` (`python3 -I scripts/native-memory-budgets.py --self-test` checks them).
+  A test-mode step whose feature is not built fails the run rather than skipping the state.
+  A window gets no frames while the display sleeps or the console is locked, so its screens never draw; then
+  add `--offscreen`, which measures `examples/measure_offscreen` (the same workspace, mods, core connection and
+  script, presented every 16 ms by GPUI's headless Metal renderer). Its idle footprint holds GPU targets a
+  hidden window does not, so only its growth over idle is judged; browser panes (`g`, `h`), the shown window
+  and the Tauri app still need the display awake.
+- Timing budgets run strict in release: `PERCH_BUDGET_STRICT=1 cargo test --release -p perch-native --test
+  editor_engine` (and every other timing test that names the variable in its header) fails at the budgets
+  themselves rather than at twice them, the default for noisy machines; each test prints its numbers under its
+  report flag (`PERCH_EDITOR_REPORT=1` for the editor).
 - Nothing opens a window, takes focus or calls `open`. The render tests draw through GPUI's test
   platform into a texture (set `SHOT=<folder>` to save each frame as a PNG); keys go through the window's
   own `dispatch_keystroke`, so the dispatcher that runs before the terminal is what is tested. The

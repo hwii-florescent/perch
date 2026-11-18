@@ -135,13 +135,17 @@ const SESSION_LIST_ROW_SELECT: &str = "SELECT
 /// Shared nav-visibility predicate for [`HistoryDb::list_sessions`] and
 /// [`HistoryDb::get_session_row`]: a session is visible once it has at least
 /// one message (Hosted mode) OR `cli_activity = 1` (CLI mode, set on first
-/// keystroke — see `cli_activity`'s migration comment). Factored out so the
+/// keystroke — see `cli_activity`'s migration comment), and is not a sub-session that was
+/// confirmed stopped (it closed like a person's Close). Factored out so the
 /// two call sites cannot drift apart on this filter, which would otherwise
 /// let a `session.updated` push disagree with `session.list` about whether a
 /// row exists. Callers combine this with their own `s.id = ?` etc.
-pub(crate) const SESSION_VISIBILITY_FILTER: &str = "(EXISTS (
+pub(crate) const SESSION_VISIBILITY_FILTER: &str = "((EXISTS (
                  SELECT 1 FROM messages WHERE session_id = s.id
-             ) OR s.cli_activity = 1)";
+             ) OR s.cli_activity = 1)
+             AND NOT EXISTS (
+                 SELECT 1 FROM sub_sessions WHERE child_session_id = s.id AND state = 'stopped'
+             ))";
 
 /// Row-mapping closure shared by `list_sessions` / `get_session_row` so the
 /// column->field mapping cannot drift between the two call sites.
@@ -525,6 +529,17 @@ impl HistoryDb {
     /// full list via `list_sessions()` and then `.find()`d the id in it — an
     /// invisible session was never in that list, so it never produced a
     /// `session.updated` push either).
+    /// A session's title as a list would show it, even when no list shows the session (a
+    /// stopped sub-session its lead still lists).
+    pub fn session_title(&self, id: &str) -> anyhow::Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let sql = format!("{SESSION_LIST_ROW_SELECT} WHERE s.id = ?1");
+        Ok(conn
+            .query_row(&sql, params![id], session_list_row_from_row)
+            .optional()?
+            .map(|row| row.title))
+    }
+
     pub fn get_session_row(&self, id: &str) -> anyhow::Result<Option<SessionListRow>> {
         let conn = self.conn.lock().unwrap();
         let sql = format!(

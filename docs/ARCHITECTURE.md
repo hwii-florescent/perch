@@ -33,18 +33,15 @@ shells, real agent CLIs
 - **Native client** (`crates/perch-native`, GPUI) is another view of the same core: it finds a
   running headless core through the `core.json` it writes and speaks the same protocol. Each
   terminal is its own libghostty-vt fed the same bytes as xterm.js (output and the daemon's repaint);
-  there is no cell stream. Tabs, splits and their layout are local to the window and are not restored.
-  It attaches a session by its saved launch provider, never the one seen running, and never
-  attaches one whose launch provider is unknown. A listed session nobody has launched anything in
-  (no provider, `cliStarted` false) lists the launch choices in its tab instead, and the one
-  picked attaches that session, as the web's `startCli` does; a session started with no recorded
-  provider keeps the refusal. Closing a tab ends its session as the web does
-  (`session.delete` over the terminal's own connection, the tab going only when the core confirms;
-  an agent's tab asks first while `warnCloseAgent` is on; a view that only watches, or has no
-  attached terminal, just closes). Links from terminal output
-  open only `http`, `https`, `mailto` and plain non-executable files.
-  What it cannot show (files, changes, browser, chat, settings beyond terminals) it hands to the
-  Tauri app with `perch://open`. It is not in default builds.
+  there is no cell stream. Tabs, splits and their layout are local to the window: a workspace's
+  strip is its sessions from the core plus file, review and browser tabs kept on this device
+  ([NATIVE](NATIVE.md)). It attaches a session by its saved launch provider, never the one seen
+  running, and never attaches one whose launch provider is unknown. A blank session lists the launch
+  choices in its tab, as the web's `startCli` does. Closing a tab ends its session as the web does
+  (`session.delete`, the tab going only when the core confirms; `warnCloseAgent` asks first).
+  Chrome (sidebar, tabs, files, Git, review, settings) is the web's stock screens run on a native
+  React runtime; Files, the editor, diffs and the browser are native engines under them. It is not
+  in default builds. Agent rules: `crates/perch-native/AGENTS.md`.
 - **Web** renders WS-driven state and owns view-local presentation. Do not
   confuse focus/layout with runtime authority.
 - **Stock screens** (`packages/web/src/stock-ui/<id>/`) are presentation only and
@@ -164,6 +161,13 @@ Read module `//!` headers for local details, not a duplicate directory catalogue
 Local persistent launches require perchd. Daemon failure is visible, not an
 in-process fallback or permission to launch a duplicate. Core distinguishes
 Alive / Exited / Unknown; Unknown cannot authorize restart or cleanup.
+A panic in perchd fails one request (or drops one session's screen), never
+the daemon: locks do not poison, requests wait at most 5 s for a lock and then
+answer "busy", input is written by a per-session thread outside any lock, and
+every panic is logged with a backtrace to `daemon.log`. A watchdog logs any
+lock held over 10 s with its holder; Health reports those as `stuck`, and the
+core announces a host that is stuck or misses a 10 s health check as
+`daemon.health` (shown in the app). Nothing is restarted over it.
 Boot/reconnect attaches to surviving execution, preserving dimensions; it does
 not restart a conversation. Idle hibernation is off unless
 `PERCH_HIBERNATE_AFTER_SECS` is set; explicit wake is a new launch.
@@ -452,19 +456,19 @@ the core, not the agent, decides:
 
 - *Admission before dispatch*, in one transaction that also writes the child's session row
   (`sessions.parent_session_id`) and its record (`sub_sessions`): not a child itself (depth 1),
-  at most `live` live children and `total` ever (`RunLimits`, below), and the key (`--key`, else one per
+  at most `live` live children (`RunLimits`, below; no per-run total), and the key (`--key`, else one per
   invocation) names the spawn, so a retry returns the first child and starts nothing. A refusal
   creates nothing and names the limit and where it is set.
 - *Runs go on without a person's prompt* (owner decision 2026-11-08). Spawn, steer and interrupt need
   no turn a person opened: any turn of the lead may use them, including one a delivered message
   started, so the core no longer tracks who opened a turn (the in-memory origin mark and its
   listeners are gone). What bounds a run is `RunLimits` (`sub_sessions.rs`), every counter **per run**
-  and never reset by a person's message: live sub-sessions 4, sub-sessions ever 8, messages 50,
+  and never reset by a person's message: live sub-sessions 4, messages 50,
   interrupts per sub-session 3, waiting suggestion cards 10. Automatic lead notifications have no
   per-run delivery limit (owner decision 2026-11-09). The remaining limits are the
   person's settings (Settings > Sub-sessions; `Settings.run_limits`, flat optional `max_*` fields on
-  the wire `Settings`/`SettingsPatch`), validated on update (each 1 to its ceiling: 16, 64, 1000,
-  20, 50; total never below live) and repaired to the defaults if a stored file is out of range. The
+  the wire `Settings`/`SettingsPatch`), validated on update (each 1 to its ceiling: 16, 1000,
+  20, 50) and repaired to the defaults if a stored file is out of range. The
   core holds them in `HistoryDb::limits()`, set at boot and on every settings update, and each
   admission rule reads them there. A limit reached refuses with the reason (and, for spawn, a 409
   naming Settings > Sub-sessions); nothing is queued silently. Unchanged: depth 1, a message is
@@ -480,11 +484,19 @@ the core, not the agent, decides:
   leaves nothing behind.
 - *Stop* is by the lead for its own children only. The record goes `stopping`, the core terminates the
   process and confirms it is gone (`stop_confirmed`, like session delete), and only then records
-  `stopped` and lets the exit be observed. A person stopping a lead (terminal kill) stops its live
-  children the same way. Deleting a lead (also what archiving its Workspace does, which deletes the Workspace's
-  sessions) first stops its live children, each confirmed; if one cannot be shown stopped (a stop not
-  confirmed, a launch still in flight) the delete is refused and the lead and its records are kept. The
-  stopped children then remain as ordinary sessions without a parent; deleting a child drops its record.
+  `stopped`. A person stopping a lead (terminal kill) stops its live children the same way.
+- *A confirmed stop closes the child* like a person's Close (`session::close_stopped_child`): its
+  agents and shells end, its runtime records and saved snapshot go (so no restart restores it as
+  `reconnecting`), and `session.deleted` reaches every window, which drops its tabs and sidebar row.
+  Its session row, report, title and sub-session record stay; the record's `stopped` state keeps it
+  out of every session list (`SESSION_VISIBILITY_FILTER`), and `perch list` shows it `exited`. The
+  same applies when `stop_unknown` later settles to `stopped`. An unconfirmed stop changes nothing. On
+  start, a `stopped` child that still has a runtime record or a shell (stopped by an older build) is
+  closed by the same rule; nothing else is touched. Deleting a lead (also what archiving its Workspace
+  does, which deletes the Workspace's sessions) first stops its live children, each confirmed; if one
+  cannot be shown stopped (a stop not confirmed, a launch still in flight) the delete is refused and the
+  lead and its records are kept. Its closed children are deleted with it; children that exited on their
+  own remain as ordinary sessions without a parent. Deleting a child drops its record.
   **Esc in the chat is not a stop:** it interrupts the lead's own turn (a keystroke into its prompt), and
   its children keep running; only a terminal kill, a delete and `perch stop` stop them.
 - *`--worktree`*: after the child is recorded, the core makes a new checkout of the lead's repository,
@@ -529,12 +541,13 @@ contract the tests hold it to.
   the explicit action. `agent_mail::route(facts)` decides, over: the recorded incarnation
   is still its live one; its runtime is alive and its native bridge has reported; nothing is blocked and
   no question or approval is open (that always waits, with the reason); and then
-  1. **idle** (lifecycle Idle or Done, the bridge says no turn runs) → the message **starts a turn**; for
-     a lead, no child may be working (an idle lead is woken by the last of them, not each);
+  1. **idle** (lifecycle Idle or Done, the bridge says no turn runs) → the message **starts a turn**, for
+     a lead too: an idle lead gets each report at once, whatever its other children are doing (owner,
+     2026-11-15; an earlier rule held it until no child worked, so one long child silenced the rest);
   2. **a turn is running** and the CLI has a follow-up queue (`has_followup_queue`: Pi, OMP) → it goes into
-     that queue (`QueuedInAgent`), with no working-children wait;
+     that queue (`QueuedInAgent`);
   3. **a turn is running** and the CLI has none but Perch can steer it (Codex, Claude: `can_steer`) → the
-     message **steers** the running turn (`Steered`, receipt "steered"), with no working-children wait;
+     message **steers** the running turn (`Steered`, receipt "steered");
   4. **a turn is running** and the CLI is neither (anything else) → it waits for idle and the receipt's
      reason says so ("... Perch cannot put a message into a running opencode turn, so it gets this when its
      turn ends");
@@ -592,22 +605,28 @@ contract the tests hold it to.
   "cancelled by sender". Once `delivering` it cannot be taken back. Receivers that end (identity revoked on
   a confirmed exit, session deleted) turn their queued mail `undelivered`; deleting a lead deletes the
   run's mail with it (its children become ordinary sessions, like their records).
-- *Envelope and neutralising.* The prompt always begins with Perch's own header naming the sender (title,
-  provider, session, kind) and saying the text is from another agent, not a person, and approves nothing;
-  the body follows as a quoted block, every line prefixed, so a leading `/`, `!` or `#` can never be a
-  command or a mode switch (the prompt starts with a `────` rule line, never a character from the
-  sender). Peer text is data; the guide tells agents the
+- *Envelope and neutralising.* The prompt always begins with Perch's own header naming the sender (name,
+  provider, session, kind); the body follows as a quoted block, every line prefixed, so a leading `/`, `!`
+  or `#` can never be a command or a mode switch (the prompt starts with a `────` rule line, never a
+  character from the sender). The standing disclaimer sentence under the header was dropped (owner,
+  2026-11-15); `parse_envelope` still reads banners written with it. Peer text is data; the guide tells agents the
   same. A message never answers a dialog and never approves anything: delivery refuses while one is open.
 - *Notes from children.* When a child's turn ends, it becomes blocked, or its exit is confirmed, Perch
   queues a `note` for its lead: status words, whether it is waiting on a person (Perch's own state), and
-  the first 400 characters of its own `perch report`, else the cheap model's summary (`Summary by <model>`),
-  else of its last message, each labelled a claim (a finished turn is noted even when the child said and
-  reported nothing: "It has reported nothing"). The summary is kept before the note is queued, so a slow or
+  the first 400 characters of its own `perch report`, else the cheap model's summary (`summary by <model>`),
+  else of its last message (a finished turn is noted even when the child said and reported nothing:
+  "nothing reported"). Each is one line: the child's session name and short id, its status, then what it
+  said (`Editor research (0407a72d) · reported: ...`). The summary is kept before the note is queued, so a slow or
   absent model only delays a note, never changes what it can say. A
   newer note from the same child replaces one still queued. Queued notes of a lead go in **one** delivery
-  (a roster, one line per child, headed as status rather than instruction); messages go one per delivery.
+  (a roster headed `──── Sub-session reports (HH:MM UTC) ────`, one line per child, with no disclaimer:
+  owner, 2026-11-15); messages go one per delivery.
+- *Sub-session names.* A spawned or suggested child gets a name: `perch spawn|suggest --name`, else the
+  task's first sentence cut to about 40 characters (`sub_sessions::session_name`). It is written as the
+  session's auto-title (`cli_title`), so the sidebar, tabs, `perch list` and the notes show it and a
+  person's rename (`title_override`) still wins. A suggestion keeps its name until Start.
 - *No wake cap* (owner decision 2026-11-09). Reports and quiet-child notes keep reaching the lead
-  throughout a run, subject to the existing process, input and working-children checks. The legacy
+  throughout a run, subject to the existing process and input checks. The legacy
   `runLimits.wakes` / `maxLeadWakesPerRun` setting and historical delivery counts no longer gate
   delivery. The wire field is retained for compatibility but no longer emitted, and Settings shows no
   wake-limit control. Notifications already marked `undelivered` remain so; an update never replays them.
@@ -647,7 +666,10 @@ strip's actions are the next section.
   or settled. No polling.
 - *Sidebar.* A sub-session's row sits under its lead's wherever both are listed together (By project, in
   compact dots its dot follows its lead's and is set in; By status within one section; Quickchat); in another section it is an ordinary row, so Needs you stays
-  complete. "In one list" stays purely chronological. No panel, tab or drawer.
+  complete. "In one list" stays purely chronological. No panel, tab or drawer. A lead with sub-sessions is a filled
+  row whose chevron folds them (the folded ids are a per-device list, `perch.sidebar.foldedSessions`, and a folded
+  lead shows the most urgent state among the hidden ones); each sub-session is a filled row as wide as any
+  other, its content set in behind an elbow connector drawn from the lead's icon. Every session row's "…" button (hover, focus, or the open row) opens the row menu, where Close is.
 - *Notes folder.* One per run under the private native directory (`/tmp/perch-native-<uid>/notes/<lead
   session id>/`, 0700), created on first use and removed when the lead is deleted. `perch whoami` and the
   end of `perch guide` give the path; the guide says what it is for. Nothing in it is ever injected into a
@@ -756,7 +778,7 @@ A lead puts tasks in front of the person instead of starting them; nothing start
   says nothing was started. With it on, `perch spawn` is exactly as before (the person-opened-turn rule).
 - *Person's actions* (`suggestion.act`, under the lead chat's input lease, as typing in it): **Start** takes
   `pending` to `starting` once (a second click finds it taken), then runs `sub_sessions::start` with the click
-  standing for the person-opened turn: the same depth, limits (4 live, 8 total), key (`suggestion-<id>`),
+  standing for the person-opened turn: the same depth, limit (4 live), key (`suggestion-<id>`),
   worktree and launch as `perch spawn`, and a refusal puts the task back to `pending` with the core's reason.
   A launch that left a record (`start_unknown`) keeps the card following that sub-session; it is never started
   a second time. **Start all** does the same for every waiting task in order, each refusal named. **Options**

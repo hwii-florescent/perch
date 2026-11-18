@@ -261,3 +261,123 @@ projects listed in the Nerd Fonts repository, each under its own license (mostly
 SIL OFL 1.1, MIT and Apache-2.0). The license text is next to the font, in
 `crates/perch-native/assets/fonts/LICENSE-SymbolsNerdFont.txt`. The file was copied
 from herdr (commit `4c8c622d7965a6f6787f55b1896b70795fc68918`).
+
+## Native mod engine: gpui-kit's shell, quickjs-jit-runtime and two GPUI crates
+
+`vendor/` holds the native client's JavaScript mod engine, copied from herdr
+(`https://github.com/herdrdev/herdr-app`, commit `4c8c622`, Apache-2.0), which vendors
+it from its upstreams. Each copy keeps its upstream licence file and herdr's
+`Vendored from ...` header; herdr's changes are marked `HERDR:` and Perch's `PERCH:`.
+
+- `vendor/gpui-kit/` (`Cargo.toml`, `LICENSE-APACHE`, `crates/base`, `crates/fps`,
+  `crates/shell` with `rquickjs-compat`): [longbridge/gpui-kit](https://github.com/longbridge/gpui-kit)
+  at `1ccf011`, version 0.7.1, Apache-2.0 (Copyright 2024 - 2026 Longbridge); the
+  `rquickjs-compat` facade is MIT. Perch's changes, each marked `PERCH:`:
+  - `vendor/gpui-kit/Cargo.toml`: a header saying so.
+  - `vendor/gpui-kit/crates/shell/Cargo.toml`, `vendor/gpui-kit/crates/shell/src/probe.rs`,
+    `vendor/gpui-kit/crates/shell/src/materialize.rs` and the `probe` module in
+    `vendor/gpui-kit/crates/shell/src/lib.rs`: test builds only (`render-test-support`), the
+    laid-out box, colours and font of each named element.
+  - `vendor/gpui-kit/crates/shell/src/lib.rs`: the window a host function is called from, for
+    facts about it (its scale factor).
+  - `vendor/gpui-kit/crates/shell/src/style.rs`: OpenType font features, by tag and as CSS
+    `font-variant-numeric: tabular-nums` (`tnum`).
+  - `vendor/gpui-kit/crates/shell/src/entities.rs` and
+    `vendor/gpui-kit/crates/shell/src/materialize/components/scrollbar.rs`: a scroll request
+    made before a scroll area's first layout waits for it, and one made after is taken in the
+    same frame.
+  - `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/entity_api.rs` and
+    `vendor/gpui-kit/crates/shell/src/typings.rs`: a scroll handle's `item_bounds`, where a
+    child was last laid out, for a script that anchors something to it.
+  - `vendor/gpui-kit/crates/shell/src/watch.rs` and
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/lifecycle.rs`: a build that a reload
+    replaces gets its final call (`View.close`) before it is released.
+  - `vendor/gpui-kit/crates/shell/src/materialize.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/typings.rs`: `window_layer`, an element painted over the
+    whole window from its top left wherever its parent sits, for what a screen in a region of the
+    window portals (CSS `position: fixed`).
+  - `vendor/gpui-kit/crates/shell/src/measure.rs` (new), the `measure` module in
+    `vendor/gpui-kit/crates/shell/src/lib.rs`, `vendor/gpui-kit/crates/shell/src/materialize.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/typings.rs`: `measure`, the box an element was last laid
+    out in, kept for a script that asked about it (`getBoundingClientRect`).
+  - `vendor/gpui-kit/crates/shell/src/materialize.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/typings.rs`: `also_named`, more names a test reads an
+    element's box by, beside its `id`.
+  - `vendor/gpui-kit/crates/shell/src/file_image.rs` (new), the `file_image` module in
+    `vendor/gpui-kit/crates/shell/src/lib.rs`, `vendor/gpui-kit/crates/shell/src/spec.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/materialize.rs`: an `image` whose source is an absolute
+    path draws that file only when it is a regular file of at most 8 MiB inside the calling
+    script's read grant, links resolved; anything else draws nothing and reads nothing.
+  - `vendor/gpui-kit/crates/shell/src/measure.rs` and `vendor/gpui-kit/crates/shell/src/view.rs`:
+    the boxes `measure` keeps are each script copy's own (by the policy it runs under), and go
+    once the copy closes.
+  - `vendor/gpui-kit/crates/shell/src/materialize.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/typings.rs`: hover groups, `group(name)` on an element and
+    `group_hover(name, ...)` styles on a descendant, drawn while the pointer is over the group
+    without calling the script.
+  - `vendor/gpui-kit/crates/shell/src/engine/quickjs/sandbox.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/view.rs`: an event, timer, task or render that the time
+    budget stops says so over its view, as a failed render does, instead of only being logged.
+  - `vendor/gpui-kit/crates/shell/src/metrics.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/scheduler.rs`: `script_time`, all time the
+    main thread spent running script, each entry counted once.
+  - `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs`: `collect_between_frames`, a
+    collection of the script heap between frames once it has grown by half, with QuickJS's own
+    trigger moved past it, so a collection does not use up a render's time budget.
+  - `vendor/gpui-kit/crates/shell/src/spec.rs`, `vendor/gpui-kit/crates/shell/src/snapshot.rs`,
+    `vendor/gpui-kit/crates/shell/src/runtime.rs`,
+    `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs` and
+    `vendor/gpui-kit/crates/shell/src/view.rs`: `reuse(id, generation)`, a subtree of the view's
+    live description copied into the one being built, its handlers registered again, so an
+    unchanged part is not described again.
+  - `vendor/gpui-kit/crates/base/src/input/base/state.rs` and
+    `vendor/gpui-kit/crates/base/src/input/base/undo_manager.rs`: `can_undo` and `can_redo`,
+    whether undo or redo has anything to replay, for an editor's menu; `apply_external` and
+    `map_external`, an edit from outside the editor (a store value) applied without an undo entry
+    or a change event, the undo history mapped through it (what it overlaps is dropped).
+- `vendor/quickjs-jit-runtime/`: the `jit` crate of
+  [longbridge/quickjs-jit](https://github.com/longbridge/quickjs-jit) at `96593cd` with
+  herdr's fix for longbridge/quickjs-jit#38, MIT (Copyright (c) 2020 Mees Delzenne,
+  (c) 2025 Rquickjs Contributors). Perch only quiets its unused-code warnings
+  (`vendor/quickjs-jit-runtime/Cargo.toml`).
+- `vendor/gpui-pre/` and `vendor/gpui-pre-macos/`: the crates.io `gpui-pre` and
+  `gpui-pre-macos` 0.3.8 (Zed's GPUI, Apache-2.0, Copyright 2022 - 2025 Zed Industries,
+  Inc.), unchanged except for three of herdr's additions the shell names, each marked
+  `PERCH:`: `AssetSource::image_resource` (a default method; nothing in this copy calls
+  it; `vendor/gpui-pre/src/assets.rs`), `Application::with_activation_policy` and
+  `ActivationPolicy::Prohibited` (`vendor/gpui-pre/src/app.rs`,
+  `vendor/gpui-pre/src/platform.rs`, with its AppKit mapping in
+  `vendor/gpui-pre-macos/src/platform.rs`). `vendor/gpui-pre/Cargo.toml` and
+  `vendor/gpui-pre-macos/Cargo.toml` say so in a header, and the latter quiets lints. Herdr's
+  other GPUI patches (idle wake, frame capture, terminal metrics, image cache) are not taken.
+  Perch's own changes, also marked `PERCH:`: the macOS display link pauses after a few vsyncs
+  with nothing to draw and the window's `frame_waker` restarts it
+  (`vendor/gpui-pre-macos/src/display_link.rs` `FrameDemand`, and `step`, `draw` and
+  `frame_waker` in `vendor/gpui-pre-macos/src/window.rs`); `PERCH_NATIVE_PERF=1` logs each
+  frame request on stderr (`perf_log` in `vendor/gpui-pre/src/window.rs`); and
+  `HeadlessAppContext::present` (`vendor/gpui-pre/src/app/headless_app_context.rs`), for the
+  offscreen measuring example, presents only after a draw, as a display tick does.
+
+The shell also pulls `quickjs-jit` (MIT, with QuickJS-ng's MIT C sources) and
+[LLRT](https://github.com/awslabs/llrt) modules (Apache-2.0) from git at the revisions
+`vendor/gpui-kit/crates/shell/Cargo.toml` pins. Apache-2.0 and MIT code may be combined
+into a GPL-3.0-only program; the licence texts stay beside each copy.
+
+## React in the native mod runtime
+
+`crates/perch-native/mods/react-runtime/runtime.mjs` (built from
+`crates/perch-native/mods-runtime/react/` and compiled into the native client) bundles
+[React](https://github.com/facebook/react) 19.2.8 (`react`, `react/jsx-runtime`),
+`react-reconciler` 0.33.0 and `scheduler` 0.27.0, MIT, Copyright (c) Meta Platforms, Inc.
+and affiliates. Each module keeps its `@license React` header in the bundle. `react-dom`
+19.2.8 (MIT, the same copyright) runs only at build time: `react-dom/server` renders the
+agent icons' SVG markup into `agent-icons.js`; none of its code ships. The bundle's own
+`react-dom` is Perch's (`mods-runtime/react/react-dom.mjs`).

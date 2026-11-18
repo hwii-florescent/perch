@@ -635,6 +635,8 @@ impl HistoryDb {
             ("agent_identities", "owner_provider_id", "TEXT"),
             ("agent_identities", "report_conversation", "INTEGER"),
             ("suggestions", "run_id", "TEXT NOT NULL DEFAULT ''"),
+            // The name a started sub-session gets (`perch suggest --name`).
+            ("suggestions", "name", "TEXT"),
         ] {
             if !Self::has_column(&conn, table, column)? {
                 conn.execute(

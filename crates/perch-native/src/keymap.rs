@@ -16,8 +16,11 @@
 //! A key nothing binds goes to the terminal. Nothing here reads the keyboard or runs a command:
 //! [`Keymap::resolve`] names what to run and the window runs it.
 //!
+//! Resize mode is the web's: the leader's follow-up `r` arms it, and each of its keys resizes the
+//! focused pane and keeps it armed; any other key, Escape or the timeout ends it.
+//!
 //! Not built: `layout:<name>` and `mod:<name>` sections (this client shows no layout or mod
-//! view), resize mode, and the follow-ups of the leader chord that resize a pane.
+//! view).
 
 use crate::actions::{Action, ACTIONS};
 use gpui::Keystroke;
@@ -30,11 +33,24 @@ pub enum Scope {
     Any,
     /// In a terminal the key belongs to the program.
     OutsideTerminal,
+    /// Neither a terminal nor a text field has the keyboard (a plain key there is typing).
+    OutsideEditable,
     /// A follow-up key after the leader chord.
     Leader,
+    /// A key of resize mode (the leader's follow-up `r`).
+    Resize,
     /// A command on the terminal that has the keyboard (find, clear, copy, scroll). It applies only
     /// while a terminal has the keyboard; the window runs it on that terminal.
     Terminal,
+    /// The folder browser's own keys: the screen asks for them (`shortcutFor(event, "directory")`),
+    /// the window never runs them.
+    Directory,
+    /// The Navigator's result keys, asked for by its screen as `Directory`'s are.
+    Navigator,
+    /// The file editor's own keys (save, find, go to line): they apply only while a native editor has
+    /// the keyboard, which resolves them on every key ([`Keymap::editor_shortcut`]); the window never
+    /// runs them.
+    Editor,
 }
 
 /// A named command and its default keys, by the web's id and wording.
@@ -88,6 +104,8 @@ impl From<&Action> for Shortcut {
 /// The commands the window runs besides the sidebar's (`actions::ACTIONS`).
 pub const SHORTCUTS: &[Shortcut] = &[
     s("global.navigator", "Open Navigator", &["mod+p"]),
+    s("nests.new", "New workspace (worktree)", &["mod+n"]),
+    s("nests.addBirdhouse", "Add project", &["mod+o"]),
     scoped(
         "global.navigatorAlt",
         "Open Navigator (outside terminals)",
@@ -95,6 +113,18 @@ pub const SHORTCUTS: &[Shortcut] = &[
         Scope::OutsideTerminal,
     ),
     s("global.settings", "Open Settings", &["mod+,"]),
+    s("global.help", "Open this keybind help", &["mod+/"]),
+    s(
+        "global.drawer",
+        "Toggle the right drawer (files and Git)",
+        &["cmd+shift+b", "alt+shift+b"],
+    ),
+    scoped(
+        "global.helpPlain",
+        "Open keybind help (outside inputs)",
+        &["shift+/"],
+        Scope::OutsideEditable,
+    ),
     // VS Code's keys, as the web's: Command on a Mac, Control elsewhere.
     s("view.zoomIn", "Zoom in", &["cmd+=", "ctrl+="]),
     s(
@@ -114,6 +144,11 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "Close the focused pane, file or tab (agents ask first)",
         &["mod+w"],
     ),
+    s(
+        "tabs.keepOpen",
+        "Keep the preview tab open (make it a regular tab)",
+        &["cmd+alt+enter", "ctrl+alt+enter"],
+    ),
     s("tabs.jump1", "Jump to tab 1", &["cmd+1", "alt+1"]),
     s("tabs.jump2", "Jump to tab 2", &["cmd+2", "alt+2"]),
     s("tabs.jump3", "Jump to tab 3", &["cmd+3", "alt+3"]),
@@ -125,6 +160,17 @@ pub const SHORTCUTS: &[Shortcut] = &[
     s("tabs.last", "Jump to the last tab", &["cmd+9", "alt+9"]),
     s("tabs.next", "Next tab", &["cmd+shift+]", "ctrl+pagedown"]),
     s("tabs.prev", "Previous tab", &["cmd+shift+[", "ctrl+pageup"]),
+    // History, not position: where you were before and after, as the web's (VS Code's Ctrl+-).
+    s(
+        "nav.back",
+        "Back to where you were",
+        &["ctrl+-", "alt+shift+left"],
+    ),
+    s(
+        "nav.forward",
+        "Forward",
+        &["ctrl+shift+-", "alt+shift+right"],
+    ),
     s("panes.splitRight", "Split right", &["mod+d"]),
     s(
         "panes.splitDown",
@@ -226,6 +272,12 @@ pub const SHORTCUTS: &[Shortcut] = &[
     ),
     scoped("leader.navigator", "Open Navigator", &["g"], Scope::Leader),
     scoped("leader.settings", "Open Settings", &["s"], Scope::Leader),
+    scoped(
+        "leader.help",
+        "Open this keybind help",
+        &["shift+/"],
+        Scope::Leader,
+    ),
     scoped("leader.sidebar", "Toggle sidebar", &["b"], Scope::Leader),
     scoped("leader.nextTab", "Next tab", &["n"], Scope::Leader),
     scoped("leader.previousTab", "Previous tab", &["p"], Scope::Leader),
@@ -283,6 +335,18 @@ pub const SHORTCUTS: &[Shortcut] = &[
     scoped("leader.jump8", "Jump to tab 8", &["8"], Scope::Leader),
     scoped("leader.jump9", "Jump to tab 9", &["9"], Scope::Leader),
     scoped(
+        "leader.nextProject",
+        "Next project's most recent session",
+        &["w"],
+        Scope::Leader,
+    ),
+    scoped(
+        "leader.worktree",
+        "Open this project's worktree menu",
+        &["shift+w"],
+        Scope::Leader,
+    ),
+    scoped(
         "leader.newSession",
         "New session in this project",
         &["c"],
@@ -292,6 +356,18 @@ pub const SHORTCUTS: &[Shortcut] = &[
         "leader.swapNext",
         "Swap with the next pane",
         &["shift+]"],
+        Scope::Leader,
+    ),
+    scoped(
+        "leader.grow",
+        "Grow the focused pane",
+        &["shift+="],
+        Scope::Leader,
+    ),
+    scoped(
+        "leader.shrink",
+        "Shrink the focused pane",
+        &["-"],
         Scope::Leader,
     ),
     scoped(
@@ -318,6 +394,116 @@ pub const SHORTCUTS: &[Shortcut] = &[
         &["shift+l"],
         Scope::Leader,
     ),
+    scoped(
+        "leader.resize",
+        "Enter resize mode (Escape or timeout exits)",
+        &["r"],
+        Scope::Leader,
+    ),
+    scoped(
+        "resize.left",
+        "Resize pane left (shrink)",
+        &["h"],
+        Scope::Resize,
+    ),
+    scoped(
+        "resize.down",
+        "Resize pane down (shrink)",
+        &["j"],
+        Scope::Resize,
+    ),
+    scoped("resize.up", "Resize pane up (grow)", &["k"], Scope::Resize),
+    scoped(
+        "resize.right",
+        "Resize pane right (grow)",
+        &["l"],
+        Scope::Resize,
+    ),
+    scoped(
+        "editor.save",
+        "Save file",
+        &["cmd+s", "ctrl+s"],
+        Scope::Editor,
+    ),
+    scoped(
+        "editor.find",
+        "Find in file",
+        &["cmd+f", "ctrl+f"],
+        Scope::Editor,
+    ),
+    scoped(
+        "editor.replace",
+        "Replace in file",
+        &["cmd+alt+f", "ctrl+h"],
+        Scope::Editor,
+    ),
+    scoped(
+        "editor.replaceAlt",
+        "Replace in file (alternate)",
+        &["cmd+shift+f", ""],
+        Scope::Editor,
+    ),
+    scoped(
+        "editor.findNext",
+        "Next file match (while Find is open)",
+        &["f3"],
+        Scope::Editor,
+    ),
+    scoped(
+        "editor.findPrevious",
+        "Previous file match (while Find is open)",
+        &["shift+f3"],
+        Scope::Editor,
+    ),
+    scoped(
+        "editor.findNextAlt",
+        "Next file match (alternate)",
+        &["cmd+g", ""],
+        Scope::Editor,
+    ),
+    scoped(
+        "editor.findPreviousAlt",
+        "Previous file match (alternate)",
+        &["cmd+shift+g", ""],
+        Scope::Editor,
+    ),
+    scoped("editor.gotoLine", "Go to line", &["ctrl+g"], Scope::Editor),
+    scoped(
+        "navigator.next",
+        "Next Navigator result",
+        &["ctrl+j"],
+        Scope::Navigator,
+    ),
+    scoped(
+        "navigator.nextAlt",
+        "Next Navigator result (alternate)",
+        &["ctrl+n"],
+        Scope::Navigator,
+    ),
+    scoped(
+        "navigator.previous",
+        "Previous Navigator result",
+        &["ctrl+k"],
+        Scope::Navigator,
+    ),
+    scoped(
+        "navigator.previousAlt",
+        "Previous Navigator result (alternate)",
+        &["ctrl+p"],
+        Scope::Navigator,
+    ),
+    scoped(
+        "directory.use",
+        "Use this folder",
+        &["cmd+enter"],
+        Scope::Directory,
+    ),
+    scoped(
+        "directory.useAlt",
+        "Use this folder (alternate)",
+        &["ctrl+enter"],
+        Scope::Directory,
+    ),
 ];
 
 /// Every shortcut the window answers: the sidebar's actions, then [`SHORTCUTS`].
@@ -328,11 +514,41 @@ pub fn all_shortcuts() -> impl Iterator<Item = Shortcut> {
         .chain(SHORTCUTS.iter().copied())
 }
 
+/// The jump ranges the keybind help lists as one row: id prefix, what is jumped to, the span.
+const JUMP_RANGES: [(&str, &str, &str); 3] = [
+    ("tabs.jump", "tab", "1…8"),
+    ("nests.jump", "workspace", "1…9"),
+    ("leader.jump", "tab", "1…9"),
+];
+
+/// Whether `id` is one of range `range`'s commands (`tabs.jump3` of `tabs.jump`).
+fn range_member(id: &str, range: &str) -> bool {
+    id.strip_prefix(range)
+        .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// The keybind help's group of a command, as the web groups its table (`KeybindGroup`).
+fn help_group(id: &str) -> &'static str {
+    match id.split('.').next().unwrap_or("") {
+        "tabs" | "sessions" | "nav" => "tabs",
+        "nests" => "nests",
+        "panes" => "panes",
+        "terminal" => "terminal",
+        "leader" => "leader",
+        "resize" => "resize",
+        "directory" => "directory",
+        "navigator" => "navigator",
+        "editor" => "editor",
+        _ => "global",
+    }
+}
+
 /// The command a leader follow-up runs: `leader.splitRight` runs `panes.splitRight`.
 pub fn leader_target(id: &str) -> Option<&'static str> {
     Some(match id.strip_prefix("leader.")? {
         "navigator" => "global.navigator",
         "settings" => "global.settings",
+        "help" => "global.help",
         "sidebar" => "global.sidebar",
         "nextTab" => "tabs.next",
         "previousTab" => "tabs.prev",
@@ -345,7 +561,14 @@ pub fn leader_target(id: &str) -> Option<&'static str> {
         "focus.down" => "panes.focus.down",
         "focus.up" => "panes.focus.up",
         "focus.right" => "panes.focus.right",
-        "newSession" => "sessions.new",
+        "newSession" => "leader.newSession",
+        // The window runs these itself: the shown project's worktree menu, the next folder's
+        // newest session, the focused pane's size and resize mode.
+        "worktree" => "leader.worktree",
+        "nextProject" => "leader.nextProject",
+        "grow" => "leader.grow",
+        "shrink" => "leader.shrink",
+        "resize" => "leader.resize",
         "jump1" => "tabs.jump1",
         "jump2" => "tabs.jump2",
         "jump3" => "tabs.jump3",
@@ -354,7 +577,7 @@ pub fn leader_target(id: &str) -> Option<&'static str> {
         "jump6" => "tabs.jump6",
         "jump7" => "tabs.jump7",
         "jump8" => "tabs.jump8",
-        "jump9" => "tabs.last",
+        "jump9" => "leader.jump9",
         "swapNext" => "pane.swapNext",
         "swap.left" => "pane.swap:left",
         "swap.down" => "pane.swap:down",
@@ -384,6 +607,10 @@ pub const TYPED: &[(&str, Option<&str>)] = &[
     ("pane.focus", Some("pane")),
     ("app.settings", None),
     ("app.palette", None),
+    ("app.help", None),
+    ("key.bind", None),
+    ("agent.next", None),
+    ("agent.prev", None),
     ("app.zoom_in", None),
     ("app.zoom_out", None),
     ("app.zoom_reset", None),
@@ -575,6 +802,14 @@ fn reserved(chord: &Chord, mac: bool) -> bool {
         .any(|spec| parse_combo(spec, true).is_some_and(|reserved| reserved == *chord))
 }
 
+/// Whether `combo` (the settings' notation) may be bound to a command, as the web's
+/// `bindableCombo`: a key, not reserved by the macOS menu, with Command, Control, Alt or a
+/// function key.
+pub fn bindable(combo: &str, mac: bool) -> bool {
+    parse_combo(combo, mac)
+        .is_some_and(|c| !reserved(&c, mac) && (c.cmd || c.ctrl || c.alt || function_key(&c)))
+}
+
 fn function_key(chord: &Chord) -> bool {
     chord.key.starts_with('f') && chord.key[1..].parse::<u8>().is_ok()
 }
@@ -590,7 +825,7 @@ pub fn effective_spec(
 ) -> Option<Chord> {
     if let Some(own) = chosen.get(shortcut.id) {
         let chord = parse_combo(own, mac).filter(|c| !reserved(c, mac))?;
-        let plain_ok = shortcut.scope == Scope::Leader;
+        let plain_ok = matches!(shortcut.scope, Scope::Leader | Scope::Resize);
         return (plain_ok || chord.cmd || chord.ctrl || chord.alt || function_key(&chord))
             .then_some(chord);
     }
@@ -610,6 +845,56 @@ pub fn effective_spec(
     } else {
         parse_combo(default, mac)
     }
+}
+
+/// `chord` in the settings' notation (`cmd+shift+]`), as the web's recorder writes it.
+fn chord_spec(chord: &Chord) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if chord.cmd {
+        parts.push("cmd");
+    }
+    if chord.ctrl {
+        parts.push("ctrl");
+    }
+    if chord.alt {
+        parts.push("alt");
+    }
+    if chord.shift {
+        parts.push("shift");
+    }
+    parts.push(&chord.key);
+    parts.join("+")
+}
+
+/// Whether `shortcut` applies where the keyboard is `context` (`shortcutAppliesTo`).
+fn applies_to(shortcut: &Shortcut, context: &str) -> bool {
+    match shortcut.scope {
+        Scope::Leader => context == "leader",
+        Scope::Resize => context == "resize",
+        _ if matches!(context, "leader" | "resize") => false,
+        Scope::Any => true,
+        Scope::OutsideTerminal => !matches!(context, "terminal" | "navigator"),
+        Scope::OutsideEditable => context == "global",
+        Scope::Terminal => context == "terminal",
+        Scope::Directory => context == "directory",
+        Scope::Navigator => context == "navigator",
+        Scope::Editor => context == "editor",
+    }
+}
+
+/// Whether two commands can fire on one key press (`overlaps`): some context has both.
+fn overlaps(a: &Shortcut, b: &Shortcut) -> bool {
+    [
+        "global",
+        "terminal",
+        "editor",
+        "navigator",
+        "directory",
+        "leader",
+        "resize",
+    ]
+    .iter()
+    .any(|ctx| applies_to(a, ctx) && applies_to(b, ctx))
 }
 
 /// The editing keys a terminal gets by default on macOS, in `keys.json`'s notation, and what each
@@ -636,7 +921,7 @@ pub enum Hit {
     Terminal,
     /// A binding in `keys.json` that cannot run. The press is swallowed and this says why.
     Fault(String),
-    /// The leader chord was armed and this press ended it without a follow-up.
+    /// The leader chord or resize mode was armed and this press ended it without one of its keys.
     LeaderEnded,
 }
 
@@ -649,6 +934,8 @@ pub struct Context {
     pub typing: bool,
     /// The leader chord was pressed and its follow-up is awaited.
     pub leader: bool,
+    /// Resize mode is armed: its keys resize, any other ends it.
+    pub resize: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -678,6 +965,226 @@ impl Keymap {
         effective_spec(&shortcut, &self.chosen, self.mac).map(|c| self.format(&c))
     }
 
+    /// The keybind help's rows (`keybindEntries` in the web), in table order: every binding the
+    /// window answers with its key (a person's choice, else the default), what it does and its
+    /// group. A jump range (to tab 1 to 8) is one row while none of its keys is a person's
+    /// choice. The bindings in `keys.json` follow, by section, as the window reads them first.
+    pub fn help(&self) -> Vec<Value> {
+        let row = |keys: String, description: &str, group: &str| serde_json::json!({ "keys": keys, "description": description, "group": group });
+        let mut rows = Vec::new();
+        let mut ranges = Vec::new();
+        // Copy and paste are the fixed row below, as the web lists them.
+        let listed =
+            all_shortcuts().filter(|s| !matches!(s.id, "terminal.copy" | "terminal.paste"));
+        for shortcut in listed {
+            let Some(chord) = effective_spec(&shortcut, &self.chosen, self.mac) else {
+                continue;
+            };
+            let Some(prefix) = self.prefix(shortcut.scope) else {
+                continue;
+            };
+            let label = format!("{prefix}{}", self.format(&chord));
+            let group = help_group(shortcut.id);
+            let range = JUMP_RANGES
+                .iter()
+                .find(|(id, ..)| range_member(shortcut.id, id))
+                .filter(|(id, ..)| !self.chosen.keys().any(|chosen| range_member(chosen, id)));
+            match range {
+                Some((id, noun, span)) => {
+                    if ranges.contains(id) {
+                        continue;
+                    }
+                    ranges.push(*id);
+                    let key = self.format(&Chord {
+                        key: chord.key.clone(),
+                        ..Chord::default()
+                    });
+                    let keys = format!("{}{span}", label.strip_suffix(&key).unwrap_or(&label));
+                    rows.push(row(keys, &format!("Jump to {noun} {span}"), group));
+                }
+                None => rows.push(row(label, shortcut.title, group)),
+            }
+        }
+        rows.push(row(
+            "Esc".into(),
+            "Close any open overlay or keyboard mode",
+            "global",
+        ));
+        rows.push(row(
+            "↑ / ↓".into(),
+            "Move selection in Navigator",
+            "navigator",
+        ));
+        let copy = if self.mac {
+            "⌘C / ⌘V"
+        } else {
+            "Ctrl+Shift+C / V"
+        };
+        rows.push(row(copy.into(), "Copy / paste", "terminal"));
+        let sections = self.file.as_ref().and_then(Value::as_object);
+        for name in ["global", "terminal"] {
+            let bindings = sections
+                .and_then(|s| s.get(name))
+                .and_then(Value::as_object);
+            for (spec, action) in bindings.into_iter().flatten() {
+                let Some(chord) = parse_chord(spec) else {
+                    continue;
+                };
+                let command = match action {
+                    Value::String(text) => text.split(':').next().unwrap_or(text).to_string(),
+                    Value::Object(map) => map
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    _ => continue,
+                };
+                let title = all_shortcuts()
+                    .find(|s| s.id == command)
+                    .map(|s| s.title.to_string())
+                    .unwrap_or_else(|| match action {
+                        Value::String(text) => text.clone(),
+                        _ => command.clone(),
+                    });
+                rows.push(row(self.format(&chord), &title, name));
+            }
+        }
+        rows
+    }
+
+    /// Settings > Keyboard's groups (`KeybindingsSection`): every command of the table with its
+    /// key as the person has it (`""` for none) and whether they changed it from the default.
+    /// The jump ranges are rows of their own here, one per key, as in the web's table.
+    pub fn settings_groups(&self) -> Value {
+        const GROUPS: [(&str, &str); 10] = [
+            ("global", "Global"),
+            ("tabs", "Tabs"),
+            ("nests", "Workspaces and projects"),
+            ("panes", "Splits and panes"),
+            ("terminal", "Terminal"),
+            ("editor", "File editor"),
+            ("navigator", "Navigator"),
+            ("directory", "Folder picker"),
+            ("leader", "Leader and follow-up keys"),
+            ("resize", "Resize mode"),
+        ];
+        let groups: Vec<Value> = GROUPS
+            .iter()
+            .map(|(id, title)| {
+                let rows: Vec<Value> = all_shortcuts()
+                    .filter(|s| help_group(s.id) == *id)
+                    .map(|s| {
+                        let keys = effective_spec(&s, &self.chosen, self.mac)
+                            .map(|c| self.format(&c))
+                            .unwrap_or_default();
+                        serde_json::json!({
+                            "id": s.id, "description": s.title, "keys": keys,
+                            "edited": self.chosen.contains_key(s.id),
+                        })
+                    })
+                    .collect();
+                serde_json::json!({ "id": id, "title": title, "rows": rows })
+            })
+            .collect();
+        Value::Array(groups)
+    }
+
+    /// What recording gives command `id` when the person pressed `key` (`recordCombo`, then
+    /// `commit` in the web's `KeybindingsSection`): `None` for a modifier alone (keep waiting);
+    /// `{kind: "error", text}` for a key that cannot be bound; else `{kind: "saved", note?,
+    /// keybindings}`, the choices to save, with the key taken off the commands that had it.
+    pub fn record(&self, id: &str, event: &Value) -> Option<Value> {
+        let error = |text: &str| Some(serde_json::json!({ "kind": "error", "text": text }));
+        let target = all_shortcuts().find(|s| s.id == id)?;
+        // The DOM event the page was given: its `key` and four modifier flags.
+        let name = event["key"].as_str()?;
+        let flag = |field: &str| event[field].as_bool().unwrap_or(false);
+        if matches!(name, "Meta" | "Control" | "Shift" | "Alt") {
+            return None;
+        }
+        let named = match name {
+            " " => "space",
+            "ArrowUp" => "up",
+            "ArrowDown" => "down",
+            "ArrowLeft" => "left",
+            "ArrowRight" => "right",
+            "PageUp" => "pageup",
+            "PageDown" => "pagedown",
+            other => other,
+        };
+        let (base, shift) = base_key(named, flag("shiftKey"));
+        let m = (flag("metaKey"), flag("ctrlKey"), flag("altKey"));
+        if !valid_key(&base) || base == "escape" {
+            return error("That key can't be used.");
+        }
+        let chord = Chord {
+            cmd: m.0,
+            ctrl: m.1,
+            alt: m.2,
+            shift,
+            key: base,
+        };
+        let plain_ok = matches!(
+            target.scope,
+            Scope::Leader | Scope::Resize | Scope::OutsideEditable
+        );
+        if !plain_ok && !chord.cmd && !chord.ctrl && !chord.alt && !function_key(&chord) {
+            return error(if self.mac {
+                "Include ⌘, ⌃ or ⌥."
+            } else {
+                "Include Ctrl or Alt."
+            });
+        }
+        if reserved(&chord, self.mac) {
+            return error("macOS reserves that key for its menu.");
+        }
+        let spec = chord_spec(&chord);
+        let mut next = self.chosen.clone();
+        // The commands that fire with it on the same key lose it (`shortcutsBoundTo`).
+        let taken: Vec<Shortcut> = all_shortcuts()
+            .filter(|other| other.id != id && overlaps(&target, other))
+            .filter(|other| effective_spec(other, &self.chosen, self.mac).as_ref() == Some(&chord))
+            .collect();
+        for other in &taken {
+            next.insert(other.id.to_string(), String::new());
+        }
+        let builtin = match target.keys {
+            [both] => Some(*both),
+            [for_mac, other] => Some(if self.mac { *for_mac } else { *other }),
+            _ => None,
+        };
+        let is_builtin = builtin
+            .filter(|b| !b.is_empty())
+            .and_then(|b| parse_combo(b, self.mac))
+            .as_ref()
+            == Some(&chord);
+        if is_builtin {
+            next.remove(id);
+        } else {
+            next.insert(id.to_string(), spec);
+        }
+        let note = (!taken.is_empty()).then(|| {
+            let names: Vec<&str> = taken.iter().map(|t| t.title).collect();
+            format!("Moved from \"{}\".", names.join("\", \""))
+        });
+        Some(serde_json::json!({ "kind": "saved", "note": note, "keybindings": next }))
+    }
+
+    /// What the help writes before a mode's key: the leader chord's (`⌃Space, `), and for resize
+    /// mode also the leader's follow-up that arms it (`⌃Space, R, `). `None` when the mode cannot
+    /// be reached because a key on the way is unbound.
+    fn prefix(&self, scope: Scope) -> Option<String> {
+        Some(match scope {
+            Scope::Leader => format!("{}, ", self.label("leader.arm")?),
+            Scope::Resize => format!(
+                "{}{}, ",
+                self.prefix(Scope::Leader)?,
+                self.label("leader.resize")?
+            ),
+            _ => String::new(),
+        })
+    }
+
     /// `cmd+shift+]` as `⇧⌘]` on a Mac, `Ctrl+Shift+]` elsewhere.
     fn format(&self, c: &Chord) -> String {
         let key = match c.key.as_str() {
@@ -686,6 +1193,12 @@ impl Keymap {
             "left" => "←".into(),
             "right" => "→".into(),
             "enter" => "Enter".into(),
+            "tab" => "Tab".into(),
+            "space" => "Space".into(),
+            "backspace" => "Backspace".into(),
+            "delete" => "Delete".into(),
+            "home" => "Home".into(),
+            "end" => "End".into(),
             "pageup" => "PgUp".into(),
             "pagedown" => "PgDn".into(),
             other => other.to_uppercase(),
@@ -722,8 +1235,11 @@ impl Keymap {
         if m.control && m.alt && m.shift && keystroke.key == "escape" {
             return None;
         }
+        if context.resize {
+            return Some(self.mode_key(keystroke, Scope::Resize, Some));
+        }
         if context.leader {
-            return Some(self.follow_up(keystroke));
+            return Some(self.mode_key(keystroke, Scope::Leader, leader_target));
         }
         if let Some(hit) = self.file_hit(keystroke, context) {
             return Some(hit);
@@ -743,7 +1259,13 @@ impl Keymap {
                     .filter(|s| match s.scope {
                         Scope::Any => true,
                         Scope::OutsideTerminal => !context.in_terminal,
-                        Scope::Leader | Scope::Terminal => false,
+                        Scope::OutsideEditable => !context.in_terminal && !context.typing,
+                        Scope::Leader
+                        | Scope::Resize
+                        | Scope::Terminal
+                        | Scope::Directory
+                        | Scope::Navigator
+                        | Scope::Editor => false,
                     })
                     .find(bound)
             })
@@ -763,15 +1285,72 @@ impl Keymap {
             })
     }
 
-    /// The press after the leader chord: a follow-up runs, Escape ends it quietly, anything else
-    /// ends it and still goes to the terminal.
-    fn follow_up(&self, keystroke: &Keystroke) -> Hit {
+    /// The editor command `keystroke` presses (`editor.save`, ...), as the web's `shortcutFor(event,
+    /// "editor")` and `runEditorShortcut` find it on every key: the editor's own commands first, then
+    /// the window's that apply in an editor; the person's bindings count, an empty one disabling the
+    /// command. A key that a window command wins stays the window's (`None`).
+    pub fn editor_shortcut(&self, keystroke: &Keystroke) -> Option<&'static str> {
+        let bound = |s: &Shortcut| {
+            applies_to(s, "editor")
+                && effective_spec(s, &self.chosen, self.mac).is_some_and(|c| matches(&c, keystroke))
+        };
+        let editor = all_shortcuts().filter(|s| s.scope == Scope::Editor);
+        let others = all_shortcuts().filter(|s| s.scope != Scope::Editor);
+        let hit = editor.chain(others).find(bound)?;
+        (hit.scope == Scope::Editor).then_some(hit.id)
+    }
+
+    /// The command of screen scope `scope` (`"directory"`) a DOM key event (`{key, ctrlKey,
+    /// metaKey, shiftKey, altKey}`) presses, as the web's `shortcutFor(event, scope)` finds it.
+    pub fn screen_shortcut(&self, event: &Value, scope: &str) -> Option<&'static str> {
+        let scope = match scope {
+            "directory" => Scope::Directory,
+            "navigator" => Scope::Navigator,
+            _ => return None,
+        };
+        let flag = |name: &str| event[name].as_bool().unwrap_or(false);
+        let key = match event["key"].as_str()? {
+            " " => "space".to_string(),
+            "ArrowUp" => "up".to_string(),
+            "ArrowDown" => "down".to_string(),
+            "ArrowLeft" => "left".to_string(),
+            "ArrowRight" => "right".to_string(),
+            other => other.to_lowercase(),
+        };
+        let keystroke = Keystroke {
+            modifiers: gpui::Modifiers {
+                control: flag("ctrlKey"),
+                alt: flag("altKey"),
+                shift: flag("shiftKey"),
+                platform: flag("metaKey"),
+                ..Default::default()
+            },
+            key,
+            key_char: None,
+        };
+        all_shortcuts()
+            .filter(|s| s.scope == scope)
+            .find(|s| {
+                effective_spec(s, &self.chosen, self.mac).is_some_and(|c| matches(&c, &keystroke))
+            })
+            .map(|s| s.id)
+    }
+
+    /// A press while the leader chord or resize mode waits: a key of the mode runs (`target` names
+    /// its command), Escape ends the mode quietly, anything else ends it and still goes to the
+    /// terminal.
+    fn mode_key(
+        &self,
+        keystroke: &Keystroke,
+        scope: Scope,
+        target: fn(&'static str) -> Option<&'static str>,
+    ) -> Hit {
         let found = all_shortcuts()
-            .filter(|s| s.scope == Scope::Leader)
+            .filter(|s| s.scope == scope)
             .find(|s| {
                 effective_spec(s, &self.chosen, self.mac).is_some_and(|c| matches(&c, keystroke))
             })
-            .and_then(|s| leader_target(s.id));
+            .and_then(|s| target(s.id));
         match found {
             Some(target) => command_hit(target),
             None => Hit::LeaderEnded,
@@ -897,6 +1476,7 @@ mod tests {
         in_terminal: true,
         typing: false,
         leader: false,
+        resize: false,
     };
 
     #[test]
@@ -915,6 +1495,7 @@ mod tests {
             run(m.resolve(&press("cmd-alt-left"), IN_TERMINAL)),
             "panes.focus.left"
         );
+        assert_eq!(run(m.resolve(&press("cmd-n"), IN_TERMINAL)), "nests.new");
         // On another system `mod` is Control+Shift and the second default applies.
         let other = keymap(&[], None).with_platform(false);
         assert_eq!(
@@ -966,6 +1547,32 @@ mod tests {
     }
 
     #[test]
+    fn the_drawer_toggles_on_the_webs_key_and_on_one_chosen_in_settings() {
+        let m = keymap(&[], None);
+        assert_eq!(
+            run(m.resolve(&press("cmd-shift-b"), IN_TERMINAL)),
+            "global.drawer"
+        );
+        assert_eq!(
+            run(m.resolve(&press("cmd-b"), IN_TERMINAL)),
+            "global.sidebar"
+        );
+        let other = keymap(&[], None).with_platform(false);
+        assert_eq!(
+            run(other.resolve(&press("alt-shift-b"), IN_TERMINAL)),
+            "global.drawer"
+        );
+        let chosen = keymap(&[("global.drawer", "cmd+alt+d")], None);
+        assert_eq!(chosen.resolve(&press("cmd-shift-b"), IN_TERMINAL), None);
+        assert_eq!(
+            run(chosen.resolve(&press("cmd-alt-d"), IN_TERMINAL)),
+            "global.drawer"
+        );
+        let off = keymap(&[("global.drawer", "")], None);
+        assert_eq!(off.resolve(&press("cmd-shift-b"), IN_TERMINAL), None);
+    }
+
+    #[test]
     fn a_choice_the_web_would_refuse_binds_nothing() {
         for bad in [
             "cmd+nonsense",
@@ -993,6 +1600,41 @@ mod tests {
         assert_eq!(
             run(m.resolve(&press("cmd-k"), IN_TERMINAL)),
             "terminal.clear"
+        );
+    }
+
+    /// The palette is the web's Navigator: `mod+p`, which is Command-P on a Mac. The web binds no
+    /// Command-Shift-P, and neither does this client until a person chooses it.
+    #[test]
+    fn the_palettes_key_is_the_webs_and_command_shift_p_is_the_persons_to_choose() {
+        let m = keymap(&[], None);
+        for context in [IN_TERMINAL, Context::default()] {
+            assert_eq!(run(m.resolve(&press("cmd-p"), context)), "global.navigator");
+            assert_eq!(m.resolve(&press("cmd-shift-p"), context), None);
+        }
+        assert_eq!(m.label("global.navigator").as_deref(), Some("⌘P"));
+        // Where `mod` is Control+Shift the palette is Ctrl-Shift-P, as in the web.
+        let other = keymap(&[], None).with_platform(false);
+        assert_eq!(
+            run(other.resolve(&press("ctrl-shift-p"), IN_TERMINAL)),
+            "global.navigator"
+        );
+
+        // A person's choice moves it, in Settings > Keyboard or in keys.json.
+        let chosen = keymap(&[("global.navigator", "cmd+shift+p")], None);
+        assert_eq!(
+            run(chosen.resolve(&press("cmd-shift-p"), IN_TERMINAL)),
+            "global.navigator"
+        );
+        assert_eq!(chosen.resolve(&press("cmd-p"), IN_TERMINAL), None);
+        let file = keymap(&[], Some(json!({"global": {"cmd-shift-p": "app.palette"}})));
+        assert_eq!(
+            run(file.resolve(&press("cmd-shift-p"), IN_TERMINAL)),
+            "app.palette"
+        );
+        assert_eq!(
+            run(file.resolve(&press("cmd-p"), IN_TERMINAL)),
+            "global.navigator"
         );
     }
 
@@ -1082,6 +1724,82 @@ mod tests {
         );
     }
 
+    fn pressed(key: &str, flags: &[&str]) -> Value {
+        let mut event = json!({ "key": key });
+        for flag in flags {
+            event[*flag] = json!(true);
+        }
+        event
+    }
+
+    #[test]
+    fn recording_a_key_moves_it_off_the_commands_that_had_it_and_saves_the_choices() {
+        let m = keymap(&[], None);
+        // Command+T is New tab's: giving it to Open Settings takes it from New tab.
+        let saved = m
+            .record("global.settings", &pressed("t", &["metaKey"]))
+            .unwrap();
+        assert_eq!(saved["kind"], "saved");
+        assert_eq!(saved["keybindings"]["global.settings"], "cmd+t");
+        assert_eq!(saved["keybindings"]["tabs.new"], "");
+        assert!(saved["note"].as_str().unwrap().starts_with("Moved from \""));
+        // What the person saved is what the window then does for that key.
+        let chosen: BTreeMap<String, String> =
+            serde_json::from_value(saved["keybindings"].clone()).unwrap();
+        let after = Keymap::new(chosen, None).with_platform(true);
+        assert_eq!(
+            run(after.resolve(&press("cmd-t"), Context::default())),
+            "global.settings"
+        );
+        // The built-in key is not kept as a choice.
+        let back = after
+            .record("global.settings", &pressed(",", &["metaKey"]))
+            .unwrap();
+        assert!(back["keybindings"].get("global.settings").is_none());
+        // A modifier alone waits; a plain key and a reserved key are refused with the web's words.
+        assert_eq!(
+            m.record("global.settings", &pressed("Meta", &["metaKey"])),
+            None
+        );
+        assert_eq!(
+            m.record("global.settings", &pressed("j", &[])).unwrap()["text"],
+            "Include ⌘, ⌃ or ⌥."
+        );
+        assert_eq!(
+            m.record("global.settings", &pressed("q", &["metaKey"]))
+                .unwrap()["text"],
+            "macOS reserves that key for its menu."
+        );
+        // A leader follow-up may be a plain key.
+        assert_eq!(
+            m.record("leader.splitRight", &pressed("v", &[])).unwrap()["kind"],
+            "saved"
+        );
+        // A key is the one it comes from with Shift: Command+Shift+] arrives as `}`.
+        let shifted = m
+            .record("global.settings", &pressed("}", &["metaKey", "shiftKey"]))
+            .unwrap();
+        assert_eq!(shifted["keybindings"]["global.settings"], "cmd+shift+]");
+    }
+
+    #[test]
+    fn settings_rows_show_the_key_each_command_has_and_which_the_person_changed() {
+        let m = keymap(&[("global.settings", "cmd+j"), ("tabs.new", "")], None);
+        let rows: Vec<Value> = m
+            .settings_groups()
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|g| g["rows"].as_array().unwrap().clone())
+            .collect();
+        let row = |id: &str| rows.iter().find(|r| r["id"] == id).unwrap().clone();
+        assert_eq!(row("global.settings")["keys"], "⌘J");
+        assert_eq!(row("global.settings")["edited"], true);
+        assert_eq!(row("tabs.new")["keys"], "");
+        assert_eq!(row("global.navigator")["keys"], "⌘P");
+        assert_eq!(row("global.navigator")["edited"], false);
+    }
+
     #[test]
     fn the_two_take_back_choices_are_commands_a_person_can_bind() {
         for id in ["terminal.takeBack", "terminal.takeBackAll"] {
@@ -1168,6 +1886,39 @@ mod tests {
         // Not a follow-up: the leader ends, and no other command runs behind it.
         assert_eq!(m.resolve(&press("cmd-t"), armed), Some(Hit::LeaderEnded));
         assert_eq!(m.resolve(&press("q"), armed), Some(Hit::LeaderEnded));
+        assert_eq!(run(m.resolve(&press("r"), armed)), "leader.resize");
+        assert_eq!(run(m.resolve(&press("w"), armed)), "leader.nextProject");
+        assert_eq!(run(m.resolve(&press("shift-+"), armed)), "leader.grow");
+        assert_eq!(run(m.resolve(&press("-"), armed)), "leader.shrink");
+        // Resize mode: h j k l resize, anything else ends it; its keys mean nothing outside it.
+        let resizing = Context {
+            resize: true,
+            ..IN_TERMINAL
+        };
+        for (key, id) in [
+            ("h", "resize.left"),
+            ("j", "resize.down"),
+            ("k", "resize.up"),
+            ("l", "resize.right"),
+        ] {
+            assert_eq!(run(m.resolve(&press(key), resizing)), id);
+            assert_eq!(m.resolve(&press(key), IN_TERMINAL), None);
+        }
+        assert_eq!(m.resolve(&press("v"), resizing), Some(Hit::LeaderEnded));
+        assert_eq!(
+            m.resolve(&press("escape"), resizing),
+            Some(Hit::LeaderEnded)
+        );
+        // History and Add project, as the web binds them on a Mac.
+        assert_eq!(run(m.resolve(&press("ctrl--"), IN_TERMINAL)), "nav.back");
+        assert_eq!(
+            run(m.resolve(&press("ctrl-shift-_"), IN_TERMINAL)),
+            "nav.forward"
+        );
+        assert_eq!(
+            run(m.resolve(&press("cmd-o"), IN_TERMINAL)),
+            "nests.addBirdhouse"
+        );
     }
 
     #[test]
@@ -1203,7 +1954,7 @@ mod tests {
             for entry in fixture[section].as_array().unwrap() {
                 let id = entry[0].as_str().unwrap();
                 let Some(shortcut) = all_shortcuts().find(|s| s.id == id) else {
-                    continue;
+                    panic!("{id}: the web ships it and this window has no such shortcut");
                 };
                 let chord = effective_spec(&shortcut, &BTreeMap::new(), true)
                     .unwrap_or_else(|| panic!("{id} has no default key here"));
@@ -1220,6 +1971,19 @@ mod tests {
     }
 
     #[test]
+    fn a_key_is_bindable_as_the_web_allows() {
+        assert!(bindable("cmd+shift+y", true));
+        assert!(bindable("f5", true));
+        assert!(bindable("ctrl+alt+left", false));
+        assert!(!bindable("y", true), "no modifier");
+        assert!(!bindable("shift+y", true), "Shift alone is typing");
+        assert!(!bindable("cmd+q", true), "the macOS menu's");
+        assert!(bindable("cmd+q", false));
+        assert!(!bindable("cmd+nope", true), "not a key");
+        assert!(!bindable("", true));
+    }
+
+    #[test]
     fn every_leader_follow_up_runs_something_this_window_knows() {
         for s in SHORTCUTS.iter().filter(|s| s.scope == Scope::Leader) {
             let target = leader_target(s.id).unwrap_or_else(|| panic!("{} runs nothing", s.id));
@@ -1230,5 +1994,158 @@ mod tests {
                 s.id
             );
         }
+    }
+
+    #[test]
+    fn help_lists_every_binding_with_ranges_choices_and_the_keys_file() {
+        let find = |rows: &[Value], description: &str| {
+            rows.iter()
+                .filter(|r| r["description"] == description)
+                .map(|r| {
+                    format!(
+                        "{} {}",
+                        r["group"].as_str().unwrap(),
+                        r["keys"].as_str().unwrap()
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let rows = keymap(&[], None).help();
+        assert_eq!(
+            find(&rows, "Open this keybind help"),
+            ["global ⌘/", "leader ⌃Space, ⇧/"]
+        );
+        assert_eq!(
+            find(&rows, "Open keybind help (outside inputs)"),
+            ["global ⇧/"]
+        );
+        assert_eq!(find(&rows, "Jump to tab 1…8"), ["tabs ⌘1…8"]);
+        assert_eq!(find(&rows, "Jump to tab 1…9"), ["leader ⌃Space, 1…9"]);
+        // Resize mode's keys follow the leader's follow-up that arms it.
+        assert_eq!(
+            find(&rows, "Resize pane up (grow)"),
+            ["resize ⌃Space, R, K"]
+        );
+        assert_eq!(find(&rows, "Back to where you were"), ["tabs ⌃-"]);
+        assert_eq!(find(&rows, "Add project"), ["nests ⌘O"]);
+        assert!(
+            keymap(&[("leader.resize", "")], None)
+                .help()
+                .iter()
+                .all(|r| r["group"] != "resize"),
+            "no way into resize mode, no resize rows"
+        );
+        assert!(
+            find(&rows, "Jump to tab 3").is_empty(),
+            "in the range's row"
+        );
+        assert_eq!(find(&rows, "Copy / paste"), ["terminal ⌘C / ⌘V"]);
+        // A person's key for one jump lists the range's keys one by one; an unbound one goes.
+        let file = serde_json::json!({"global": {"ctrl-shift-t": "tabs.next", "cmd-j": "send:x"}});
+        let rows = keymap(
+            &[("tabs.jump3", "cmd+shift+3"), ("global.settings", "")],
+            Some(file),
+        )
+        .help();
+        assert_eq!(find(&rows, "Jump to tab 3"), ["tabs ⇧⌘3"]);
+        assert_eq!(find(&rows, "Jump to tab 1"), ["tabs ⌘1"]);
+        assert!(find(&rows, "Open Settings")
+            .iter()
+            .all(|r| r.starts_with("leader")));
+        assert_eq!(
+            find(&rows, "Next tab"),
+            ["tabs ⇧⌘]", "leader ⌃Space, N", "global ⌃⇧T"]
+        );
+        assert_eq!(find(&rows, "send:x"), ["global ⌘J"]);
+    }
+
+    #[test]
+    fn help_opens_on_its_keys_but_a_plain_question_mark_stays_typing() {
+        let map = keymap(&[], None);
+        let at = |spec: &str, context: Context| run(map.resolve(&press(spec), context));
+        assert_eq!(at("cmd-/", Context::default()), "global.help");
+        assert_eq!(at("shift-/", Context::default()), "global.helpPlain");
+        let typing = Context {
+            typing: true,
+            ..Context::default()
+        };
+        assert_ne!(at("shift-/", typing), "global.helpPlain");
+        let terminal = Context {
+            in_terminal: true,
+            ..Context::default()
+        };
+        assert_ne!(at("shift-/", terminal), "global.helpPlain");
+        let leader = Context {
+            leader: true,
+            ..Context::default()
+        };
+        assert_eq!(at("shift-/", leader), "global.help");
+    }
+
+    #[test]
+    fn editor_shortcuts_have_the_webs_defaults() {
+        let mac = keymap(&[], None);
+        let other = Keymap::new(BTreeMap::new(), None).with_platform(false);
+        for (spec, id) in [
+            ("cmd-s", "editor.save"),
+            ("cmd-f", "editor.find"),
+            ("cmd-alt-f", "editor.replace"),
+            ("cmd-shift-f", "editor.replaceAlt"),
+            ("f3", "editor.findNext"),
+            ("shift-f3", "editor.findPrevious"),
+            ("cmd-g", "editor.findNextAlt"),
+            ("cmd-shift-g", "editor.findPreviousAlt"),
+            ("ctrl-g", "editor.gotoLine"),
+        ] {
+            assert_eq!(
+                mac.editor_shortcut(&press(spec)),
+                Some(id),
+                "{spec} on a Mac"
+            );
+        }
+        assert_eq!(other.editor_shortcut(&press("ctrl-s")), Some("editor.save"));
+        assert_eq!(
+            other.editor_shortcut(&press("ctrl-h")),
+            Some("editor.replace")
+        );
+        assert_eq!(
+            other.editor_shortcut(&press("ctrl-shift-g")),
+            None,
+            "no alternate elsewhere"
+        );
+        assert_eq!(mac.editor_shortcut(&press("a")), None);
+    }
+
+    #[test]
+    fn an_editor_override_applies_and_an_empty_one_disables() {
+        let moved = keymap(&[("editor.save", "ctrl+alt+s")], None);
+        assert_eq!(moved.editor_shortcut(&press("cmd-s")), None);
+        assert_eq!(
+            moved.editor_shortcut(&press("ctrl-alt-s")),
+            Some("editor.save")
+        );
+        let off = keymap(&[("editor.save", "")], None);
+        assert_eq!(off.editor_shortcut(&press("cmd-s")), None);
+    }
+
+    #[test]
+    fn a_global_binding_is_not_run_as_an_editor_shortcut() {
+        let global = keymap(&[("editor.save", ""), ("global.navigator", "ctrl+s")], None);
+        assert_eq!(global.editor_shortcut(&press("ctrl-s")), None);
+        // The window's own commands never resolve to an editor command, and the editor's never reach it.
+        assert_eq!(keymap(&[], None).editor_shortcut(&press("cmd-p")), None);
+        let context = Context {
+            in_terminal: false,
+            typing: true,
+            leader: false,
+            resize: false,
+        };
+        assert_ne!(
+            run(keymap(&[], None).resolve(&press("ctrl-g"), context)),
+            "editor.gotoLine"
+        );
+        // An editor command wins a key it shares with a window command, as the web's editor context.
+        let shared = keymap(&[("editor.save", "cmd+p")], None);
+        assert_eq!(shared.editor_shortcut(&press("cmd-p")), Some("editor.save"));
     }
 }
