@@ -16,7 +16,8 @@
 # ~/.perch/replaced-apps/, not deleted. Terminals live in perchd and survive the swap.
 #
 # Needs Zig 0.16.x (ZIG=..., else Homebrew's zig@0.16) and the ghostty submodule.
-# `--quit` stops the running app and does nothing else. scripts/reinstall-desktop.sh still builds the
+# `--quit` stops the running app and does nothing else; `--relay-only` only redeploys the relay
+# (scripts/deploy-relay.sh, which a full install also runs; PERCH_SKIP_RELAY=1 skips it). scripts/reinstall-desktop.sh still builds the
 # Tauri app, if it is ever needed back.
 set -eu
 cd "$(dirname "$0")/.."
@@ -43,6 +44,10 @@ if [ "${1:-}" = --quit ]; then
   quit_app
   echo "Perch is not running."
   exit 0
+fi
+# `--relay-only` redeploys the phone's web app from the current build and does nothing else.
+if [ "${1:-}" = --relay-only ]; then
+  exec sh scripts/deploy-relay.sh
 fi
 
 [ -e third_party/ghostty/build.zig ] || git submodule update --init third_party/ghostty
@@ -123,3 +128,6 @@ rm -rf "$(dirname "$stage")"
 # Perch terminal's identity when run from one.
 env -u PERCH_SESSION -u PERCH_TOKEN -u PERCH_SHELL open -g "$APP"
 echo "Installed and opened $APP (replaced bundles kept in $keep)"
+
+# The phone's web app on the relay follows the same build (scripts/deploy-relay.sh; never fails this).
+sh scripts/deploy-relay.sh
