@@ -7,6 +7,16 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-18 — One desktop app; the phone mirrors the desktop's tabs (owner)
+
+- `/Applications/perch.app` is the native client. It starts its bundled headless core when none runs,
+  and the core keeps running after the window closes, so the phone and terminals stay reachable.
+- The phone shows each workspace's open tabs as the desktop has them: tabs, their order and splits live
+  in the core and are shared by every device (replaces the 2026-11-03 per-viewer rule for tabs).
+- Per device stay only view settings such as UI or CLI mode (a phone in UI mode never changes the
+  desktop) and which session each device shows: no device follows another's focus.
+- Plan: `plans/261118-1429-mobile-route/plan.md`.
+
 ## 2026-11-18 — Review comments inline, per-file sideways scroll; native tabs follow the web (owner)
 
 Owner, for the review on both the web and the native client (replaces the composer part of 2026-11-16):
