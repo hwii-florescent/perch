@@ -156,9 +156,16 @@ function filePathForSide(file: GitDiffFile, side: ReviewSide): string {
   return file.newPath ?? file.oldPath ?? "(unknown file)";
 }
 
-/** What a file's diff says, as a short hash: a file marked viewed stays viewed only while this is unchanged (GitHub
- * clears Viewed when the file changes). */
-export function fileSignature(file: GitDiffFile): string {
+/** What a file's diff says: a file marked viewed stays viewed only while this is unchanged (GitHub clears Viewed when
+ * the file changes). The core's per-side source revisions (`path:old`, `path:new`) already fingerprint each side's
+ * content, so a file with all of its sides revised costs O(1). Otherwise (an added or binary side, a source past the
+ * core's size limit, an older core) it hashes the diff's text, O(lines): callers ask only for files marked viewed.
+ * ponytail: a huge viewed file with no revisions still costs O(lines) per snapshot; a Rust-side fingerprint per
+ * file in the diff snapshot would remove that. */
+export function fileSignature(file: GitDiffFile, revisions?: Record<string, string>): string {
+  const sides = [file.oldPath === undefined ? "" : `${file.oldPath}:old`, file.newPath === undefined ? "" : `${file.newPath}:new`].filter(Boolean);
+  const known = sides.map((side) => revisions?.[side]);
+  if (sides.length > 0 && known.every(Boolean)) return `${file.status}:${known.join(":")}`;
   let hash = 0x811c9dc5;
   const add = (text: string) => {
     for (let i = 0; i < text.length; i += 1) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
@@ -547,15 +554,19 @@ export function WorkspaceGitReview({
     }
     return new Map(countCache.current.counts);
   }, [diff]);
-  const signatures = useMemo(() => new Map(diffFiles.map((file) => [filePath(file), fileSignature(file)])), [diffFiles]);
-  const viewedPaths = useMemo(() => [...signatures].filter(([path, signature]) => viewedFiles[path] === signature).map(([path]) => path), [signatures, viewedFiles]);
+  // Only files marked viewed are signed: a big diff nobody marked costs nothing here.
+  const viewedPaths = useMemo(
+    () => diffFiles.map(filePath).filter((path, index) => path in viewedFiles && viewedFiles[path] === fileSignature(diffFiles[index]!, diff?.sourceRevisions)),
+    [diffFiles, diff?.sourceRevisions, viewedFiles],
+  );
   function toggleCollapsed(path: string) {
     setCollapsedFiles((current) => { const next = new Set(current); if (!next.delete(path)) next.add(path); return next; });
   }
   /** Marking a file viewed folds it; unmarking unfolds it. */
   function toggleViewed(path: string) {
-    const signature = signatures.get(path);
-    if (!signature) return;
+    const file = diffFiles.find((candidate) => filePath(candidate) === path);
+    if (!file) return;
+    const signature = fileSignature(file, diff?.sourceRevisions);
     const on = viewedFiles[path] !== signature;
     setViewedFiles((current) => { const next = { ...current }; if (on) next[path] = signature; else delete next[path]; return next; });
     setCollapsedFiles((current) => { const next = new Set(current); if (on) next.add(path); else next.delete(path); return next; });

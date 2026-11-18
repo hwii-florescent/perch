@@ -821,10 +821,23 @@ impl DiffView {
         if dx == 0. && dy == 0. {
             return;
         }
+        let path = self
+            .diff
+            .as_deref()
+            .and_then(|d| d.files.get(file))
+            .map(|f| file_path(f).to_string());
+        let max = (self.content_width(file) - self.visible_width()).max(0.);
+        // A file that cannot move sideways (wrapped, or no wider than the view) never holds a gesture sideways: it
+        // goes to the list instead of doing nothing.
+        let sideways = !self.props.wrap && max > 0. && path.is_some();
         let now = Instant::now();
         let axis = match self.latch {
-            Some((axis, at)) if now.duration_since(at) < LATCH_GAP => axis,
-            _ if dx.abs() > dy.abs() => Axis::Horizontal,
+            Some((axis, at))
+                if now.duration_since(at) < LATCH_GAP && (axis == Axis::Vertical || sideways) =>
+            {
+                axis
+            }
+            _ if sideways && dx.abs() > dy.abs() => Axis::Horizontal,
             _ => Axis::Vertical,
         };
         self.latch = Some((axis, now));
@@ -834,19 +847,9 @@ impl DiffView {
         }
         // Sideways: the list must not take the vertical part.
         cx.stop_propagation();
-        if self.props.wrap || dx == 0. {
-            return;
+        if let (Some(path), true) = (path, dx != 0.) {
+            self.set_offset(path, self.offset_of(file) - dx, max, cx);
         }
-        let Some(path) = self
-            .diff
-            .as_deref()
-            .and_then(|d| d.files.get(file))
-            .map(|f| file_path(f).to_string())
-        else {
-            return;
-        };
-        let max = (self.content_width(file) - self.visible_width()).max(0.);
-        self.set_offset(path, self.offset_of(file) - dx, max, cx);
     }
 
     fn offset_of(&self, file: usize) -> f32 {
