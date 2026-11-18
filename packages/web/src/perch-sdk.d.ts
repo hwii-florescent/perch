@@ -910,6 +910,8 @@ declare module "@perch/sdk" {
     /** The comment being edited in its thread, and the field's text. */
     editingCommentId: string | null;
     editingBody: string;
+    /** Scrolls to this file's header; a new `seq` asks again for the same file. */
+    reveal?: { path: string; seq: number } | null;
     /** A line was clicked or chosen with Enter/Space; `extend` with Shift. */
     onSelectLine(path: string, side: ReviewSide, line: number, extend: boolean): void;
     /** A line's `＋`. */

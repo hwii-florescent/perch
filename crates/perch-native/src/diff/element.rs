@@ -71,6 +71,8 @@ pub struct DiffProps {
     pub editing: Option<Editing>,
     /// Whether to offer Ask agent on file headers (the host offers it).
     pub can_ask: bool,
+    /// Scroll to this file's header; a new number asks again for the same file.
+    pub reveal: Option<(String, u64)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -307,6 +309,8 @@ pub struct DiffView {
     /// The sideways scrollbars at the last paint, one per file on screen that is wider than the view.
     hbars: Rc<RefCell<Vec<HBar>>>,
     hdrag: Option<HDrag>,
+    /// A file asked for by `reveal` that the rows do not hold yet (its diff is on its way).
+    reveal: Option<String>,
     /// Counts row builds (tests read it: a scroll must build none).
     pub builds: u64,
 }
@@ -342,6 +346,7 @@ impl DiffView {
             latch: None,
             hbars: Rc::default(),
             hdrag: None,
+            reveal: None,
             builds: 0,
         }
     }
@@ -409,6 +414,26 @@ impl DiffView {
         self.rebuild(anchor.filter(|_| same_comparison), window, cx);
     }
 
+    /// Scrolls to the file `reveal` asked for, once the rows hold it.
+    fn apply_reveal(&mut self) {
+        let Some(diff) = self.diff.as_deref() else {
+            return;
+        };
+        let Some(path) = &self.reveal else {
+            return;
+        };
+        let header = self.rows.rows.iter().position(
+            |r| matches!(r, Row::File { file } if file_path(&diff.files[*file]) == path.as_str()),
+        );
+        if let Some(item_ix) = header {
+            self.list.scroll_to(ListOffset {
+                item_ix,
+                offset_in_item: px(0.),
+            });
+            self.reveal = None;
+        }
+    }
+
     /// Where the reader is, by file rather than row: the top row's file path, how many rows into that file it is,
     /// and how far into that row.
     fn top_anchor(&self) -> Option<Anchor> {
@@ -430,6 +455,9 @@ impl DiffView {
             return;
         }
         let old = std::mem::replace(&mut self.props, props);
+        if self.props.reveal != old.reveal {
+            self.reveal = self.props.reveal.as_ref().map(|(path, _)| path.clone());
+        }
         let editing_changed = old.editing.as_ref().map(|e| &e.comment)
             != self.props.editing.as_ref().map(|e| &e.comment);
         if old.path != self.props.path {
@@ -441,6 +469,7 @@ impl DiffView {
             self.offsets = Rc::default();
             self.list.remeasure();
         }
+        self.apply_reveal();
         // The edit field follows the screen's body (another copy of the screen may have typed it).
         if let (Some(editing), Some((id, field))) = (&self.props.editing, &self.edit) {
             if *id == editing.comment && field.read(cx).value().as_ref() != editing.body {
@@ -521,6 +550,7 @@ impl DiffView {
         if self.cursor.is_some_and(|c| c >= self.rows.rows.len()) {
             self.cursor = None;
         }
+        self.apply_reveal();
         self.edit = match &self.props.editing {
             Some(editing) => Some(match self.edit.take() {
                 Some((id, field)) if id == editing.comment => (id, field),

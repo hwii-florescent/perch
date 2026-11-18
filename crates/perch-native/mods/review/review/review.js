@@ -312,6 +312,14 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     const [railOpen, setRailOpen] = useResourceState(`review:${workspaceId}:railOpen`, true);
     const [collapsedDirs, setCollapsedDirs] = useResourceState(`review:${workspaceId}:collapsedDirs`, new Set());
     const [fileFilter, setFileFilter] = useState("");
+    // The file the tree last asked this copy's diff to scroll to (each copy scrolls on its own).
+    const [reveal, setReveal] = useState(null);
+    function revealFile(path) {
+        // A one-file diff of another file would not hold it: show every file again, then scroll to it.
+        if (activeFile && activeFile !== path)
+            setActiveFile(undefined);
+        setReveal((previous) => ({ path, seq: (previous?.seq ?? 0) + 1 }));
+    }
     const [diffLayout, setDiffLayout] = useResourceState(`review:${workspaceId}:diffLayout`, "auto");
     // Whether the host's diff can show a change side by side (the native client's can).
     const canChooseLayout = DiffView.splitLayout === true;
@@ -802,9 +810,9 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                     }),
                                     _jsxs("button", {
                                         type: "button",
-                                        className: `${PATH_BUTTON} ${activeFile === row.entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`,
+                                        className: `${PATH_BUTTON} ${(activeFile ?? reveal?.path) === row.entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`,
                                         style: { paddingLeft: `${0.1 + row.depth * 0.8}rem` },
-                                        onClick: () => { setActiveFile(activeFile === row.entry.path ? undefined : row.entry.path); setSelection(null); },
+                                        onClick: () => revealFile(row.entry.path),
                                         title: row.entry.originalPath ? `${row.entry.originalPath} → ${row.entry.path}` : row.entry.path,
                                         children: [
                                             _jsx(FileIcon, { name: row.name }),
@@ -1155,6 +1163,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                             selection: selection,
                                             editingCommentId: editingCommentId,
                                             editingBody: editingBody,
+                                            reveal: reveal,
                                             onSelectLine: selectLine,
                                             onAddComment: (path, side, line) => { selectLine(path, side, line, false); startComment(); },
                                             onAskAgent: onAskAgent ? (path) => { const file = diffFiles.find((candidate) => filePath(candidate) === path); if (file)

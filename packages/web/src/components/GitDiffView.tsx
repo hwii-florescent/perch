@@ -4,7 +4,7 @@
 //! below it, always in view. The diff and its comments are read from `gitReviewStore` by `workspaceId`; the props
 //! are view state and what the person does comes back through the callbacks. The native client draws the same rows
 //! natively (`crates/perch-native/src/diff/`).
-import type { KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 import type { GitDiffFile, GitDiffLine, ReviewComment } from "@perch/shared";
 import type * as Sdk from "@perch/sdk";
 import { cn } from "../lib/cn";
@@ -55,6 +55,17 @@ export function DiffView(props: Sdk.DiffViewProps) {
   const { diff, comments } = state;
   const files = diff?.files ?? [];
   const displayed = selectedFile && files.some((file) => filePath(file) === selectedFile) ? files.filter((file) => filePath(file) === selectedFile) : files;
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  // `reveal` scrolls to the file's header, once the diff holds it.
+  const revealed = useRef<number | null>(null);
+  useEffect(() => {
+    const reveal = props.reveal;
+    if (!reveal || revealed.current === reveal.seq) return;
+    const article = [...(rootRef.current?.querySelectorAll<HTMLElement>("article[data-file-path]") ?? [])].find((node) => node.dataset.filePath === reveal.path);
+    if (!article) return;
+    revealed.current = reveal.seq;
+    article.scrollIntoView({ block: "start" });
+  }, [props.reveal, displayed]);
 
   function select(path: string, line: GitDiffLine, extend: boolean) {
     const side = lineSide(line);
@@ -112,7 +123,7 @@ export function DiffView(props: Sdk.DiffViewProps) {
   function file(file: GitDiffFile) {
     const displayPath = filePath(file);
     return (
-      <article key={displayPath}>
+      <article key={displayPath} data-file-path={displayPath}>
         <header className="sticky top-0 left-0 z-[2] flex w-[100cqi] items-center justify-between gap-3 bg-[color-mix(in_srgb,var(--surface-1)_70%,var(--panel-bg))] px-[0.7rem] py-[0.3rem]">
           <span className="min-w-0 flex-1 [font-family:var(--font-mono)] text-[0.75rem]" title={displayPath}><PathLabel path={displayPath} /></span>
           <span className="shrink-0 text-[0.68rem] text-subtext-0 capitalize">{file.status}{file.isBinary ? " · binary" : ""}</span>
@@ -157,7 +168,7 @@ export function DiffView(props: Sdk.DiffViewProps) {
   }
 
   return (
-    <div className={cn("workspace-git__diff min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain", props.className)} data-testid="git-diff">
+    <div ref={rootRef} className={cn("workspace-git__diff min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain", props.className)} data-testid="git-diff">
       {displayed.map(file)}
     </div>
   );

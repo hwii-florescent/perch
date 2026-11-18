@@ -874,6 +874,35 @@ fn vertical_bar(cx: HeadlessAppContext) -> HeadlessAppContext {
     rig.close()
 }
 
+/// `reveal` scrolls to a file's header, and asks again with a new number.
+fn reveals_a_file(cx: HeadlessAppContext) -> HeadlessAppContext {
+    let diff = synthetic(1_000);
+    let path = diff.files[3].new_path.clone().unwrap();
+    let (mut rig, _) = Rig::open(cx, diff, vec![], DiffProps::default());
+    let header = rig
+        .rows()
+        .iter()
+        .position(|r| *r == Row::File { file: 3 })
+        .unwrap();
+    rig.set_props(DiffProps {
+        reveal: Some((path.clone(), 1)),
+        ..DiffProps::default()
+    });
+    assert_eq!(rig.top().item_ix, header, "the file's header is at the top");
+    rig.wheel(point(0., 10.), Modifiers::default());
+    assert!(rig.top().item_ix < header, "scrolled away");
+    rig.set_props(DiffProps {
+        reveal: Some((path, 2)),
+        ..DiffProps::default()
+    });
+    assert_eq!(
+        rig.top().item_ix,
+        header,
+        "asked again, it scrolls there again"
+    );
+    rig.close()
+}
+
 /// The compact unified layout, saved when `PERCH_DIFF_SHOTS` is set.
 fn unified_shot(cx: HeadlessAppContext) -> HeadlessAppContext {
     let (mut rig, _) = Rig::open_sized(cx, synthetic(500), vec![], DiffProps::default(), 520.);
@@ -897,6 +926,7 @@ fn main() {
     let cx = keeps_place(cx);
     let cx = one_axis_and_hbars(cx);
     let cx = vertical_bar(cx);
+    let cx = reveals_a_file(cx);
     let _ = unified_shot(cx);
     println!("diff_element: ok");
 }

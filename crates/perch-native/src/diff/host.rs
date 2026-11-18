@@ -28,6 +28,7 @@ export function setProps(key: string, props: {
   path?: string | null; wrap?: boolean; layout?: string; canAsk?: boolean;
   selection?: { path: string; side: string; start: number; end: number } | null;
   editingCommentId?: string | null; editingBody?: string;
+  reveal?: { path: string; seq: number } | null;
 }): void;
 export function events(key: string): Array<{ type: string; [field: string]: unknown }>;
 export function seq(key: string): number;
@@ -341,6 +342,15 @@ fn props_of(props: &HostValue) -> Result<DiffProps, HostError> {
             body: text("editingBody").unwrap_or("").to_string(),
         }),
         can_ask: flag("canAsk"),
+        reveal: match props.get("reveal") {
+            Some(r @ HostValue::Object(_)) => {
+                r.get("path").and_then(HostValue::as_str).map(|path| {
+                    let seq = r.get("seq").and_then(HostValue::as_number).unwrap_or(0.);
+                    (path.to_string(), seq as u64)
+                })
+            }
+            _ => None,
+        },
     })
 }
 
@@ -408,6 +418,13 @@ mod tests {
             ),
             ("editingCommentId".into(), "c1".to_string().into()),
             ("editingBody".into(), "draft".to_string().into()),
+            (
+                "reveal".into(),
+                HostValue::Object(vec![
+                    ("path".into(), "b.rs".to_string().into()),
+                    ("seq".into(), HostValue::Number(2.)),
+                ]),
+            ),
         ]);
         let props = props_of(&value).unwrap();
         assert_eq!(props.path.as_deref(), Some("a.rs"));
@@ -422,6 +439,7 @@ mod tests {
             })
         );
         assert_eq!(props.editing.unwrap().body, "draft");
+        assert_eq!(props.reveal, Some(("b.rs".into(), 2)));
         assert_eq!(
             props_of(&HostValue::Object(vec![])).unwrap(),
             DiffProps::default()

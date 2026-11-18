@@ -556,7 +556,7 @@ export function DiffView(props) {
   }
   perch.diff.setProps(key, {
     path: props.path ?? null, wrap: !!props.wrap, layout: props.layout ?? "auto", canAsk: !!props.onAskAgent, selection: props.selection ?? null,
-    editingCommentId: props.editingCommentId ?? null, editingBody: props.editingBody ?? "",
+    editingCommentId: props.editingCommentId ?? null, editingBody: props.editingBody ?? "", reveal: props.reveal ?? null,
   });
   const comments = useHostSnapshot((p) => p.gitReview(workspaceId)).comments ?? [];
   const seq = useSyncExternalStore(subscribe, () => perch.diff.seq(key));

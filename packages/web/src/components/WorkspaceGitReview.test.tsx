@@ -225,7 +225,7 @@ describe("review state the host keeps for the workspace", () => {
 });
 
 describe("WorkspaceGitReview interaction truthfulness", () => {
-  it("selects one file while keeping horizontal scrolling at the diff surface", async () => {
+  it("selects one file; the diff scrolls down and each file sideways on its own", async () => {
     const actionSet = actions();
     const twoFileDiff: GitDiffSnapshot = {
       ...diff,
@@ -242,7 +242,9 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
     await chooseDropdown(picker, "src/other.ts");
 
     const editor = document.querySelector('[data-testid="git-diff"]');
-    expect(editor?.className).toContain("overflow-auto");
+    expect(editor?.className).toContain("overflow-y-auto");
+    expect(editor?.className).toContain("overflow-x-hidden");
+    expect(editor?.querySelector('[data-testid="git-diff-file-body"]')?.className).toContain("overflow-x-auto");
     expect(editor?.querySelectorAll("article")).toHaveLength(1);
     expect(editor?.textContent).toContain("src/other.ts");
     expect(editor?.textContent).not.toContain("src/main.ts");
@@ -252,7 +254,9 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
     expect(line?.querySelector("code")?.className).not.toContain("overflow-x-auto");
   });
 
-  it("folds the changes list away and clicking the open file again shows every file", async () => {
+  it("folds the changes list away; a file in the tree scrolls the diff to it and keeps every file", async () => {
+    const scrolled: string[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this.getAttribute("data-file-path") ?? ""); };
     const actionSet = actions();
     await render(props(actionSet));
 
@@ -265,9 +269,9 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
 
     const file = document.querySelector<HTMLButtonElement>('[data-testid="git-status"] [role="treeitem"] button:not([aria-expanded])');
     await act(async () => file?.click());
-    expect(actionSet.loadDiff).toHaveBeenLastCalledWith(expect.anything(), "src/main.ts", expect.anything());
     await act(async () => file?.click());
-    expect(actionSet.loadDiff).toHaveBeenLastCalledWith(expect.anything(), undefined, expect.anything());
+    expect(scrolled).toEqual(["src/main.ts", "src/main.ts"]);
+    expect(actionSet.loadDiff).not.toHaveBeenCalledWith(expect.anything(), "src/main.ts", expect.anything());
   });
 
   it("wraps long diff lines at the pane instead of scrolling sideways when asked", async () => {
