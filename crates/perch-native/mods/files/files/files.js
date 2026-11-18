@@ -10,7 +10,7 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 //! Tree expansion, the search box and the cursor are this view's own and start over when it is remounted, as
 //! before; a draft never does.
 import { memo, Suspense, useEffect, useRef, useState } from "react";
-import { assetKind, Chevron, cn, CodeEditor, FileAsset, FileEntryMenu, FileIcon, GitMarker, ghostButton as GHOST_BUTTON, MarkdownPreview, shortcutLabel, useWorkspaceFiles, useZoom, } from "@perch/sdk";
+import { assetKind, Chevron, cn, CodeEditor, FileAsset, FileEntryMenu, FileIcon, GitMarker, ghostButton as GHOST_BUTTON, MarkdownPreview, tip, useWorkspaceFiles, useZoom, } from "@perch/sdk";
 import { explorerKey, flattenTree, treeItems, treeWindow } from "./explorerNav.js";
 /** A workspace-relative path as the store keys it: no `./`, no leading or trailing slash. */
 function normalizePath(path) {
@@ -883,7 +883,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                                                         className: cn(GHOST_BUTTON, "workspace-files__save px-[0.4rem] py-[0.15rem] [@container(max-width:460px)]:min-h-[2.5rem]", canSave && "text-fg"),
                                                         onClick: () => saveFile(selectedPath),
                                                         disabled: !canSave,
-                                                        title: shortcutLabel("editor.save") ? `Save (${shortcutLabel("editor.save")})` : "Save",
+                                                        title: tip("Save", "editor.save"),
                                                         children: document.state === "saving" ? "Saving…" : "Save"
                                                     })
                                                 ]
@@ -982,7 +982,7 @@ export function WorkspaceFilesView({ workspaceId, initialPath, onPathChange, lay
                                                 type: "button",
                                                 className: cn(GHOST_BUTTON, "shrink-0 px-[0.3rem]"),
                                                 onClick: () => editorRef.current?.openGoto(),
-                                                title: shortcutLabel("editor.gotoLine") ? `Go to line (${shortcutLabel("editor.gotoLine")})` : "Go to line",
+                                                title: tip("Go to line", "editor.gotoLine"),
                                                 children: [
                                                     "Ln ",
                                                     caret.line,

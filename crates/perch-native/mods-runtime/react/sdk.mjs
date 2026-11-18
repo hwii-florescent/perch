@@ -86,6 +86,11 @@ export const agentStateColor = (state) => DOT_GLYPH[state].color;
 export const shortcutFor = (event, scope) => host().shortcutFor?.(event, scope) ?? null;
 /** The key that runs command `id` as the person has it (`"⌘↵"`), or null. */
 export const shortcutLabel = (id) => host().shortcutLabel?.(id) ?? null;
+/** `label` with the key bound to `command` after it (`"Save (⌘S)"`), as a button's `title`; `label` alone when none is. */
+export const tip = (label, command) => {
+  const key = shortcutLabel(command);
+  return key ? `${label} (${key})` : label;
+};
 
 /** A typed command (`session.open`, `project.move`, ...) for the host to run; false when it refused it. */
 export const runCommand = (command, args) => host().command(command, args ?? {}) !== false;

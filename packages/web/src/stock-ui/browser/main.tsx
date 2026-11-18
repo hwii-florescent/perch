@@ -43,7 +43,7 @@ export default function Browser({ workspaceId }: { workspaceId: string }) {
                 <span className="truncate">{pageLabel(page.url, page.title)}</span>
               </span>
             </button>
-            <button type="button" className={cn(ghostButton, "px-1 py-1 text-[0.75rem]")} data-testid="drawer-browser-page-close" aria-label={`Close ${pageLabel(page.url, page.title)}`}
+            <button type="button" className={cn(ghostButton, "px-1 py-1 text-[0.75rem]")} data-testid="drawer-browser-page-close" aria-label={`Close ${pageLabel(page.url, page.title)}`} title={`Close ${pageLabel(page.url, page.title)}`}
               onClick={() => { browser.close(page.id); setFocusPage(pages.filter((other) => other.id !== page.id).at(-1)?.id ?? null); }}>×</button>
           </span>
         ))}

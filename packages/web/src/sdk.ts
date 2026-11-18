@@ -456,6 +456,10 @@ export function FileEntryMenu(props: Sdk.FileEntryMenuProps): ReactElement {
   return createElement(HostFileEntryMenu, props);
 }
 export const shortcutLabel = (command: string) => hostShortcutLabel(command);
+export const tip = (label: string, command: string) => {
+  const key = shortcutLabel(command);
+  return key ? `${label} (${key})` : label;
+};
 export { assetKind, Chevron };
 
 // 1.5: the native chat (`stock:chat`). Its state and actions are `chatSession.ts`'s; agent text goes only through
@@ -621,7 +625,7 @@ export function sdkSurface(): typeof Sdk {
   useResourceState, newId, FileIcon, GitMarker, useGitReview, DiffView,
   terminals: terminalRecords, useTerminals, readTerminal, fetchTerminal, sendToTerminal, layoutTree, focus: focusInfo, useModData,
   useNotifications, iconButton: ICON_BUTTON, useAgentChoices, shortcutFor, menuDividerClass: menuDivider,
-  useWorkspaceFiles, CodeEditor, FileAsset: WorkspaceFileAsset, MarkdownPreview: WorkspaceMarkdownPreview, FileEntryMenu, Chevron, assetKind, shortcutLabel,
+  useWorkspaceFiles, CodeEditor, FileAsset: WorkspaceFileAsset, MarkdownPreview: WorkspaceMarkdownPreview, FileEntryMenu, Chevron, assetKind, shortcutLabel, tip,
   useNativeChat, Markdown: ChatMarkdown, CopyButton, Layout, useBrowserPages, BrowserPage, SlashPopover,
   glassClass: glass, tapButtonClass: TAP_BUTTON, GearIcon, PlusIcon, EllipsisIcon,
   // 1.8 settings: BEGIN

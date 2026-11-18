@@ -12,7 +12,7 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 //! drag with the mouse (`beginReorderDrag`: the row follows the pointer, the others slide aside); Move up/down in
 //! the row menus serves the keyboard and the phone. The core keeps the order, so every screen shows it.
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { beginReorderDrag, buttonClass, cn, ConfirmDialog, Dialog, FolderBrowser, ghostButton, InstructionsDialog, MemoryDialog, nestSessions, NewSessionMenu, pickFolder, rowActionClass, runCommand, segmentClass, Select, SessionDot, SessionMenu, startSession, useAddProject, useAddProjectRequest, useHosts, useNavigation, WorktreeMenu, } from "@perch/sdk";
+import { beginReorderDrag, buttonClass, cn, ConfirmDialog, Dialog, FolderBrowser, ghostButton, InstructionsDialog, MemoryDialog, nestSessions, NewSessionMenu, pickFolder, rowActionClass, runCommand, segmentClass, Select, SessionDot, SessionMenu, startSession, tip, useAddProject, useAddProjectRequest, useHosts, useNavigation, WorktreeMenu, } from "@perch/sdk";
 import { Chevron, CheckoutIcon, EllipsisIcon, FolderMark, NewChatIcon, OrganizeIcon, PlusIcon } from "./icons.js";
 import { BODY, copyText, DOT, ENTRY_BTN, FOCUS, HiddenWorktrees, HOLDABLE, longPress, readFlag, RENAME, RESTORE, Rollup, ROW_BTN, RowMenu, saveFlag, SECTION_WORDS, SectionHeading, SESSION, SESSION_TITLE, SPAN, StateBadge, STRONG, WORKSPACE_TITLE, WORKSPACE_TREE, WorktreeJobRows, } from "./parts.js";
 // Glyph buttons at the end of a row.
@@ -782,7 +782,7 @@ export function WorkspaceOverview({ compact = false, onNavigate }) {
                                 type: "button",
                                 className: cn("my-[3px] cursor-pointer self-center rounded-ui bg-transparent px-2 py-[0.15rem] text-[0.68rem] font-medium text-accent [border:0] [font-family:inherit] hover:bg-surface-1 [@media(max-width:700px)]:min-h-[2.75rem]", FOCUS),
                                 "data-testid": "workspace-needs-you",
-                                title: "Open the next chat that needs you",
+                                title: tip("Open the next chat that needs you", "global.needsYou"),
                                 onClick: () => { runCommand("global.needsYou"); onNavigate?.(); },
                                 children: [
                                     nav.needsYou,

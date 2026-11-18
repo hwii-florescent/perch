@@ -149,7 +149,7 @@ function RowActions({ row, name, onAct, unavailable, onRefresh }: { row: CrewRow
   return <div className="flex flex-col gap-1 pl-5" data-testid="native-cli-family-actions">
     <div ref={holder} className="relative flex items-center gap-1">
       <button type="button" disabled={!message.ok || busy} title={message.ok ? undefined : message.reason} data-testid="native-cli-family-message" onClick={() => choose("message")} className={button({ size: "sm" })}>Message</button>
-      <button type="button" aria-haspopup="menu" aria-expanded={menu} aria-label={`More actions for ${name}`} data-testid="native-cli-family-more" onClick={() => setMenu(!menu)} className={button({ size: "sm" })}>⋯</button>
+      <button type="button" aria-haspopup="menu" aria-expanded={menu} aria-label={`More actions for ${name}`} title={`More actions for ${name}`} data-testid="native-cli-family-more" onClick={() => setMenu(!menu)} className={button({ size: "sm" })}>⋯</button>
       {menu && <div role="menu" aria-label={`Actions for ${name}`} className={cn(menuPanel, "absolute top-full left-0 z-10 min-w-56")}>
         {(["steer", "interrupt", "stop"] as const).map((action) => {
           const item = state(action);

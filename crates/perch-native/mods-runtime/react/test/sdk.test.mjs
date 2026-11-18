@@ -116,3 +116,11 @@ test("a create's agent starts once its workspace is listed, and never once the w
   held();
   assert.deepEqual([late.started, closed.started], [[], []]);
 });
+
+test("tip adds the key bound to a command after the label, and leaves the label alone when none is", async () => {
+  await loadSidebar();
+  const sdk = await import("@perch/sdk");
+  globalThis.perch = { isMac: true, shortcutLabel: (id) => ({ "editor.save": "⌘S" })[id] ?? null };
+  assert.equal(sdk.tip("Save", "editor.save"), "Save (⌘S)");
+  assert.equal(sdk.tip("Save", "editor.unbound"), "Save");
+});
