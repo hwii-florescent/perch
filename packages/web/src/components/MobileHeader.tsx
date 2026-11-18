@@ -14,6 +14,8 @@ import { useNeedsYouCount } from "../attention";
 import type { SessionSummary } from "@perch/shared";
 import Header from "../stock-ui/mobile-header/main";
 import { StockRoute } from "./mod-root";
+import { MobileTabRow } from "./MobileTabRow";
+import type { MobilePaneKind } from "@perch/sdk";
 
 function basename(cwd: string): string {
   const parts = cwd.replace(/\/+$/, "").split("/");
@@ -23,9 +25,11 @@ function basename(cwd: string): string {
 export interface MobileHeaderProps {
   onOpenSwitcher: () => void;
   onOpenTools: () => void;
+  /** Shows a pane of this phone (a tab of the row was tapped). */
+  onShowPane: (pane: MobilePaneKind) => void;
 }
 
-export function MobileHeader({ onOpenSwitcher, onOpenTools }: MobileHeaderProps) {
+export function MobileHeader({ onOpenSwitcher, onOpenTools, onShowPane }: MobileHeaderProps) {
   const sessionId = usePerchStore((s) => s.sessionId);
   const setSettingsOpen = usePerchStore((s) => s.setSettingsOpen);
   const knownSession = usePerchStore((s) => s.sessions.find((sess) => sess.id === sessionId));
@@ -57,6 +61,7 @@ export function MobileHeader({ onOpenSwitcher, onOpenTools }: MobileHeaderProps)
     onOpenSwitcher,
     onOpenTools,
     onOpenSettings: () => setSettingsOpen(true),
+    tabs: <MobileTabRow onPane={onShowPane} />,
   };
   return <StockRoute name="mobile-header" props={props} stock={Header} />;
 }

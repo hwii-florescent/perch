@@ -2485,6 +2485,9 @@ declare module "@perch/sdk" {
     onOpenTools(): void;
     /** Opens Settings. The stock header no longer shows it: Settings is in the switcher. */
     onOpenSettings(): void;
+    /** The shown workspace's tabs as the desktop's strip has them, as Perch draws them on a phone (a sideways row; a
+     * tap shows a tab on this phone only, a hold offers its close). Null with fewer than two tabs. */
+    tabs?: ReactNode;
   }
 
   /** `stock:mobile-switcher`, the phone's sidebar while open, a slide-over from the left (1.10). */

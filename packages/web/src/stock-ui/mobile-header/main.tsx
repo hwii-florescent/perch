@@ -2,7 +2,8 @@
 //! card has its tab row (44px, no rules). Left, the sidebar button, the desktop's own sidebar glyph (every session,
 //! project and host, plus Settings); a count of sessions that need the person rides on it as on the desktop's. Middle,
 //! the session shown (its status dot, title, and `project · branch` under it, or "Reconnecting…" while the connection
-//! is down). Right, the desktop's drawer glyph: the Files and Git drawer of the shown session's workspace.
+//! is down). Right, the desktop's drawer glyph: the Files and Git drawer of the shown session's workspace. Under the
+//! row, `tabs`: the workspace's tabs as the desktop's strip has them (Perch draws it; null with fewer than two).
 //!
 //! A phone screen: drawn only on a phone, and a person's copy runs there only once turned on for that phone (Settings
 //! > Mods). What the row shows and what a tap does are Perch's (props); the arrangement is this file's. The card
@@ -18,8 +19,9 @@ const GLYPH = { width: 16, height: 16, viewBox: "0 0 16 16", fill: "none", strok
 // 44px to the thumb; the fill appears on press (a finger leaves no hover).
 const TOGGLE = cn(ghostButton, tapButtonClass, "relative grid size-11 shrink-0 place-items-center p-0");
 
-export default function MobileHeader({ dot, title, place, connected, needsYou, cwd, onOpenSwitcher, onOpenTools }: MobileHeaderProps) {
+export default function MobileHeader({ dot, title, place, connected, needsYou, cwd, tabs, onOpenSwitcher, onOpenTools }: MobileHeaderProps) {
   return (
+    <>
     <header className="box-border flex h-11 shrink-0 items-center px-1" data-testid="mobile-header">
       <button
         type="button"
@@ -46,5 +48,7 @@ export default function MobileHeader({ dot, title, place, connected, needsYou, c
         <svg {...GLYPH}><rect x="1.5" y="2.5" width="13" height="11" rx="2" /><path d="M10 2.5v11" /></svg>
       </button>
     </header>
+    {tabs}
+    </>
   );
 }
