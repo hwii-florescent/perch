@@ -231,6 +231,42 @@ struct HDrag {
     max: f32,
 }
 
+/// The diff's vertical scrollbar over its rows. The list measures only the rows it has drawn, so its own height
+/// grows as the reader scrolls; this bar instead counts every row as one line high, so the thumb's place and size
+/// are the reader's place and share among all rows from the first frame, and a drag lands on the row it points at.
+// ponytail: rows taller than a line (headers, threads) count as one line; a running mean of measured heights would
+// track a thread-heavy diff more closely.
+#[derive(Clone)]
+struct RowBar(ListState);
+
+impl gpui_base::ScrollbarHandle for RowBar {
+    fn viewport_bounds(&self) -> Bounds<Pixels> {
+        self.0.viewport_bounds()
+    }
+    fn offset(&self) -> gpui::Point<Pixels> {
+        let top = self.0.logical_scroll_top();
+        point(
+            px(0.),
+            -(px(LINE_HEIGHT) * top.item_ix as f32 + top.offset_in_item.min(px(LINE_HEIGHT))),
+        )
+    }
+    fn set_offset(&self, offset: gpui::Point<Pixels>) {
+        let y = f32::from(-offset.y).max(0.);
+        let item_ix = ((y / LINE_HEIGHT) as usize).min(self.0.item_count().saturating_sub(1));
+        self.0.scroll_to(ListOffset {
+            item_ix,
+            offset_in_item: px(y - item_ix as f32 * LINE_HEIGHT),
+        });
+    }
+    fn content_size(&self) -> gpui::Size<Pixels> {
+        let view = self.0.viewport_bounds().size;
+        size(
+            view.width,
+            px(LINE_HEIGHT) * self.0.item_count() as f32 + view.height,
+        )
+    }
+}
+
 /// The reader's place by file: kept across a rebuild of the rows.
 struct Anchor {
     path: String,
@@ -1525,6 +1561,12 @@ impl Render for DiffView {
                 .size_full(),
             )
             .child(list(self.list.clone(), move |ix, _, _| rows.named_row(ix)).size_full())
+            // Where the reader is in the whole diff, and a thumb to drag there.
+            .child(
+                gpui_base::Scrollbar::vertical(&RowBar(self.list.clone()))
+                    .id("git-diff-vbar")
+                    .mode(gpui_base::ScrollbarMode::Always),
+            )
             .children(pinned.map(|(_, header, push)| {
                 div().absolute().top(push).left_0().right_0().child(header)
             }))

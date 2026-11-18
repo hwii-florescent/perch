@@ -861,6 +861,19 @@ fn one_axis_and_hbars(cx: HeadlessAppContext) -> HeadlessAppContext {
     rig.close()
 }
 
+/// The diff has a vertical scrollbar: dragging its thumb down the right edge scrolls the list.
+fn vertical_bar(cx: HeadlessAppContext) -> HeadlessAppContext {
+    let (mut rig, _) = Rig::open(cx, synthetic(5_000), vec![], DiffProps::default());
+    let edge = px(WIDTH - 6.);
+    rig.drag(point(edge, px(12.)), point(edge, px(HEIGHT / 2.)));
+    let top = rig.top().item_ix;
+    assert!(
+        top > 1_000,
+        "dragging the thumb halfway scrolls far down ({top})"
+    );
+    rig.close()
+}
+
 /// The compact unified layout, saved when `PERCH_DIFF_SHOTS` is set.
 fn unified_shot(cx: HeadlessAppContext) -> HeadlessAppContext {
     let (mut rig, _) = Rig::open_sized(cx, synthetic(500), vec![], DiffProps::default(), 520.);
@@ -883,6 +896,7 @@ fn main() {
     let cx = split_layout(cx);
     let cx = keeps_place(cx);
     let cx = one_axis_and_hbars(cx);
+    let cx = vertical_bar(cx);
     let _ = unified_shot(cx);
     println!("diff_element: ok");
 }
