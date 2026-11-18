@@ -39,7 +39,7 @@ impl Workspace {
         cx: &App,
     ) {
         if self.chrome.tools() == Some(shell::Tools::Git) {
-            let shown = self.shown_workspace(cx);
+            let shown = self.drawer_scope(cx);
             if let Some(workspace_id) = shown.or_else(|| self.explorer_workspace.clone()) {
                 want(
                     "review",

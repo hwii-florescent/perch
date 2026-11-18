@@ -1,6 +1,7 @@
 //! One order of a workspace's sessions, in the tab strip and the sidebar alike, as the web's
-//! `workspaceTabs` keeps it: oldest first, then the core's chat order (`workspace.order`), each
-//! sub-session straight after its lead. A drag in the strip writes the core's order, so the sidebar
+//! `workspaceTabs` keeps it: oldest first, then the core's chat order (`workspace.order`); the
+//! sidebar lists each sub-session under its lead, the strip keeps the order a person dragged into
+//! it, as the web's. A drag in the strip writes the core's order, so the sidebar
 //! follows; a drag of a sidebar row writes it too, so the strip follows; and an order the core
 //! broadcasts (another screen's move) reorders both. A sidebar row's drag only reorders: it never
 //! splits, which stays a strip gesture.
@@ -287,13 +288,17 @@ fn main() {
     assert_eq!(rig.rows(), moved, "perf is first in the sidebar");
     assert_eq!(rig.strip(), moved, "and in the strip");
 
-    // A sub-session moves within its lead's family: p7 dragged to the strip's start lands first
-    // among leader's sub-sessions, in the strip and the sidebar alike.
+    // A sub-session dragged to the strip's start stays there, as on the web; the sidebar lists it
+    // first among leader's sub-sessions.
     let p7 = rig.center("tab:p7");
     let start = rig.center("tab:perf");
     rig.drag(p7, &[(p7.0 - 10., p7.1)], (start.0 - 40., start.1));
+    assert_eq!(
+        rig.strip(),
+        strings(&["p7", "perf", "leader", "p4", "leak"]),
+        "the drop slot is the final slot"
+    );
     let moved = strings(&["perf", "leader", "p7", "p4", "leak"]);
-    assert_eq!(rig.strip(), moved, "p7 stays in leader's family");
     assert_eq!(rig.rows(), moved);
     rig.orders();
 
@@ -312,7 +317,10 @@ fn main() {
         !rig.ws(|ws, _, _| ws.screens_open()).contains(&"tab-drag"),
         "no tab drag started"
     );
-    assert_eq!(rig.strip(), moved);
+    assert_eq!(
+        rig.strip(),
+        strings(&["p7", "perf", "leader", "p4", "leak"])
+    );
     assert_eq!(rig.rows(), moved);
 
     // Another screen's move (the phone's), broadcast by the core, reorders both.

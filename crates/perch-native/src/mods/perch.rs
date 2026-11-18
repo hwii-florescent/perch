@@ -364,7 +364,7 @@ impl Perch {
             let tabs = ws.tabs();
             let model = ws.sidebar().read(cx).model();
             let window = WindowState {
-                strip: tabs.strip().to_vec(),
+                strip: ws.drawn_strip(cx),
                 previews: tabs.previews().to_vec(),
                 browser_tabs: ws.browser_tabs(),
                 shown: tabs.shown(),
@@ -509,7 +509,8 @@ impl Perch {
     fn workspace_files(&self, workspace_id: &str) -> HostValue {
         let store = self.store();
         let data = self.0.data.borrow();
-        let workspace = store.workspaces.iter().find(|w| w.id == workspace_id);
+        let record = crate::sidebar::navigation::workspace_record(&store, workspace_id);
+        let workspace = record.as_ref();
         let empty = || json!({ "trees": {}, "documents": {}, "previews": {}, "search": null, "wrap": false });
         let HostValue::Object(mut files) = data
             .files
@@ -551,11 +552,9 @@ impl Perch {
     fn media_file(&self, workspace_id: &str, path: &str) -> Value {
         let store = self.store();
         let data = self.0.data.borrow();
-        let root = store
-            .workspaces
-            .iter()
-            .find(|w| w.id == workspace_id && w.host_id == crate::sidebar::LOCAL)
-            .map(|w| w.path.clone());
+        let root = crate::sidebar::navigation::workspace_record(&store, workspace_id)
+            .filter(|w| w.host_id == crate::sidebar::LOCAL)
+            .map(|w| w.path);
         let extraction = data
             .files
             .get(workspace_id)
@@ -678,7 +677,8 @@ impl Perch {
             json!({ "statusState": "idle", "diffState": "idle", "actionState": "idle", "diff": null,
                     "comments": [], "refs": [], "batchDelivery": null, "lastAgentTurn": null })
         });
-        let workspace = store.workspaces.iter().find(|w| w.id == workspace_id);
+        let record = crate::sidebar::navigation::workspace_record(&store, workspace_id);
+        let workspace = record.as_ref();
         let scope = workspace_id
             .strip_prefix("term:")
             .and_then(|rest| rest.split(':').next());

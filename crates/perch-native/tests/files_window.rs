@@ -391,13 +391,21 @@ fn main() {
         "{sent:?}"
     );
 
-    // A regular file tab is kept in the window's state file and opened again by the next window,
-    // without the keyboard; a preview is not kept.
+    // The strip is kept in the window's state file, a preview as a preview, as the web keeps its
+    // file tabs, and opened again by the next window, without the keyboard.
     rig.ws(|ws, _, cx| ws.open_file("w1", "src/lib.rs", false, cx));
     rig.ws(|ws, _, cx| ws.open_file("w1", "docs/clean.md", true, cx));
     rig.settle();
     let state: Value = serde_json::from_slice(&std::fs::read(&kept).unwrap()).unwrap();
-    assert_eq!(state["files"], json!(["w1\nsrc/lib.rs"]), "{state}");
+    let w1 = &state["tabs"]["strips"]["w1"];
+    assert_eq!(
+        (&w1["strip"], &w1["previews"]),
+        (
+            &json!(["w1\nsrc/lib.rs", "w1\ndocs/clean.md"]),
+            &json!(["w1\ndocs/clean.md"])
+        ),
+        "{state}"
+    );
 
     // Back and Forward move over file tabs as over sessions.
     let active = |rig: &mut Rig| rig.ws(|ws, _, _| ws.tabs().active().map(str::to_string));
@@ -423,11 +431,15 @@ fn main() {
     next.update(&mut rig.cx, |ws, cx| {
         ws.open_file("w1", "docs/new.md", false, cx)
     });
-    let strip = rig.cx.update(|cx| next.read(cx).tabs().strip().to_vec());
+    let (strip, preview) = rig.cx.update(|cx| {
+        let tabs = next.read(cx).tabs();
+        (tabs.strip().to_vec(), tabs.is_preview("w1\ndocs/clean.md"))
+    });
     assert_eq!(
         strip,
-        vec!["w1\nsrc/lib.rs".to_string(), "w1\ndocs/new.md".to_string()]
+        ["w1\nsrc/lib.rs", "w1\ndocs/clean.md", "w1\ndocs/new.md"]
     );
+    assert!(preview, "the preview comes back as a preview");
 
     // A Markdown file's Preview draws its draft, rendered, in place of the editor. A long one (as the repository's
     // docs are): lexed at once it ran past the 500 ms a click may take, and Preview never showed.

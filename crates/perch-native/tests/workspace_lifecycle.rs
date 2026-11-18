@@ -151,7 +151,8 @@ fn a_shell_that_ended_before_attach(rig: &Rig, h: &mut Harness, id: &str) {
     // A tab the core never attached has no connection of its own to end over: the main
     // connection asks the core to delete the session, as the web does, and the tab goes with it.
     assert!(h.press("cmd-w"));
-    h.wait("the tab to go", |h| h.shown().is_empty());
+    // The workspace's other session (listed by the core, so in the strip) is what shows next.
+    h.wait("the tab to go", |h| h.ws(|ws, _| !ws.tabs().contains(id)));
     h.wait("the session to be gone", |h| h.attention(id).is_none());
 }
 

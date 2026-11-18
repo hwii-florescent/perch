@@ -1156,7 +1156,12 @@ fn tabs_out_of_sight_are_parked_beyond_twelve() {
     for name in &names[1..14] {
         assert!(attached(&mut h, name), "{name} is kept");
     }
-    assert_eq!(h.ws(|ws| ws.tabs().strip().len()), 14, "no tab was closed");
+    // Every session of the workspace has a tab; the one never shown has no terminal attached.
+    assert_eq!(h.ws(|ws| ws.tabs().strip().len()), 15, "no tab was closed");
+    assert!(
+        !attached(&mut h, "s14"),
+        "a tab never shown attaches nothing"
+    );
 
     // Showing it attaches it again, and now the one unseen longest is parked.
     h.open("s00");
@@ -1188,8 +1193,8 @@ fn the_pane_menu_opens_on_right_click() {
     println!("workspace_render: pane menu ok");
 }
 
-/// `terminal.peek` shows a session's terminal over the window with no tab of its own; park puts
-/// it away; keep makes it a tab; show goes to a session's tab, opening one.
+/// `terminal.peek` shows a session's terminal over the window without going to its tab; park puts
+/// it away; keep goes to its tab; show goes to a session's tab, opening one.
 fn a_peek_is_a_terminal_over_the_window() {
     let mut h = Harness::new(model(&[
         ("alpha", json!({})),
@@ -1206,7 +1211,11 @@ fn a_peek_is_a_terminal_over_the_window() {
         h.ws(|ws| ws.peeked().map(str::to_string)).as_deref(),
         Some("bravo")
     );
-    assert_eq!(h.strip(), ["alpha"], "a peek has no tab");
+    assert_eq!(
+        h.ws(|ws| ws.tabs().shown()),
+        ["alpha"],
+        "a peek is not a tab on screen"
+    );
     assert_ne!(plain.raw, peeking.raw, "the peek is drawn");
     let shown = h
         .window
@@ -1240,13 +1249,13 @@ fn a_peek_is_a_terminal_over_the_window() {
         Modifiers::default(),
     );
     assert_eq!(h.ws(|ws| ws.peeked().map(str::to_string)), None);
-    // Keep turns it into a tab and goes there.
+    // Keep goes to its tab.
     h.run("terminal.peek", json!({"id": "bravo"})).unwrap();
     h.run("terminal.keep", json!({"id": "bravo"})).unwrap();
     assert_eq!(h.ws(|ws| ws.peeked().map(str::to_string)), None);
-    assert_eq!(h.strip(), ["alpha", "bravo"]);
+    assert_eq!(h.strip(), ["alpha", "bravo", "charlie"]);
     assert_eq!(h.active().as_deref(), Some("bravo"));
-    // Show opens a tab for a session that has none, and goes to one that has.
+    // Show goes to a session's tab.
     h.run("terminal.show", json!({"id": "charlie"})).unwrap();
     assert_eq!(h.active().as_deref(), Some("charlie"));
     h.run("terminal.show", json!({"id": "alpha"})).unwrap();
@@ -1448,9 +1457,8 @@ fn a_deleted_session_closes_its_tab_whenever_the_core_says_so() {
     println!("workspace_render: deleted session ok");
 }
 
-/// Every sub-session of a lead with a tab here has a tab, as the web's strip lists every session of
-/// the workspace: opened behind the lead's family as the core lists it, leaving the keyboard where it
-/// is. Other sessions open only when picked.
+/// Every session of the workspace has a tab, sub-sessions too, as the web's strip lists them:
+/// oldest first, behind the tabs already there, leaving the keyboard where it is.
 fn sub_sessions_open_beside_their_lead() {
     let terminal = |parent: Option<&str>| match parent {
         Some(p) => json!({"cliProviderId": "terminal", "parentSessionId": p}),
@@ -1468,15 +1476,15 @@ fn sub_sessions_open_beside_their_lead() {
     assert_eq!(
         strip(&mut h),
         ["lead", "k1", "loose"],
-        "the lead's sub-session opens with it"
+        "every session of the workspace has a tab"
     );
     assert_eq!(
         h.ws(|ws| ws.tabs().active().map(str::to_string)),
         Some("lead".into())
     );
 
-    // The lead spawns another: its tab opens after the lead's family, before the next tab, and the
-    // lead keeps the keyboard. A sub-session of a lead with no tab here opens nowhere.
+    // The lead spawns another: its tab opens in the order the core's list gives (oldest first), and
+    // the lead keeps the keyboard; so does a session of this workspace whose lead is elsewhere.
     let more = model(&[
         ("lead", terminal(None)),
         ("k1", terminal(Some("lead"))),
@@ -1491,14 +1499,14 @@ fn sub_sessions_open_beside_their_lead() {
         })
         .unwrap();
     h.cx.run_until_parked();
-    assert_eq!(strip(&mut h), ["lead", "k1", "k2", "loose"]);
+    assert_eq!(strip(&mut h), ["lead", "k1", "loose", "k2", "k3"]);
     assert_eq!(
         h.ws(|ws| ws.tabs().active().map(str::to_string)),
         Some("lead".into())
     );
 
     // A sub-session's tab closed without ending it (this window only watches it) stays closed
-    // while the lead's family changes, until it is picked again.
+    // while the workspace's sessions change, until it is picked again.
     h.open("k1");
     h.draw();
     let (_rx, core) = h.live();
@@ -1520,7 +1528,7 @@ fn sub_sessions_open_beside_their_lead() {
     h.cx.run_until_parked();
     assert_eq!(
         strip(&mut h),
-        ["lead", "k2", "loose"],
+        ["lead", "loose", "k2", "k3"],
         "put away, it stays away"
     );
     h.open("k1");
@@ -1528,9 +1536,9 @@ fn sub_sessions_open_beside_their_lead() {
     println!("workspace_render: sub-session tabs ok");
 }
 
-/// Showing any member of a family first opens the whole family in the sidebar's order: a
-/// sub-session picked on a fresh window brings its lead and its siblings; the lead then changes
-/// nothing.
+/// Showing any session of a workspace first gives it the workspace's whole strip, oldest first: a
+/// sub-session picked on a fresh window brings its lead, its siblings and the rest; the lead then
+/// changes nothing.
 fn a_sub_session_shown_first_opens_its_family() {
     let terminal = |parent: Option<&str>, created: u64| match parent {
         Some(p) => json!({"cliProviderId": "terminal", "parentSessionId": p, "createdAt": created}),
@@ -1544,7 +1552,7 @@ fn a_sub_session_shown_first_opens_its_family() {
         ("loose", terminal(None, 5)),
     ]));
     h.open("k2");
-    let family = ["lead", "k1", "k2", "k3"];
+    let family = ["lead", "k1", "k2", "k3", "loose"];
     assert_eq!(h.ws(|ws| ws.tabs().strip().to_vec()), family);
     assert_eq!(
         h.ws(|ws| ws.tabs().active().map(str::to_string)),

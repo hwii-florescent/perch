@@ -225,11 +225,8 @@ fn main() {
         });
     }
     let records = rig.settle();
-    // s3 and s7 are sub-sessions of s2 and s6: they open with their leads.
-    assert_eq!(
-        rig.keys(&records, "tab"),
-        ["s1", "s2", "s3", "s5", "s6", "s7", "s20"]
-    );
+    // The workspace's strip lists every one of its sessions, as the web's.
+    assert_eq!(rig.keys(&records, "tab"), all);
 
     // Hover: sweep the pointer down and up the rows, a frame per move.
     let centers: Vec<_> = rows
@@ -319,9 +316,14 @@ fn main() {
         rows.iter().all(|id| !gone.contains(&id.as_str())),
         "{rows:?}"
     );
+    let kept: Vec<String> = all
+        .iter()
+        .filter(|id| !gone.contains(&id.as_str()))
+        .cloned()
+        .collect();
     assert_eq!(
         rig.keys(&records, "tab"),
-        ["s3", "s7", "s20"],
+        kept,
         "the strip closes the tabs of the stopped sessions and keeps the others"
     );
     // Settings' Keyboard page opens and draws within the script's budgets.

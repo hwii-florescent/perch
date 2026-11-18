@@ -286,10 +286,11 @@ fn main() {
         "at the window's foot"
     );
 
-    // The strip: a tab per open session, in order, beside the sidebar; the last opened is shown.
+    // The strip: a tab per session of the workspace, in order, beside the sidebar; the last opened
+    // is shown.
     rig.open("alpha");
     rig.open("bravo");
-    assert_eq!(rig.keys("tab"), ["alpha", "bravo"]);
+    assert_eq!(rig.keys("tab"), ["alpha", "bravo", "charlie"]);
     let strip = rig.record("tab-strip").expect("the tabs mod draws");
     assert!(
         strip.bounds.origin.x >= px(SIDEBAR_WIDTH),
@@ -354,8 +355,8 @@ fn main() {
     // Alpha is an agent attached to nothing: the close guard asks first, as the web's does.
     assert_eq!(rig.ws(|ws, _, _| ws.screens_open()), ["confirm"]);
     rig.click("confirm-extra");
-    assert_eq!(rig.strip(), ["bravo"], "tab.close ran");
-    assert_eq!(rig.keys("tab"), ["bravo"]);
+    assert_eq!(rig.strip(), ["bravo", "charlie"], "tab.close ran");
+    assert_eq!(rig.keys("tab"), ["bravo", "charlie"]);
 
     // A right click opens the tab's menu.
     rig.click_with("tab:bravo", MouseButton::Right);

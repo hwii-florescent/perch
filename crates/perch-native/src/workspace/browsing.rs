@@ -307,8 +307,8 @@ impl Workspace {
             return Some(id);
         }
         let active = self.tabs.active()?;
-        if let Some((workspace, _)) = active.split_once('\n') {
-            return Some(workspace.to_string());
+        if !Tabs::is_session(active) {
+            return Some(self.tab_workspace(active, cx));
         }
         // The core's list, not the sidebar's rows: a session the sidebar does not list (a plain shell) is still in
         // its workspace.
@@ -320,6 +320,28 @@ impl Workspace {
             .iter()
             .find(|s| s.id == active)
             .and_then(|s| s.workspace_id.clone())
+    }
+
+    /// What the drawer's Files and Git show (`useToolsContext(..., scoped)`): the focused terminal's
+    /// folder, as its `term:` scope, when its shell has left its workspace's folder, else the
+    /// workspace shown.
+    pub(super) fn drawer_scope(&self, cx: &App) -> Option<String> {
+        let shown = self.shown_workspace(cx)?;
+        // A file of a terminal's (or a chosen) folder keeps the drawer on that folder.
+        if let Some((scope, _)) = self.tabs.active().and_then(|id| id.split_once('\n')) {
+            if scope.starts_with("term:") || scope.starts_with("dir:") {
+                return Some(scope.to_string());
+            }
+        }
+        let store = &self.sidebar.read(cx).model().store;
+        let scoped = self
+            .tabs
+            .active()
+            .filter(|id| Tabs::is_session(id))
+            .and_then(|id| store.sessions.iter().find(|s| s.id == id))
+            .filter(|s| s.workspace_id.as_deref() == Some(shown.as_str()))
+            .and_then(|s| navigation::terminal_scope_id(store, s));
+        Some(scoped.unwrap_or(shown))
     }
 
     /// The drawer's page for the workspace shown, while the drawer shows Browser.
@@ -542,7 +564,7 @@ impl Workspace {
             }
         };
         let id = format!("{workspace}\n{BROWSER}{path}");
-        self.enter_workspace(workspace);
+        self.enter_workspace(workspace, cx);
         let started = !path.starts_with("blank:");
         if let Some(pages) = &self.browsing.pages {
             let mut pages = pages.borrow_mut();

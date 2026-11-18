@@ -414,7 +414,8 @@ fn close_untabbed(rig: &mut Rig) {
         rig.draw();
         result
     };
-    assert!(!rig.ws(|ws, _, _| ws.tabs().contains("echo")), "no tab");
+    // Its workspace's strip lists it, but no terminal was ever attached to it.
+    assert!(rig.ws(|ws, _, _| ws.view("echo").is_none()), "no terminal");
     close(rig, "echo").unwrap();
     assert_eq!(
         rig.ws(|ws, _, _| ws.screens_open()),

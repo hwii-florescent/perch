@@ -2,6 +2,8 @@
 //! shows that workspace's own tabs (sessions, files, browser pages), or no strip when it has none,
 //! and switching back brings the strip, its active tab and its Back and Forward history as they
 //! were left. A Quickchat session is in the Quickchat workspace, never in a project's strip.
+//! A strip lists every session the core has for its workspace, and every strip (its files,
+//! review and browser tabs, splits and active tab) comes back after a relaunch.
 //!
 //! Offscreen: no window is shown or focused, no core runs, and every change goes through the
 //! window's own commands.
@@ -79,6 +81,7 @@ fn main() {
     std::fs::create_dir_all(scratch.join("home")).unwrap();
     std::env::set_var("HOME", scratch.join("home"));
     let user = scratch.join("native-mods");
+    let kept = user.join(".window.json");
 
     let mut cx = HeadlessAppContext::with_platform(
         gpui_platform::current_platform(true).text_system(),
@@ -91,6 +94,7 @@ fn main() {
             cx.new(|cx| {
                 Workspace::new(model, None, cx)
                     .with_core(|| Err(anyhow::anyhow!("no core in this test")))
+                    .with_window_state(kept.clone())
             })
         })
         .unwrap();
@@ -135,8 +139,12 @@ fn main() {
         result
     };
 
-    // One project's sessions: its strip, with the last opened active.
+    // One project's sessions: opening one puts every session of its workspace in the strip.
     open(&mut cx, "alpha");
+    assert_eq!(
+        tabs(&mut cx),
+        (strings(&["alpha", "bravo"]), Some("alpha".into()))
+    );
     open(&mut cx, "bravo");
     run(&mut cx, "tab.select", json!({"id": "alpha"})).unwrap();
     assert_eq!(
@@ -161,10 +169,6 @@ fn main() {
     // newest session, as after a launch, when no workspace has a tab.
     run(&mut cx, "workspace.open", json!({"id": "w2"})).unwrap();
     assert_eq!(tabs(&mut cx), (strings(&["delta"]), Some("delta".into())));
-    let saved = std::fs::read_to_string(scratch.join("home/.perch/native-last-tabs.json"))
-        .expect("the last shown session is kept for the next launch");
-    assert!(saved.contains("\"w2\":\"delta\""), "{saved}");
-    assert_eq!(tabs(&mut cx), (strings(&["delta"]), Some("delta".into())));
     // Back and Forward stay in this workspace: w1's places are not offered.
     run(&mut cx, "nav.back", json!({})).unwrap();
     assert_eq!(tabs(&mut cx).1.as_deref(), Some("delta"), "history is w2's");
@@ -186,6 +190,77 @@ fn main() {
     assert_eq!(tabs(&mut cx), (strings(&["chat"]), Some("chat".into())));
     // A tab of a workspace that is not on screen is no tab of this strip.
     assert!(run(&mut cx, "tab.select", json!({"id": "alpha"})).is_err());
+
+    // The strips are kept on this device: w1's file and review with its sessions for their places.
+    run(&mut cx, "workspace.open", json!({"id": "w1"})).unwrap();
+    window
+        .update(&mut cx, |ws, _, cx| ws.open_review("w1", cx))
+        .unwrap();
+    settle(&mut cx);
+    window.update(&mut cx, |_, _, cx| cx.notify()).unwrap();
+    settle(&mut cx);
+    let saved: Value = serde_json::from_slice(&std::fs::read(&kept).unwrap()).unwrap();
+    assert_eq!(
+        saved["tabs"]["strips"]["w1"]["strip"],
+        json!(["alpha", "bravo", "w1\nsrc/a.rs", "w1\n\u{0}review"]),
+        "{saved}"
+    );
+    window
+        .update(&mut cx, |_, window, _| window.remove_window())
+        .unwrap();
+    cx.run_until_parked();
+
+    // A relaunch, with w1's strip as a person left it: a browser tab, a split of a file and a
+    // session, the file active, and a session since ended. Clicking w1's second session shows
+    // every session of w1 (the owner's repro) and the rest as it was.
+    let browser = "w1\n\u{0}browser\nhttps://perch.dev/";
+    let left = json!({
+        "strip": ["alpha", "w1\nsrc/a.rs", "gone", browser, "w1\n\u{0}review"],
+        "sets": [{"Split": {"dir": "Row", "kids": [{"Pane": "alpha"}, {"Pane": "w1\nsrc/a.rs"}],
+                  "sizes": [0.5, 0.5]}}],
+        "active": "w1\nsrc/a.rs",
+        "previews": []
+    });
+    std::fs::write(
+        &kept,
+        json!({"tabs": {"strips": {"w1": left}, "putAway": []}}).to_string(),
+    )
+    .unwrap();
+    let model = state().model();
+    let window = cx
+        .open_window(size(px(1000.), px(900.)), |_, cx| {
+            cx.new(|cx| {
+                Workspace::new(model, None, cx)
+                    .with_core(|| Err(anyhow::anyhow!("no core in this test")))
+                    .with_window_state(kept.clone())
+            })
+        })
+        .unwrap();
+    settle(&mut cx);
+    window
+        .update(&mut cx, |ws, _, cx| {
+            ws.sidebar().update(cx, |s, cx| {
+                s.open("local".into(), "bravo".into(), Some("claude".into()), cx)
+            })
+        })
+        .unwrap();
+    settle(&mut cx);
+    let (strip, active, split) = window
+        .update(&mut cx, |ws, _, _| {
+            (
+                ws.tabs().strip().to_vec(),
+                ws.tabs().active().map(str::to_string),
+                ws.tabs().in_split("alpha") && ws.tabs().in_split("w1\nsrc/a.rs"),
+            )
+        })
+        .unwrap();
+    assert_eq!(
+        strip,
+        strings(&["alpha", "w1\nsrc/a.rs", browser, "w1\n\u{0}review", "bravo"]),
+        "every session of w1 and its kept tabs; the ended one is gone"
+    );
+    assert_eq!(active.as_deref(), Some("bravo"));
+    assert!(split, "the split set comes back");
 
     window
         .update(&mut cx, |_, window, _| window.remove_window())

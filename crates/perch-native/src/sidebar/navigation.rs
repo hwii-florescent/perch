@@ -31,6 +31,9 @@ pub struct Store {
     /// Counts changes; two stores of one follower are equal when this is.
     pub revision: u64,
     pub connected: bool,
+    /// The core's session list has been read on this connection: a session it does not hold is
+    /// gone, not just not heard of yet.
+    pub listed: bool,
     pub hostname: Option<String>,
     pub platform: Option<String>,
     pub is_ssh: Option<bool>,
@@ -439,36 +442,134 @@ pub fn strip_of_workspace(store: &Store, session: &SessionSummary) -> Vec<String
         .collect()
 }
 
-/// [`strip_of_workspace`] with each sub-session straight after its lead, as the sidebar's
-/// `nestSessions` lists them: the one order the tab strip and the sidebar both show.
-pub fn shown_strip_of_workspace(store: &Store, session: &SessionSummary) -> Vec<String> {
-    let ids = strip_of_workspace(store, session);
-    let parent_of = |id: &str| {
-        store
-            .sessions
+/// The key of the workspace whose strip shows `session`: the workspace the core records, else
+/// for an older record the one at its folder, else `<host>:<folder>`.
+pub fn workspace_key(store: &Store, session: &SessionSummary) -> String {
+    match &session.workspace_id {
+        Some(w) => w.clone(),
+        None => store
+            .workspaces
             .iter()
-            .find(|s| s.id == id)?
-            .parent_session_id
-            .clone()
-            .filter(|parent| parent != id && ids.contains(parent))
-    };
-    // One level, as Perch's sub-sessions: a lead is a session whose own lead is not listed.
-    let leads: HashSet<&str> = ids
+            .find(|w| in_workspace(session, w))
+            .map_or_else(
+                || format!("{}:{}", session.host_id, session.cwd),
+                |w| w.id.clone(),
+            ),
+    }
+}
+
+/// Every session of the workspace keyed `key` (see [`workspace_key`]) in its strip's order, as
+/// the web's `workspaceTabs` lists them: oldest first, then the core's chat order. Sub-sessions
+/// are not moved next to their lead: the strip keeps the order a person dragged into it.
+pub fn sessions_of_workspace(store: &Store, key: &str) -> Vec<String> {
+    let mine: HashSet<&str> = store
+        .sessions
         .iter()
-        .filter(|id| parent_of(id).is_none())
-        .map(String::as_str)
+        .filter(|s| workspace_key(store, s) == key)
+        .map(|s| s.id.as_str())
         .collect();
-    let lead_of = |id: &str| parent_of(id).filter(|parent| leads.contains(parent.as_str()));
-    ids.iter()
-        .filter(|id| lead_of(id).is_none())
-        .flat_map(|lead| {
-            std::iter::once(lead).chain(
-                ids.iter()
-                    .filter(|id| lead_of(id).as_deref() == Some(lead.as_str())),
-            )
-        })
-        .cloned()
+    let Some(first) = store.sessions.iter().find(|s| mine.contains(s.id.as_str())) else {
+        return Vec::new();
+    };
+    strip_of_workspace(store, first)
+        .into_iter()
+        .filter(|id| mine.contains(id.as_str()))
         .collect()
+}
+
+/// `terminalScopeId`: the Files and Git scope of a terminal on this computer whose shell is
+/// known to be outside its workspace's folder, `term:<session id>:<base64url folder>`; `None`
+/// for any other session, which keeps its workspace.
+pub fn terminal_scope_id(store: &Store, session: &SessionSummary) -> Option<String> {
+    use base64::Engine;
+    let cwd = session.current_cwd.as_deref()?;
+    let workspace_id = session.workspace_id.as_deref()?;
+    if session.host_id != LOCAL {
+        return None;
+    }
+    let workspace = store.workspaces.iter().find(|w| w.id == workspace_id)?;
+    (workspace.path != cwd).then(|| {
+        let folder = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(cwd);
+        format!("term:{}:{folder}", session.id)
+    })
+}
+
+/// The workspace a Files or Git scope is filed under: a `term:` scope's terminal's (`None` once
+/// that terminal is gone), a `dir:` scope's own, and a plain workspace id is itself.
+pub fn scope_workspace(store: &Store, scope: &str) -> Option<String> {
+    if let Some(rest) = scope.strip_prefix("term:") {
+        let session_id = rest.split(':').next()?;
+        let session = store.sessions.iter().find(|s| s.id == session_id)?;
+        return Some(workspace_key(store, session));
+    }
+    if let Some(rest) = scope.strip_prefix("dir:") {
+        return rest.split(':').next().map(str::to_string);
+    }
+    Some(scope.to_string())
+}
+
+/// `workspaceRecord`: the workspace row a Files or Git id stands for. A `term:` scope is a
+/// hidden local row at its folder (its terminal's project and branch while that terminal is
+/// there; the core keeps resolving the scope after it closes), a `dir:` scope a hidden row at
+/// its folder under its workspace, any other id the core's own row.
+pub fn workspace_record(store: &Store, id: &str) -> Option<WorkspaceSummary> {
+    use base64::Engine;
+    let decode = |text: &str| {
+        base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(text)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+    };
+    let name_of = |path: &str| {
+        path.trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .filter(|name| !name.is_empty())
+            .unwrap_or("/")
+            .to_string()
+    };
+    if let Some(rest) = id.strip_prefix("dir:") {
+        let (workspace_id, encoded) = rest.split_once(':')?;
+        let workspace = store.workspaces.iter().find(|w| w.id == workspace_id)?;
+        let path = decode(encoded).filter(|path| !path.is_empty())?;
+        return Some(WorkspaceSummary {
+            id: id.to_string(),
+            name: name_of(&path),
+            path,
+            branch: None,
+            dirty: false,
+            hidden: true,
+            ..workspace.clone()
+        });
+    }
+    let Some(rest) = id.strip_prefix("term:") else {
+        return store.workspaces.iter().find(|w| w.id == id).cloned();
+    };
+    let (session_id, encoded) = rest.split_once(':')?;
+    let path = decode(encoded)?;
+    let session = store.sessions.iter().find(|s| s.id == session_id);
+    let created = session.map_or(0, |s| s.created_at);
+    Some(WorkspaceSummary {
+        id: id.to_string(),
+        project_id: session
+            .and_then(|s| s.project_id.clone())
+            .unwrap_or_default(),
+        host_id: LOCAL.to_string(),
+        name: name_of(&path),
+        branch: session
+            .filter(|s| s.current_cwd.as_deref() == Some(path.as_str()))
+            .and_then(|s| s.current_branch.clone()),
+        base_branch: None,
+        dirty: false,
+        start_snapshot: None,
+        parent_workspace_id: None,
+        state: WorkspaceState::Active,
+        created_at: created,
+        updated_at: created,
+        pinned: false,
+        hidden: true,
+        path,
+    })
 }
 
 /// `sessionsForWorkspace`: newest first.
@@ -1367,6 +1468,114 @@ mod tests {
             ..View::default()
         };
         assert!(folders(&shown)[1].1, "the shown session's folder");
+    }
+
+    fn workspace(id: &str, path: &str) -> WorkspaceSummary {
+        serde_json::from_value(json!({
+            "id": id, "projectId": format!("p-{id}"), "hostId": LOCAL, "path": path, "name": id,
+            "dirty": false, "state": "active", "createdAt": 0, "updatedAt": 0,
+        }))
+        .unwrap()
+    }
+
+    /// The vectors of the web's `terminalScope.test.ts`.
+    #[test]
+    fn a_terminal_is_scoped_only_once_its_shell_leaves_its_workspace_folder() {
+        let store = Store {
+            workspaces: vec![
+                workspace("w-chats", "/home/u/.perch/scratch"),
+                workspace("w-proj", "/work/proj"),
+            ],
+            ..Store::default()
+        };
+        let term = |workspace: &str, host: &str, cwd: Option<&str>| {
+            let mut s = session("s1", host, "/x", 1);
+            s.workspace_id = Some(workspace.into());
+            s.current_cwd = cwd.map(str::to_string);
+            s.current_branch = Some("main".into());
+            terminal_scope_id(&store, &s)
+        };
+        assert_eq!(term("w-proj", LOCAL, Some("/work/proj")), None);
+        assert!(term("w-proj", LOCAL, Some("/work/proj/src"))
+            .is_some_and(|id| id.starts_with("term:s1:")));
+        assert_eq!(term("w-chats", LOCAL, None), None);
+        assert_eq!(term("w-chats", "box", Some("/home/u/café")), None);
+        let id = term("w-chats", LOCAL, Some("/home/u/café")).unwrap();
+        assert_eq!(id, "term:s1:L2hvbWUvdS9jYWbDqQ");
+
+        // Its row: the folder, its terminal's branch while it is there, and still the folder
+        // once the terminal has closed; filed under the terminal's workspace.
+        let mut open = session("s1", LOCAL, "/x", 1);
+        open.workspace_id = Some("w-chats".into());
+        open.current_cwd = Some("/home/u/café".into());
+        open.current_branch = Some("main".into());
+        let live = Store {
+            sessions: vec![open],
+            ..store.clone()
+        };
+        let row = workspace_record(&live, &id).unwrap();
+        assert_eq!(
+            (
+                row.path.as_str(),
+                row.name.as_str(),
+                row.branch.as_deref(),
+                row.host_id.as_str()
+            ),
+            ("/home/u/café", "café", Some("main"), LOCAL)
+        );
+        assert_eq!(scope_workspace(&live, &id).as_deref(), Some("w-chats"));
+        let closed = workspace_record(&store, &id).unwrap();
+        assert_eq!(
+            (closed.path.as_str(), closed.branch),
+            ("/home/u/café", None)
+        );
+        assert_eq!(scope_workspace(&store, &id), None);
+        assert!(workspace_record(&store, "term:s1:***").is_none());
+        assert_eq!(
+            workspace_record(&store, "w-proj").map(|w| w.id).as_deref(),
+            Some("w-proj")
+        );
+        // A chosen folder, under its workspace.
+        let dir = "dir:w-proj:L3RtcC9ub3Rlcw";
+        let row = workspace_record(&store, dir).unwrap();
+        assert_eq!(
+            (
+                row.path.as_str(),
+                row.name.as_str(),
+                row.project_id.as_str(),
+                row.hidden
+            ),
+            ("/tmp/notes", "notes", "p-w-proj", true)
+        );
+        assert_eq!(scope_workspace(&store, dir).as_deref(), Some("w-proj"));
+        assert!(workspace_record(&store, "dir:gone:L3RtcA").is_none());
+    }
+
+    /// The strip lists a workspace's sessions in the core's order and leaves a sub-session where
+    /// that order puts it, as the web's strip does: a person's drag is not undone.
+    #[test]
+    fn a_workspace_strip_keeps_the_core_order_without_nesting() {
+        let mut lead = session("lead", LOCAL, "/a", 1);
+        let mut other = session("other", LOCAL, "/a", 2);
+        let mut kid = session("kid", LOCAL, "/a", 3);
+        let mut away = session("away", LOCAL, "/b", 4);
+        for s in [&mut lead, &mut other, &mut kid] {
+            s.workspace_id = Some("w".into());
+        }
+        away.workspace_id = Some("v".into());
+        kid.parent_session_id = Some("lead".into());
+        let mut store = Store {
+            sessions: vec![lead, other, kid, away],
+            ..Store::default()
+        };
+        assert_eq!(sessions_of_workspace(&store, "w"), ["lead", "other", "kid"]);
+        store.order.insert(
+            LOCAL.into(),
+            (vec![], vec!["other".into(), "kid".into(), "lead".into()]),
+        );
+        assert_eq!(sessions_of_workspace(&store, "w"), ["other", "kid", "lead"]);
+        assert_eq!(sessions_of_workspace(&store, "v"), ["away"]);
+        assert!(sessions_of_workspace(&store, "none").is_empty());
     }
 }
 
