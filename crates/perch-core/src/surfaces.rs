@@ -233,6 +233,7 @@ pub fn ensure_schema(db: &HistoryDb) -> anyhow::Result<()> {
     db.with_connection(|conn| {
         conn.execute_batch(SCHEMA)?;
         conn.execute_batch(crate::workspace_terminals::SCHEMA)?;
+        crate::shared_tabs::ensure_schema(conn)?;
         Ok(())
     })
 }

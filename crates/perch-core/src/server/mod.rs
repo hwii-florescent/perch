@@ -2438,6 +2438,9 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
     let _ = state
         .out_tx
         .send(workspace::order_message(&state.app, None));
+    for msg in workspace::tabs_messages(&state.app) {
+        let _ = state.out_tx.send(msg);
+    }
     for msg in state.app.hub.snapshot_remote_orders() {
         let _ = state.out_tx.send(msg);
     }
@@ -2711,6 +2714,7 @@ fn foundation_capabilities() -> Vec<String> {
         "worktree.delete",
         "workspace.pin",
         "workspace.order.v1",
+        "workspace.tabs.v1",
         "workspace.nest",
         "workspace.visibility",
         "agent.manifest.list",

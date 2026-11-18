@@ -1130,6 +1130,20 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             "workspace_pin_failed",
             |db, id| db.set_workspace_pinned(id, pinned),
         ),
+        ClientMessage::WorkspaceTabsSet {
+            request_id,
+            workspace_id,
+            base_revision,
+            strip,
+            sets,
+        } => workspace::handle_workspace_tabs_set(
+            state,
+            request_id,
+            workspace_id,
+            base_revision,
+            strip,
+            sets,
+        ),
         ClientMessage::WorkspaceOrderSet {
             request_id,
             host_id,

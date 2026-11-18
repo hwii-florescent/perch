@@ -2614,6 +2614,22 @@ pub enum ClientMessage {
     /// Replace the core's sidebar order (capability `workspace.order.v1`).
     /// Each list that is present replaces the stored one (last write wins);
     /// absent lists are untouched. Answered by a `workspace.order` broadcast.
+    /// Replace a local workspace's shared tabs (capability `workspace.tabs.v1`,
+    /// `shared_tabs.rs`): its strip of tab ids and its split sets. With
+    /// `baseRevision` not current nothing is stored and only the sender gets the
+    /// current row (`conflict`); else a `workspace.tabs` broadcast answers it.
+    #[serde(rename = "workspace.tabs.set", rename_all = "camelCase")]
+    WorkspaceTabsSet {
+        request_id: String,
+        workspace_id: String,
+        #[serde(default)]
+        base_revision: Option<u64>,
+        #[serde(default)]
+        strip: Vec<String>,
+        #[serde(default)]
+        sets: Vec<serde_json::Value>,
+    },
+
     #[serde(rename = "workspace.order.set", rename_all = "camelCase")]
     WorkspaceOrderSet {
         request_id: String,
@@ -3647,6 +3663,21 @@ pub enum ServerMessage {
     /// requester's copy echoes `requestId`). Ids may be stale or unknown.
     /// Through a hub, `hostId` names the owning remote and project ids are
     /// host-qualified.
+    /// A local workspace's shared tabs: sent on connect for each workspace that
+    /// has them, broadcast after each change (the writer's copy echoes
+    /// `requestId`), and sent to a stale writer alone with `conflict`.
+    #[serde(rename = "workspace.tabs", rename_all = "camelCase")]
+    WorkspaceTabs {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        request_id: Option<String>,
+        workspace_id: String,
+        revision: u64,
+        strip: Vec<String>,
+        sets: Vec<serde_json::Value>,
+        #[serde(skip_serializing_if = "std::ops::Not::not", default)]
+        conflict: bool,
+    },
+
     #[serde(rename = "workspace.order", rename_all = "camelCase")]
     WorkspaceOrder {
         #[serde(skip_serializing_if = "Option::is_none", default)]
