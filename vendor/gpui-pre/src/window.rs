@@ -5500,6 +5500,12 @@ impl Window {
             }
             PlatformInput::MouseExited(mouse_exited) => {
                 self.modifiers = mouse_exited.modifiers;
+                // PERCH: the pointer left (no press held): nothing in the window is hovered any
+                // more, so hover styles and group-hover actions hide (they kept the last point).
+                if mouse_exited.pressed_button.is_none() {
+                    self.mouse_position = point(px(-1.), px(-1.));
+                    self.refresh();
+                }
                 PlatformInput::MouseExited(mouse_exited)
             }
             PlatformInput::ModifiersChanged(modifiers_changed) => {

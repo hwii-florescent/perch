@@ -47,6 +47,9 @@ const KEYS: &str = "keys";
 const WORKSPACES: &str = "workspaces";
 /// The sidebar's view settings: a change to them does not read again what follows the view.
 const SIDEBAR: &str = "sidebar";
+/// A drag's geometry (`tabSlide`, `pointerFollow`), which moves with every pointer move: only
+/// the strip and a followed press read it, so a move re-renders nothing else.
+const DRAG: &str = "drag";
 
 /// The sidebar's view settings, by the web's names (`perch.sidebar.*` in its localStorage).
 #[derive(Clone, Debug, PartialEq)]
@@ -169,10 +172,9 @@ pub struct WindowState {
     pub new_tab: u64,
     /// The open tabs whose terminal is known to be `running` or `exited`; any other is unknown.
     pub terminals: HashMap<String, &'static str>,
-    /// A tab drag in flight (`tabSlide()`, `TabDrag::slide`); null when none.
-    pub slide: Value,
-    /// The pointer as last forwarded for a press a mod follows (`pointerFollow()`), null before any.
-    pub pointer: Value,
+    /// The tab a drag holds off the strip, which the strip dims (`draggingId`); null when none.
+    /// The drag's geometry is published apart from the window ([`Perch::set_drag`]).
+    pub dragging: Value,
     /// The last Add project request (`useAddProject`), null before any.
     pub add_project: Value,
     /// How many times the window asked the sidebar for its Add project form, and when last.
@@ -182,6 +184,14 @@ pub struct WindowState {
     pub worktree_request: Value,
     /// The drawer's browser pages by workspace (`useBrowserPages`).
     pub browser_pages: Value,
+}
+
+/// The tab a drag `slide` holds off the strip (the strip dims it, as the web's), null when none.
+fn dragging(slide: &Value) -> Value {
+    match slide {
+        slide if slide["overStrip"] == false => slide["id"].clone(),
+        _ => Value::Null,
+    }
 }
 
 /// Answers a screen's question for the core (`kind` and its `args`, as
@@ -208,6 +218,10 @@ struct Data {
     /// The window's logical size (`set_viewport`).
     viewport: (f32, f32),
     window: WindowState,
+    /// A tab drag in flight (`tabSlide()`, `TabDrag::slide`); null when none.
+    slide: Value,
+    /// The pointer as last forwarded for a press a mod follows (`pointerFollow()`), null before any.
+    pointer: Value,
     /// A theme chosen here, until the core says which one is set.
     chosen_theme: Option<String>,
     /// The theme last put into gpui-base's global.
@@ -276,6 +290,8 @@ struct Shared {
     /// Per copy key, how many times a copy under it was loaded: a reload is a new one, which
     /// holds nothing its predecessor held.
     loads: RefCell<HashMap<String, u64>>,
+    /// Per copy key, how many times [`Perch::flush`] re-rendered it because a part it read moved.
+    refreshes: RefCell<HashMap<String, u64>>,
 }
 
 /// The `perch` module's state for one window. Cheap to clone.
@@ -305,6 +321,7 @@ impl Perch {
             flush_queued: Cell::new(false),
             sidebar_file: RefCell::default(),
             loads: RefCell::default(),
+            refreshes: RefCell::default(),
         }))
     }
 
@@ -378,8 +395,7 @@ impl Perch {
                 worktree_request: ws.worktree_request().clone(),
                 browser_pages: ws.browser_drawer_state(cx),
                 terminals: ws.terminal_states(cx),
-                slide: ws.tab_slide(),
-                pointer: ws.pointer_follow().clone(),
+                dragging: dragging(&ws.tab_slide()),
                 notifications: ws
                     .notifications()
                     .iter()
@@ -395,6 +411,10 @@ impl Perch {
         };
         if let Some(model) = model {
             self.set_model(model);
+        }
+        {
+            let ws = workspace.read(cx);
+            self.set_drag(ws.tab_slide(), ws.pointer_follow().clone());
         }
         // A file, review or browser tab on screen names its workspace in its id: the one the
         // strip's + (New browser, New file) and the start page work in.
@@ -476,6 +496,27 @@ impl Perch {
         if data.window != window {
             data.window = window;
             drop(data);
+            self.bump(WINDOW);
+        }
+    }
+
+    /// Publishes a drag's geometry: where the strip's tabs slide (`tabSlide()`) and the pointer
+    /// a followed press last had (`pointerFollow()`). Only their readers re-render; the window's
+    /// own part moves only when the dragged tab leaves or comes back to the strip. Call
+    /// [`Self::flush`] after.
+    pub fn set_drag(&self, slide: Value, pointer: Value) {
+        let mut data = self.0.data.borrow_mut();
+        if data.slide == slide && data.pointer == pointer {
+            return;
+        }
+        let held = dragging(&slide);
+        let left = data.window.dragging != held;
+        data.window.dragging = held;
+        data.slide = slide;
+        data.pointer = pointer;
+        drop(data);
+        self.bump(DRAG);
+        if left {
             self.bump(WINDOW);
         }
     }
@@ -986,6 +1027,11 @@ impl Perch {
         if changed.is_empty() && !restyled {
             return;
         }
+        let mut refreshes = self.0.refreshes.borrow_mut();
+        for id in &changed {
+            *refreshes.entry(id.clone()).or_default() += 1;
+        }
+        drop(refreshes);
         // A new theme reaches every mod: one may read it through gpui-base without asking us.
         let only = (!restyled).then_some(&changed);
         let hosts = self.0.hosts.borrow().clone();
@@ -1206,6 +1252,12 @@ impl Perch {
         self.0.loads.borrow().get(key).copied().unwrap_or(0)
     }
 
+    /// How many times each copy (by key) was re-rendered for a part it read that moved: what a
+    /// gesture costs the screens that do not show it.
+    pub fn refreshes(&self) -> HashMap<String, u64> {
+        self.0.refreshes.borrow().clone()
+    }
+
     pub fn module(&self, id: &str) -> HostModule {
         // Built once for each load of the copy `id`.
         let load = {
@@ -1373,15 +1425,11 @@ impl Perch {
             )
             .function(
                 "tabSlide",
-                reader(WINDOW, |perch, _| {
-                    perch.0.data.borrow().window.slide.clone()
-                }),
+                reader(DRAG, |perch, _| perch.0.data.borrow().slide.clone()),
             )
             .function(
                 "pointerFollow",
-                reader(WINDOW, |perch, _| {
-                    perch.0.data.borrow().window.pointer.clone()
-                }),
+                reader(DRAG, |perch, _| perch.0.data.borrow().pointer.clone()),
             )
             .function("workspaceTabs", both(|perch, _| perch.workspace_tabs()))
             .function("focus", both(|perch, _| perch.focus()))
@@ -2176,10 +2224,7 @@ impl Perch {
             "tabs": tabs,
             "tabShape": "square",
             // Off the strip the dragged tab dims (its ghost follows the pointer), as the web's.
-            "draggingId": match &data.window.slide {
-                slide if slide["overStrip"] == false => slide["id"].clone(),
-                _ => Value::Null,
-            },
+            "draggingId": data.window.dragging,
         })
     }
 

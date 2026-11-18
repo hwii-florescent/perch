@@ -20,7 +20,9 @@ use perch_native::mods::{self, WindowMods, POLL};
 use perch_native::sidebar::State;
 use perch_native::ui::Workspace;
 use serde_json::{json, Value};
+use std::cell::Cell;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 
 const WIDTH: f32 = 1200.;
@@ -230,12 +232,11 @@ fn main() {
     let workspace = window.entity(&cx).unwrap();
     cx.update(|cx| mods::start_in(user, &workspace, window.into(), cx));
     let mut rig = Rig { cx, window, asked };
-    // Manual order: sorting by attention is a view with no drag.
+    // Manual order by default: sorting by attention (a view with no drag) is off until chosen,
+    // so the sidebar's rows reorder in project organize as they come.
     let perch = rig.cx.update(|cx| cx.global::<WindowMods>().perch.clone());
-    let mut settings = perch.sidebar();
-    settings.sort_by_attention = false;
-    perch.set_sidebar(settings);
-    rig.cx.update(|cx| perch.flush(cx));
+    assert!(!perch.sidebar().sort_by_attention);
+    assert_eq!(perch.sidebar().organize, "project");
 
     // Opened out of order (the sub-sessions first, as a lead's sub-sessions often are), the strip
     // still lists them as the sidebar does.
@@ -253,6 +254,69 @@ fn main() {
         "the sidebar: oldest first, sub-sessions under their lead"
     );
     assert_eq!(rig.strip(), first, "the strip shows the sidebar's order");
+    rig.orders();
+
+    // While a tab is dragged along the strip, each move re-renders the strip (its tabs slide)
+    // and the drag's own screen, and no other screen: the sidebar, the status line and the rest
+    // read nothing that moves with the pointer.
+    let at = |(x, y): (f32, f32)| point(px(x), px(y));
+    let moving = |x: f32, y: f32| {
+        PlatformInput::MouseMove(MouseMoveEvent {
+            position: at((x, y)),
+            pressed_button: Some(MouseButton::Left),
+            modifiers: Modifiers::default(),
+        })
+    };
+    let leader = rig.center("tab:leader");
+    let leak = rig.center("tab:leak");
+    rig.input(PlatformInput::MouseDown(MouseDownEvent {
+        button: MouseButton::Left,
+        position: at(leader),
+        modifiers: Modifiers::default(),
+        click_count: 1,
+        first_mouse: false,
+    }));
+    rig.input(moving(leader.0 + 10., leader.1));
+    let before = perch.refreshes();
+    let steps = 12;
+    for i in 1..=steps {
+        let x = leader.0 + 10. + (leak.0 - leader.0 - 10.) * i as f32 / steps as f32;
+        rig.input(moving(x, leader.1));
+    }
+    let after = perch.refreshes();
+    let moved: Vec<(&String, u64)> = after
+        .iter()
+        .map(|(key, n)| (key, n - before.get(key).copied().unwrap_or(0)))
+        .filter(|(_, n)| *n > 0)
+        .collect();
+    assert!(
+        moved
+            .iter()
+            .all(|(key, _)| *key == "tabs" || *key == "tab-drag"),
+        "only the strip and the drag re-render while a tab moves along it: {moved:?}"
+    );
+    assert!(
+        moved.iter().any(|(key, n)| *key == "tabs" && *n >= 3),
+        "the strip slides as the tab passes others: {moved:?}"
+    );
+    // Escape ends it with nothing changed, and the strip's tabs come to rest.
+    rig.input(PlatformInput::KeyDown(gpui::KeyDownEvent {
+        keystroke: gpui::Keystroke::parse("escape").unwrap(),
+        is_held: false,
+        prefer_character_input: false,
+    }));
+    assert!(
+        rig.ws(|ws, _, _| ws.tab_slide().is_null()),
+        "no slide is left"
+    );
+    assert!(!rig.ws(|ws, _, _| ws.screens_open()).contains(&"tab-drag"));
+    rig.input(PlatformInput::MouseUp(MouseUpEvent {
+        button: MouseButton::Left,
+        position: at(leak),
+        modifiers: Modifiers::default(),
+        click_count: 1,
+    }));
+    assert_eq!(rig.strip(), first, "an Escaped drag moves nothing");
     rig.orders();
 
     // A drag in the strip: leak before perf. The core is asked to keep it, and the sidebar
@@ -325,6 +389,67 @@ fn main() {
         .update_window(rig.window.into(), |_, window, _| window.remove_window())
         .unwrap();
     rig.cx.run_until_parked();
+    pointer_leaving_ends_hover(&mut rig.cx);
     let _ = std::fs::remove_dir_all(&scratch);
     println!("tab_order_window: ok");
+}
+
+/// An element hovered when the pointer leaves the window is no longer hovered, though no move
+/// came after the one that hovered it: a row's hover-only actions and a hover popover hide.
+fn pointer_leaving_ends_hover(cx: &mut HeadlessAppContext) {
+    use gpui::{InteractiveElement as _, StatefulInteractiveElement as _, Styled as _};
+    struct Box(Rc<Cell<bool>>);
+    impl gpui::Render for Box {
+        fn render(
+            &mut self,
+            _: &mut Window,
+            _: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            let hovered = self.0.clone();
+            gpui::div()
+                .id("box")
+                .size_full()
+                .on_hover(move |on, _, _| hovered.set(*on))
+        }
+    }
+    let hovered = Rc::new(Cell::new(false));
+    let shown = hovered.clone();
+    let window = cx
+        .open_window(size(px(200.), px(200.)), move |_, cx| {
+            cx.new(|_| Box(shown))
+        })
+        .unwrap();
+    let mut send = |input: PlatformInput| {
+        cx.update_window(window.into(), |_, window: &mut Window, cx| {
+            window.dispatch_event(input, cx);
+        })
+        .unwrap();
+        for _ in 0..2 {
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window: &mut Window, cx| {
+                window.refresh();
+                let _ = window.draw(cx);
+            })
+            .unwrap();
+        }
+        cx.run_until_parked();
+    };
+    send(PlatformInput::MouseMove(MouseMoveEvent {
+        position: point(px(100.), px(100.)),
+        pressed_button: None,
+        modifiers: Modifiers::default(),
+    }));
+    assert!(hovered.get(), "the pointer over it hovers it");
+    send(PlatformInput::MouseExited(gpui::MouseExitEvent {
+        position: point(px(100.), px(100.)),
+        pressed_button: None,
+        modifiers: Modifiers::default(),
+    }));
+    assert!(
+        !hovered.get(),
+        "the pointer left the window: nothing is hovered"
+    );
+    cx.update_window(window.into(), |_, window, _| window.remove_window())
+        .unwrap();
+    cx.run_until_parked();
 }
