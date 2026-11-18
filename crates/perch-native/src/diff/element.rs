@@ -6,8 +6,8 @@
 //! The diff and its comments are the host store's ([`DiffView::set_data`]); the screen sends only view state
 //! ([`DiffProps`]) and hears what the person did as [`DiffEvent`]s, so no line ever crosses into script. The file
 //! header of the file at the top stays pinned there (CSS `sticky top-0`), pushed up by the next file's header; hunk
-//! headers do not pin (the web's only stick to the left). Unwrapped, every line shares one width (the widest) and
-//! one horizontal offset; wrapped, lines break at the view's width and the list measures them.
+//! headers do not pin (the web's only stick to the left). Unwrapped, the lines of one file share one width (that
+//! file's widest) and one horizontal offset, and each file scrolls sideways on its own; wrapped, lines break at the view's width and the list measures them.
 //!
 //! A line is drawn compactly: one number (the old line's for a deletion, else the new line's) and a colour bar on
 //! the edge in place of a second number and a `+`/`−` column. A view at least [`SPLIT_WIDTH`] wide draws each change
@@ -28,6 +28,7 @@ use gpui_base::input::{InputEvent, Textarea, TextareaState};
 use perch_core::review::{ReviewComment, ReviewSide, ReviewStatus};
 use perch_core::source_control::{DiffFile, DiffFileStatus, DiffLine, DiffLineKind};
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 /// The web's root font size: `rem` in `review.tsx` is 16 px.
@@ -213,8 +214,8 @@ pub struct DiffView {
     props: DiffProps,
     colors: Colors,
     tints: Tints,
-    /// Horizontal offset of unwrapped lines.
-    offset_x: f32,
+    /// Horizontal offset of each file's unwrapped lines, by file index (a file not here is at 0).
+    offsets: Rc<HashMap<usize, f32>>,
     /// The view's width at the last paint.
     width: Rc<Cell<f32>>,
     /// The rows pair the two sides of a change (the view is at least [`SPLIT_WIDTH`] wide).
@@ -252,7 +253,7 @@ impl DiffView {
             props: DiffProps::default(),
             colors: Colors::of(theme),
             tints: Tints::of(theme),
-            offset_x: 0.,
+            offsets: Rc::default(),
             width: Rc::new(Cell::new(0.)),
             split: false,
             cursor: None,
@@ -319,7 +320,7 @@ impl DiffView {
         if old.path != self.props.path || editing_changed {
             self.rebuild(old.path != self.props.path, window, cx);
         } else if old.wrap != self.props.wrap {
-            self.offset_x = 0.;
+            self.offsets = Rc::default();
             self.list.remeasure();
         }
         // The edit field follows the screen's body (another copy of the screen may have typed it).
@@ -334,6 +335,9 @@ impl DiffView {
 
     fn rebuild(&mut self, to_top: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.builds += 1;
+        if to_top {
+            self.offsets = Rc::default();
+        }
         let rows = match &self.diff {
             Some(diff) => rows::build(diff, &self.comments, self.props.path.as_deref(), self.split),
             None => Rows::default(),
@@ -499,7 +503,14 @@ impl DiffView {
         cx.stop_propagation();
     }
 
-    fn on_wheel(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+    /// A wheel step over a row of `file`: sideways, it moves that file's lines only.
+    fn on_wheel(
+        &mut self,
+        file: usize,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.props.wrap {
             return;
         }
@@ -512,10 +523,11 @@ impl DiffView {
         if dx == px(0.) {
             return;
         }
-        let max = (self.content_width() - self.visible_width()).max(0.);
-        let next = (self.offset_x - f32::from(dx)).clamp(0., max);
-        if next != self.offset_x {
-            self.offset_x = next;
+        let max = (self.content_width(file) - self.visible_width()).max(0.);
+        let offset = self.offsets.get(&file).copied().unwrap_or(0.);
+        let next = (offset - f32::from(dx)).clamp(0., max);
+        if next != offset {
+            Rc::make_mut(&mut self.offsets).insert(file, next);
             cx.notify();
         }
         if event.modifiers.shift {
@@ -539,11 +551,11 @@ impl DiffView {
         }
     }
 
-    /// The shared width of unwrapped lines: the bar, the number and the widest code.
-    fn content_width(&self) -> f32 {
+    /// The shared width of `file`'s unwrapped lines: the bar, the number and its widest code.
+    fn content_width(&self, file: usize) -> f32 {
         let (number, bar) = self.gutters();
         // ponytail: SF Mono's advance is 0.6 em; a measured advance would replace this if the mono face changes.
-        number + bar + self.rows.widest as f32 * CODE_SIZE * 0.6
+        number + bar + self.rows.widest.get(file).copied().unwrap_or(0) as f32 * CODE_SIZE * 0.6
     }
 }
 
@@ -578,8 +590,7 @@ struct Frame {
     props: Rc<DiffProps>,
     colors: Colors,
     tints: Tints,
-    offset_x: f32,
-    content_width: f32,
+    offsets: Rc<HashMap<usize, f32>>,
     gutters: (f32, f32),
     /// The view's width at the last paint (the web's `100cqi`).
     view_width: f32,
@@ -612,10 +623,31 @@ fn probed(name: String, background: Option<Hsla>, text: Hsla, element: AnyElemen
 }
 
 impl Frame {
+    /// The shared width of `file`'s unwrapped lines: the bar, the number and its widest code.
+    fn content_width(&self, file: usize) -> f32 {
+        let (number, bar) = self.gutters;
+        // ponytail: SF Mono's advance is 0.6 em; a measured advance would replace this if the mono face changes.
+        number + bar + self.rows.widest.get(file).copied().unwrap_or(0) as f32 * CODE_SIZE * 0.6
+    }
+
+    /// Row `ix` as the list draws it, under a wheel handler that scrolls its file sideways.
+    fn named_row(&self, ix: usize) -> AnyElement {
+        let file = self.rows.rows[ix].file();
+        let view = self.view.clone();
+        div()
+            .w_full()
+            .on_scroll_wheel(move |event, window, cx| {
+                view.update(cx, |view, cx| view.on_wheel(file, event, window, cx))
+                    .ok();
+            })
+            .child(self.drawn_row(ix))
+            .into_any_element()
+    }
+
     /// Row `ix` as the list draws it. A line carries the comment thread under it (the web draws the thread inside
     /// the line's grid, so the line's box holds both); the thread's own row is then empty. Each is named for the
     /// parity probe by its place among its kind (`git-diff-line@2`).
-    fn named_row(&self, ix: usize) -> AnyElement {
+    fn drawn_row(&self, ix: usize) -> AnyElement {
         let rows = &self.rows.rows;
         let name = |base: &str, ix: usize| match self.ordinal.get(ix) {
             Some(0) | None => base.to_string(),
@@ -919,6 +951,9 @@ impl Frame {
             line.content.clone().into()
         };
         let wrap = self.props.wrap;
+        let file_ix = self.rows.rows[ix].file();
+        let offset_x = self.offsets.get(&file_ix).copied().unwrap_or(0.);
+        let content_width = self.content_width(file_ix);
         let code = div().flex_1().min_w_0().child(text);
         let code = if wrap { code } else { code.whitespace_nowrap() };
         let view = self.view.clone();
@@ -928,7 +963,7 @@ impl Frame {
                 .id(("git-comment-add", ix * 2 + usize::from(half == Some(true))))
                 .absolute()
                 .top(px(0.1 * REM))
-                .left(px(0.1 * REM + if wrap { 0. } else { self.offset_x }))
+                .left(px(0.1 * REM + if wrap { 0. } else { offset_x }))
                 .size(px(1.2 * REM))
                 .rounded_full()
                 .bg(c.panel)
@@ -963,7 +998,7 @@ impl Frame {
             .line_height(px(LINE_HEIGHT))
             .text_color(c.text)
             .when(!wrap, |d| {
-                d.w(px(self.content_width)).ml(px(-self.offset_x))
+                d.w(px(content_width)).ml(px(-offset_x))
             })
             .when(wrap, |d| d.w_full())
             .child(
@@ -1195,7 +1230,7 @@ impl Render for DiffView {
         };
         if split != self.split {
             self.split = split;
-            self.offset_x = 0.;
+            self.offsets = Rc::default();
             self.rebuild(false, window, cx);
         }
         let frame = Frame {
@@ -1207,8 +1242,7 @@ impl Render for DiffView {
             props: Rc::new(self.props.clone()),
             colors: self.colors,
             tints: self.tints,
-            offset_x: self.offset_x,
-            content_width: self.content_width(),
+            offsets: self.offsets.clone(),
             gutters: self.gutters(),
             view_width: self.width.get(),
             cursor: self.cursor.filter(|_| self.keyed),
@@ -1253,7 +1287,6 @@ impl Render for DiffView {
             .size_full()
             .overflow_hidden()
             .on_key_down(cx.listener(Self::on_key))
-            .on_scroll_wheel(cx.listener(Self::on_wheel))
             .child(
                 gpui::canvas(
                     move |bounds: Bounds<Pixels>, _, _| width.set(f32::from(bounds.size.width)),

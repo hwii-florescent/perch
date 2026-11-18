@@ -275,10 +275,7 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
     const line = () => document.querySelector<HTMLElement>('[data-testid="git-diff-line"]');
     expect(line()?.className).toContain("min-w-max");
 
-    const options = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.startsWith("Options"));
-    await act(async () => options?.click());
-    const wrap = [...document.querySelectorAll<HTMLLabelElement>("label")].find((label) => label.textContent?.includes("Wrap lines"))?.querySelector("input");
-    await act(async () => wrap?.click());
+    await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="Wrap lines"]')?.click());
     expect(line()?.className).toContain("whitespace-pre-wrap");
     expect(line()?.className).not.toContain("min-w-max");
   });

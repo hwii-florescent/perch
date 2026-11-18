@@ -328,6 +328,28 @@ test("a switch's knob (its ::before) is drawn inside its track, moved across whe
   }
 });
 
+test("a plain check box shows it is ticked: the accent fill and a mark, none when it is not", async () => {
+  const { runtime } = await loadSidebar();
+  const { createElement: h } = await import("react");
+  const perch = { isMac: true, render() {}, error: (e) => { throw e; } };
+  const Probe = () => h("div", null,
+    h("input", { type: "checkbox", "data-testid": "off", checked: false, onChange() {} }),
+    h("input", { type: "checkbox", "data-testid": "on", checked: true, onChange() {} }));
+  const handle = runtime.mount(perch, Probe, { container: { width: 300, height: 100 } });
+  try {
+    await settle();
+    const node = (id) => {
+      const walk = (n) => (n.meta?.attrs?.["data-testid"] === id ? n : (n.children ?? []).map(walk).find(Boolean));
+      return walk(handle.description.root);
+    };
+    assert.equal(node("off").children?.length ?? 0, 0, "an unticked box has no mark");
+    assert.equal(node("on").children?.[0]?.children?.[0]?.text, "\u2713", "a ticked box draws a check mark");
+    assert.notEqual(JSON.stringify([node("on").style.bg, node("on").tokens]), JSON.stringify([node("off").style.bg, node("off").tokens]), "and fills with the accent");
+  } finally {
+    handle.unmount();
+  }
+});
+
 test("rows styled alike compute their style once, and a row that differs gets its own", async () => {
   const { runtime } = await loadSidebar();
   const { createElement: h } = await import("react");

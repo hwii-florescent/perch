@@ -22,7 +22,52 @@ const PATH_BUTTON_IDLE = "";
 const PATH_BUTTON_ACTIVE = "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]";
 const TB_FIELD = "flex min-w-0 max-w-full items-center gap-[0.35rem] text-[0.68rem] text-subtext-0";
 const TB_INPUT = "min-w-0 max-w-full rounded-ui bg-surface-1 px-[0.4rem] py-[0.3rem] text-fg";
-const TB_CHECK = "inline-flex items-center gap-[0.3rem] text-[0.68rem] whitespace-nowrap text-subtext-0";
+/** Line icons (24-unit grid, `|` between the strokes of one icon), drawn in `currentColor`. */
+const ICONS = {
+    refresh: "M21 12a9 9 0 1 1-3-6.7L21 8|M21 3v5h-5",
+    files: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z|M15 3v18",
+    untracked: "M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z|M14 2v6h6|M12 18v-6|M9 15h6",
+    wrap: "M3 6h18|M3 12h15a3 3 0 1 1 0 6h-4|M16 16l-2 2 2 2|M3 18h7",
+    whitespace: "M22 17v1c0 .5-.5 1-1 1H3c-.5 0-1-.5-1-1v-1",
+    stage: "M5 12h14|M12 5v14",
+    unstage: "M5 12h14",
+    discard: "M9 14L4 9l5-5|M4 9h10.5a5.5 5.5 0 0 1 0 11H11",
+    commit: "M15 12a3 3 0 1 1-6 0a3 3 0 0 1 6 0|M3 12h6|M15 12h6",
+    clear: "M18 6L6 18|M6 6l12 12",
+};
+const ICON_BTN = "inline-flex shrink-0 items-center justify-center rounded-ui p-[0.35rem] disabled:cursor-not-allowed! disabled:opacity-[0.45] [&:hover:not(:disabled)]:bg-surface-1";
+const ICON_TONE = {
+    default: "bg-transparent text-subtext-0 [&:hover:not(:disabled)]:text-fg",
+    on: "bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-accent",
+    primary: "bg-accent text-panel-bg",
+    danger: "bg-transparent text-red",
+};
+/** A button that is only an icon: its name is the `label` (the accessible name and the tooltip). `pressed` makes it a
+ * toggle that shows when it is on. */
+function IconButton({ icon, label, pressed, tone = "default", disabled, onClick, testId }) {
+    return (_jsx("button", {
+        type: "button",
+        className: cn(ICON_BTN, ICON_TONE[pressed ? "on" : tone]),
+        "aria-label": label,
+        title: label,
+        "aria-pressed": pressed,
+        "data-testid": testId,
+        disabled: disabled,
+        onClick: onClick,
+        children: _jsx("svg", {
+            width: 14,
+            height: 14,
+            viewBox: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            strokeWidth: "2",
+            strokeLinecap: "round",
+            strokeLinejoin: "round",
+            "aria-hidden": "true",
+            children: ICONS[icon].split("|").map((d) => _jsx("path", { d: d }, d))
+        })
+    }));
+}
 const TB_GROUP = "flex max-w-full min-w-0 flex-wrap items-center gap-[0.45rem]";
 const DIFF_FILE = "flex min-w-0 flex-col items-start gap-[0.1rem] rounded-ui px-[0.45rem] py-[0.42rem] text-left text-fg [background:none] hover:bg-surface-1";
 const COMMENT = "workspace-git__comment mt-[0.3rem] rounded-ui bg-surface-0 px-[0.55rem] py-[0.45rem] whitespace-normal [font-family:inherit]";
@@ -33,9 +78,6 @@ const COMMENT_FIELD = "block min-h-[3.2rem] w-full resize-y rounded-ui bg-surfac
 // (and `comment-actions` buttons need `!` to beat that unlayered reset, as the old later same-specificity rule did).
 const BTN = "rounded-ui px-2 py-[0.3rem] whitespace-nowrap disabled:cursor-not-allowed! disabled:opacity-[0.45] [&:hover:not(:disabled)]:bg-surface-1";
 const BTN_DEFAULT = `${BTN} bg-surface-1 text-fg [&:hover:not(:disabled)]:text-accent`;
-const BTN_QUIET = `${BTN} bg-transparent text-fg [&:hover:not(:disabled)]:text-accent`;
-const BTN_PRIMARY = `${BTN} bg-accent text-panel-bg`;
-const BTN_DANGER = `${BTN} bg-surface-1 text-red [&:hover:not(:disabled)]:text-red`;
 // Inside `comment-actions` every button is a transparent accent link; a `__button` there keeps its frame.
 const CA_BTN_BASE = "rounded-ui bg-transparent px-2 py-[0.3rem] text-[0.66rem]! whitespace-nowrap text-accent disabled:cursor-not-allowed! disabled:opacity-[0.45] [&:hover:not(:disabled)]:bg-surface-1";
 const CA_BTN = `${CA_BTN_BASE} [&:hover:not(:disabled)]:text-accent`;
@@ -287,7 +329,6 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
         const timer = setInterval(read, 250);
         return () => clearInterval(timer);
     }, []);
-    const [optionsOpen, setOptionsOpen] = useState(false);
     const [confirmAction, setConfirmAction] = useState(null);
     const [localActionError, setLocalActionError] = useState(null);
     const [selectedSessionId, setSelectedSessionId] = useResourceState(`review:${workspaceId}:selectedSessionId`, sessions[0]?.id);
@@ -809,35 +850,39 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                         className: "flex flex-col gap-[0.35rem] p-[0.5rem] [border-top:1px_solid_var(--git-border)]",
                         children: [
                             _jsxs("div", {
-                                className: "flex flex-wrap items-center gap-[0.3rem]",
+                                className: "flex items-center gap-[0.2rem]",
                                 children: [
-                                    _jsx("button", {
-                                        type: "button",
-                                        className: `${BTN_DEFAULT} min-w-fit flex-1`,
+                                    _jsx(IconButton, {
+                                        icon: "stage",
+                                        label: "Stage selected",
                                         disabled: selectedCount === 0,
-                                        onClick: () => actions.stage([...selectedPaths]),
-                                        children: "Stage selected"
+                                        onClick: () => actions.stage([...selectedPaths])
                                     }),
-                                    _jsx("button", {
-                                        type: "button",
-                                        className: `${BTN_DEFAULT} min-w-fit flex-1`,
+                                    _jsx(IconButton, {
+                                        icon: "unstage",
+                                        label: "Unstage",
                                         disabled: selectedCount === 0,
-                                        onClick: () => actions.unstage([...selectedPaths]),
-                                        children: "Unstage"
+                                        onClick: () => actions.unstage([...selectedPaths])
                                     }),
-                                    _jsx("button", {
-                                        type: "button",
-                                        className: `${BTN_DANGER} min-w-fit flex-1`,
-                                        "data-testid": "git-discard-preview",
+                                    _jsx(IconButton, {
+                                        icon: "discard",
+                                        label: "Discard selected",
+                                        tone: "danger",
+                                        testId: "git-discard-preview",
                                         disabled: selectedCount === 0,
-                                        onClick: () => requestDiscard("worktree"),
-                                        children: "Discard selected"
+                                        onClick: () => requestDiscard("worktree")
+                                    }),
+                                    selectedCount > 0 && _jsxs("span", {
+                                        className: "ml-auto text-[0.68rem] text-subtext-0",
+                                        children: [
+                                            selectedCount,
+                                            " selected"
+                                        ]
                                     })
                                 ]
                             }),
                             _jsxs("div", {
-                                className: "flex flex-col gap-[0.3rem]",
-                                style: narrow ? { flexDirection: "row" } : undefined,
+                                className: "flex items-center gap-[0.3rem]",
                                 children: [
                                     _jsx("input", {
                                         className: `${TB_INPUT} min-w-0 flex-1`,
@@ -846,12 +891,12 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                         onChange: (event) => setCommitMessage(event.target.value),
                                         placeholder: "Describe the change"
                                     }),
-                                    _jsx("button", {
-                                        type: "button",
-                                        className: BTN_PRIMARY,
+                                    _jsx(IconButton, {
+                                        icon: "commit",
+                                        label: "Preview commit",
+                                        tone: "primary",
                                         disabled: stagedCount === 0 || !commitMessage.trim(),
-                                        onClick: requestCommitPreview,
-                                        children: "Preview commit"
+                                        onClick: requestCommitPreview
                                     })
                                 ]
                             })
@@ -861,7 +906,6 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
             })
         ]
     })) : null;
-    const optionsChanged = !includeUntracked || ignoreWhitespace || wrapLines || diffLayout !== "auto" || contextLines !== 3;
     return (_jsxs("section", {
         ref: rootRef,
         className: "workspace-git",
@@ -907,21 +951,18 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                         role: "status",
                         children: statusState === "loading" ? "Updating…" : statusState === "error" ? "Status unavailable" : status?.dirty ? "Dirty" : "Clean"
                     }),
-                    _jsx("button", {
-                        type: "button",
-                        className: BTN_DEFAULT,
-                        "data-testid": "git-rail-toggle",
-                        "aria-pressed": railOpen,
-                        title: railOpen ? "Hide the changed files to give the diff the room" : "Show the changed files",
-                        onClick: () => setRailOpen(!railOpen),
-                        children: railOpen ? "Hide files" : "Show files"
+                    _jsx(IconButton, {
+                        icon: "files",
+                        label: railOpen ? "Hide files" : "Show files",
+                        testId: "git-rail-toggle",
+                        pressed: railOpen,
+                        onClick: () => setRailOpen(!railOpen)
                     }),
-                    _jsx("button", {
-                        type: "button",
-                        className: BTN_DEFAULT,
-                        "data-testid": "git-refresh",
-                        onClick: () => { actions.refreshStatus(); actions.listComments(); },
-                        children: "Refresh"
+                    _jsx(IconButton, {
+                        icon: "refresh",
+                        label: "Refresh",
+                        testId: "git-refresh",
+                        onClick: () => { actions.refreshStatus(); actions.listComments(); }
                     })
                 ]
             }),
@@ -935,183 +976,143 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                         style: narrow ? { minHeight: "18rem", flex: "auto" } : undefined,
                         children: [
                             _jsxs("div", {
-                                className: "flex shrink-0 flex-wrap items-center gap-x-[0.7rem] gap-y-[0.3rem] px-[0.7rem] py-[0.4rem]",
+                                className: "flex shrink-0 flex-wrap items-center gap-x-[0.4rem] gap-y-[0.3rem] px-[0.7rem] py-[0.4rem]",
                                 children: [
-                                    _jsxs("label", {
+                                    _jsx("label", {
                                         className: TB_FIELD,
-                                        children: [
-                                            _jsx("span", { children: "Compare" }),
-                                            _jsx(Select, {
-                                                className: TB_INPUT,
-                                                testId: "git-diff-target",
-                                                ariaLabel: "Compare",
-                                                value: compareOpen ? "compare" : target.kind === "compare" ? (preset ?? "compare") : target.kind,
-                                                onChange: chooseTarget,
-                                                options: [
-                                                    { value: "workingTree", label: "Working tree" },
-                                                    { value: "staged", label: "Staged" },
-                                                    { value: "head", label: "HEAD" },
-                                                    { value: "workspaceStart", label: startSnapshot ? "Workspace start" : "Workspace start (not recorded)", disabled: !startSnapshot },
-                                                    { value: "lastAgentTurn", label: turnLabel, disabled: !turnBase },
-                                                    { value: "compare", label: "Another ref…" },
-                                                ]
-                                            })
-                                        ]
+                                        title: "Compare",
+                                        children: _jsx(Select, {
+                                            className: TB_INPUT,
+                                            testId: "git-diff-target",
+                                            ariaLabel: "Compare",
+                                            value: compareOpen ? "compare" : target.kind === "compare" ? (preset ?? "compare") : target.kind,
+                                            onChange: chooseTarget,
+                                            options: [
+                                                { value: "workingTree", label: "Working tree" },
+                                                { value: "staged", label: "Staged" },
+                                                { value: "head", label: "HEAD" },
+                                                { value: "workspaceStart", label: startSnapshot ? "Workspace start" : "Workspace start (not recorded)", disabled: !startSnapshot },
+                                                { value: "lastAgentTurn", label: turnLabel, disabled: !turnBase },
+                                                { value: "compare", label: "Another ref…" },
+                                            ]
+                                        })
                                     }),
-                                    _jsxs("label", {
+                                    _jsx("label", {
                                         className: TB_FIELD,
-                                        children: [
-                                            _jsx("span", { children: "Session" }),
-                                            _jsx(Select, {
-                                                className: TB_INPUT,
-                                                testId: "git-turn-session",
-                                                ariaLabel: "Turn session",
-                                                value: agentSessionId ?? "",
-                                                onChange: (value) => {
-                                                    chooseTarget("workingTree");
-                                                    actions.selectAgentSession(value || undefined);
-                                                },
-                                                options: [
-                                                    { value: "", label: "Latest in workspace" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title} · ${session.agent ?? "agent"}` }))
-                                                ]
-                                            })
-                                        ]
+                                        title: "Session",
+                                        children: _jsx(Select, {
+                                            className: TB_INPUT,
+                                            testId: "git-turn-session",
+                                            ariaLabel: "Turn session",
+                                            value: agentSessionId ?? "",
+                                            onChange: (value) => {
+                                                chooseTarget("workingTree");
+                                                actions.selectAgentSession(value || undefined);
+                                            },
+                                            options: [
+                                                { value: "", label: "Latest in workspace" }, ...sessions.map((session) => ({ value: session.id, label: `${session.title} · ${session.agent ?? "agent"}` }))
+                                            ]
+                                        })
                                     }),
-                                    _jsxs("label", {
-                                        className: `${TB_FIELD} min-w-[12rem] flex-1`,
-                                        children: [
-                                            _jsx("span", { children: "File" }),
-                                            _jsx(Select, {
-                                                className: `${TB_INPUT} min-w-0 flex-1`,
-                                                ariaLabel: "Diff file",
-                                                testId: "git-diff-file-select",
-                                                value: selectedFile ?? "",
-                                                onChange: (value) => { setActiveFile(value || undefined); setSelection(null); },
-                                                options: [
-                                                    { value: "", label: `All files · ${diffFiles.length}` }, ...diffFiles.map((file) => { const path = filePath(file); return { value: path, label: `${file.status} · ${path}` }; })
-                                                ]
-                                            })
-                                        ]
+                                    _jsx("label", {
+                                        className: `${TB_FIELD} min-w-[8rem] flex-1`,
+                                        title: "File",
+                                        children: _jsx(Select, {
+                                            className: `${TB_INPUT} min-w-0 flex-1`,
+                                            ariaLabel: "Diff file",
+                                            testId: "git-diff-file-select",
+                                            value: selectedFile ?? "",
+                                            onChange: (value) => { setActiveFile(value || undefined); setSelection(null); },
+                                            options: [
+                                                { value: "", label: `All files · ${diffFiles.length}` }, ...diffFiles.map((file) => { const path = filePath(file); return { value: path, label: `${file.status} · ${path}` }; })
+                                            ]
+                                        })
                                     }),
-                                    compareOpen && (_jsxs(_Fragment, { children: [_jsxs("label", {
+                                    compareOpen && (_jsxs(_Fragment, { children: [_jsx("label", {
                                                 className: TB_FIELD,
-                                                children: [
-                                                    _jsx("span", { children: "Base" }),
-                                                    _jsx(Select, {
-                                                        freeText: true,
-                                                        className: TB_INPUT,
-                                                        testId: "git-base-selector",
-                                                        ariaLabel: "Base ref",
-                                                        value: compareBase,
-                                                        onChange: setCompareBase,
-                                                        placeholder: "main",
-                                                        options: [
-                                                            ...new Map(refs.map((ref) => [ref.name, { value: ref.name, label: _jsxs(_Fragment, { children: [ref.name, " ", _jsx("span", {
-                                                                                className: "text-subtext-0",
-                                                                                children: ref.target.slice(0, 8)
-                                                                            })] }), text: ref.name }])).values()
-                                                        ]
-                                                    })
-                                                ]
-                                            }), _jsxs("label", {
+                                                title: "Base",
+                                                children: _jsx(Select, {
+                                                    freeText: true,
+                                                    className: TB_INPUT,
+                                                    testId: "git-base-selector",
+                                                    ariaLabel: "Base ref",
+                                                    value: compareBase,
+                                                    onChange: setCompareBase,
+                                                    placeholder: "main",
+                                                    options: [
+                                                        ...new Map(refs.map((ref) => [ref.name, { value: ref.name, label: _jsxs(_Fragment, { children: [ref.name, " ", _jsx("span", {
+                                                                            className: "text-subtext-0",
+                                                                            children: ref.target.slice(0, 8)
+                                                                        })] }), text: ref.name }])).values()
+                                                    ]
+                                                })
+                                            }), _jsx("label", {
                                                 className: TB_FIELD,
-                                                children: [
-                                                    _jsx("span", { children: "Head" }),
-                                                    _jsx("input", {
-                                                        className: `${TB_INPUT} w-[7rem]`,
-                                                        "aria-label": "Head (optional)",
-                                                        value: compareHead,
-                                                        onChange: (event) => setCompareHead(event.target.value),
-                                                        placeholder: "HEAD"
-                                                    })
-                                                ]
-                                            }), _jsx("button", {
-                                                type: "button",
-                                                className: BTN_QUIET,
-                                                onClick: () => { setCompareBase(""); setCompareHead(""); setCompareOpen(false); setTarget({ kind: "workingTree" }); },
-                                                children: "Clear base"
+                                                title: "Head (optional)",
+                                                children: _jsx("input", {
+                                                    className: `${TB_INPUT} w-[6rem]`,
+                                                    "aria-label": "Head (optional)",
+                                                    value: compareHead,
+                                                    onChange: (event) => setCompareHead(event.target.value),
+                                                    placeholder: "HEAD"
+                                                })
+                                            }), _jsx(IconButton, {
+                                                icon: "clear",
+                                                label: "Clear base",
+                                                onClick: () => { setCompareBase(""); setCompareHead(""); setCompareOpen(false); setTarget({ kind: "workingTree" }); }
                                             })] })),
-                                    _jsxs("button", {
-                                        type: "button",
-                                        className: `${BTN_QUIET} ml-auto`,
-                                        "aria-expanded": optionsOpen,
-                                        onClick: () => setOptionsOpen(!optionsOpen),
+                                    _jsxs("div", {
+                                        className: "flex shrink-0 items-center gap-[0.15rem]",
                                         children: [
-                                            "Options",
-                                            optionsChanged ? " •" : ""
+                                            _jsx(IconButton, {
+                                                icon: "untracked",
+                                                label: "Untracked files",
+                                                pressed: includeUntracked,
+                                                onClick: () => setIncludeUntracked(!includeUntracked)
+                                            }),
+                                            _jsx(IconButton, {
+                                                icon: "wrap",
+                                                label: "Wrap lines",
+                                                pressed: wrapLines,
+                                                onClick: () => setWrapLines(!wrapLines)
+                                            }),
+                                            _jsx(IconButton, {
+                                                icon: "whitespace",
+                                                label: "Ignore whitespace",
+                                                pressed: ignoreWhitespace,
+                                                onClick: () => setIgnoreWhitespace(!ignoreWhitespace)
+                                            }),
+                                            canChooseLayout && _jsx("label", {
+                                                className: TB_FIELD,
+                                                title: "Diff layout",
+                                                children: _jsx(Select, {
+                                                    className: `${TB_INPUT} w-[5.2rem]`,
+                                                    testId: "git-diff-layout",
+                                                    ariaLabel: "Diff layout",
+                                                    value: diffLayout,
+                                                    onChange: (value) => setDiffLayout(value),
+                                                    options: [
+                                                        { value: "auto", label: "Auto" }, { value: "unified", label: "Unified" }, { value: "split", label: "Split" }
+                                                    ]
+                                                })
+                                            }),
+                                            _jsx("label", {
+                                                className: TB_FIELD,
+                                                title: "Context lines",
+                                                children: _jsx(Select, {
+                                                    className: `${TB_INPUT} w-[3.6rem]`,
+                                                    ariaLabel: "Context",
+                                                    value: String(contextLines),
+                                                    onChange: (value) => setContextLines(Number(value)),
+                                                    options: [
+                                                        { value: "0", label: "±0" }, { value: "3", label: "±3" }, { value: "8", label: "±8" }
+                                                    ]
+                                                })
+                                            })
                                         ]
                                     })
                                 ]
                             }),
-                            optionsOpen && (_jsxs("div", {
-                                className: "flex shrink-0 flex-wrap items-center gap-x-[0.9rem] gap-y-[0.3rem] px-[0.7rem] pb-[0.4rem]",
-                                children: [
-                                    _jsxs("label", {
-                                        className: TB_CHECK,
-                                        children: [
-                                            _jsx("input", {
-                                                type: "checkbox",
-                                                checked: includeUntracked,
-                                                onChange: (event) => setIncludeUntracked(event.target.checked)
-                                            }),
-                                            " Untracked"
-                                        ]
-                                    }),
-                                    _jsxs("label", {
-                                        className: TB_CHECK,
-                                        children: [
-                                            _jsx("input", {
-                                                type: "checkbox",
-                                                checked: wrapLines,
-                                                onChange: (event) => setWrapLines(event.target.checked)
-                                            }),
-                                            " Wrap lines"
-                                        ]
-                                    }),
-                                    canChooseLayout && _jsxs("label", {
-                                        className: TB_FIELD,
-                                        children: [
-                                            _jsx("span", { children: "Layout" }),
-                                            _jsx(Select, {
-                                                className: `${TB_INPUT} w-[6rem]`,
-                                                testId: "git-diff-layout",
-                                                ariaLabel: "Diff layout",
-                                                value: diffLayout,
-                                                onChange: (value) => setDiffLayout(value),
-                                                options: [
-                                                    { value: "auto", label: "Auto" }, { value: "unified", label: "Unified" }, { value: "split", label: "Split" }
-                                                ]
-                                            })
-                                        ]
-                                    }),
-                                    _jsxs("label", {
-                                        className: TB_CHECK,
-                                        children: [
-                                            _jsx("input", {
-                                                type: "checkbox",
-                                                checked: ignoreWhitespace,
-                                                onChange: (event) => setIgnoreWhitespace(event.target.checked)
-                                            }),
-                                            " Ignore whitespace"
-                                        ]
-                                    }),
-                                    _jsxs("label", {
-                                        className: TB_FIELD,
-                                        children: [
-                                            _jsx("span", { children: "Context" }),
-                                            _jsx(Select, {
-                                                className: `${TB_INPUT} w-[6rem]`,
-                                                ariaLabel: "Context",
-                                                value: String(contextLines),
-                                                onChange: (value) => setContextLines(Number(value)),
-                                                options: [
-                                                    { value: "0", label: "0 lines" }, { value: "3", label: "3 lines" }, { value: "8", label: "8 lines" }
-                                                ]
-                                            })
-                                        ]
-                                    })
-                                ]
-                            })),
                             preset === "lastAgentTurn" && lastAgentTurn && (
                             /* The gate asks for the *agent's* changes, so say whose turn this
                                is and how much it touched — a diff alone does not answer that. */

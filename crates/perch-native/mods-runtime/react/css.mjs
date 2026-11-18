@@ -39,7 +39,12 @@ const UA_RULES = [
   ["input", { padding: "1px 2px", "border-width": "2px", "border-style": "inset", "border-color": "buttonborder", "background-color": "field", color: "fieldtext" }],
   // A check box or radio button is WebKit's 12 px control with its margins (the reference's memory switch: 12 x 12,
   // 2 px from the label's edge, its row 18 px high).
-  ['input[type="checkbox"], input[type="radio"]', { width: "12px", height: "12px", margin: "3px 2px", padding: "0", "border-width": "0", "box-sizing": "border-box" }],
+  ['input[type="checkbox"], input[type="radio"]', { width: "12px", height: "12px", margin: "3px 2px", padding: "0", "border-width": "0", "box-sizing": "border-box", "border-radius": "3px" }],
+  // A ticked one is the app's accent with a mark, as the web's `accent-color: var(--accent)` draws it (the plain box
+  // gave no sign it was ticked). A radio button is round.
+  ['input[type="checkbox"]:checked, input[type="radio"]:checked', { "background-color": "var(--accent)", color: "var(--panel-bg)" }],
+  ['input[type="radio"]', { "border-radius": "6px" }],
+  ['input[type="checkbox"]:checked::before, input[type="radio"]:checked::before', { content: '"\u2713"', display: "block", width: "12px", "text-align": "center", "font-size": "10px", "font-weight": "700", "line-height": "12px" }],
   ["svg", { overflow: "hidden" }],
   ["[hidden]", { display: "none" }],
 ];

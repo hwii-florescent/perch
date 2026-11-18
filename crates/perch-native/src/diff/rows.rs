@@ -45,12 +45,26 @@ pub enum Row {
     Binary { file: usize },
 }
 
-/// The diff's rows, the widest line in characters (the shared width of unwrapped lines) and the largest line
-/// number (the number column's width).
+impl Row {
+    /// The index of the file this row belongs to.
+    pub fn file(&self) -> usize {
+        match self {
+            Row::File { file }
+            | Row::Hunk { file, .. }
+            | Row::Line { file, .. }
+            | Row::Pair { file, .. }
+            | Row::Thread { file, .. }
+            | Row::Binary { file } => *file,
+        }
+    }
+}
+
+/// The diff's rows, the widest line of each file in characters (the shared width of that file's unwrapped lines;
+/// each file scrolls sideways on its own) and the largest line number (the number column's width).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Rows {
     pub rows: Vec<Row>,
-    pub widest: usize,
+    pub widest: Vec<usize>,
     pub max_number: u32,
     /// Built as [`Row::Pair`]s rather than one [`Row::Line`] per line.
     pub split: bool,
@@ -146,6 +160,7 @@ pub fn build(
     let shown = path.filter(|p| diff.files.iter().any(|f| file_path(f) == *p));
     let mut out = Rows {
         split,
+        widest: vec![0; diff.files.len()],
         ..Rows::default()
     };
     for (fi, file) in diff.files.iter().enumerate() {
@@ -179,7 +194,7 @@ pub fn build(
         for (hi, hunk) in file.hunks.iter().enumerate() {
             out.rows.push(Row::Hunk { file: fi, hunk: hi });
             for line in &hunk.lines {
-                out.widest = out.widest.max(line.content.chars().count());
+                out.widest[fi] = out.widest[fi].max(line.content.chars().count());
                 out.max_number = out
                     .max_number
                     .max(line.old_line.unwrap_or(0))
@@ -449,7 +464,7 @@ mod tests {
     fn widest_line_counts_characters() {
         let mut f = file("a.rs", false);
         f.hunks[0].lines[0].content = "ééé".repeat(20);
-        assert_eq!(build(&diff(vec![f]), &[], None, false).widest, 60);
+        assert_eq!(build(&diff(vec![f]), &[], None, false).widest[0], 60);
     }
 
     #[test]
