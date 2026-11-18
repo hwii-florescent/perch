@@ -118,7 +118,8 @@ export function DiffView(props: Sdk.DiffViewProps) {
           <span className="shrink-0 text-[0.68rem] text-subtext-0 capitalize">{file.status}{file.isBinary ? " · binary" : ""}</span>
           {props.onAskAgent && <button type="button" className={`${BTN_QUIET} shrink-0`} disabled={file.isBinary || state.diffState !== "ready"} aria-label="Ask agent about diff…" title="Ask agent about this diff" onClick={() => props.onAskAgent?.(displayPath)}>Ask agent</button>}
         </header>
-        {file.isBinary ? <div className={EMPTY}>Binary content is not rendered. Status and path remain available for review.</div> : file.hunks.map((hunk, hunkIndex) => (
+        {/* Each file scrolls sideways on its own, with its own scrollbar (as GitHub's Files changed). */}
+        {file.isBinary ? <div className={EMPTY}>Binary content is not rendered. Status and path remain available for review.</div> : <div className={wrap ? "" : "overflow-x-auto overscroll-x-contain"} data-testid="git-diff-file-body"><div className={wrap ? "" : "min-w-max"}>{file.hunks.map((hunk, hunkIndex) => (
           <section key={`${displayPath}:${hunkIndex}`}>
             <div className="sticky left-0 w-[100cqi] bg-[color-mix(in_srgb,var(--accent)_8%,var(--panel-bg))] px-[0.7rem] py-[2px] text-accent [font-family:var(--font-mono)] text-[0.68rem]">{hunk.header || `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`}</div>
             {hunk.lines.map((line, lineIndex) => {
@@ -150,15 +151,14 @@ export function DiffView(props: Sdk.DiffViewProps) {
               );
             })}
           </section>
-        ))}
+        ))}</div></div>}
       </article>
     );
   }
 
   return (
-    <div className={cn("workspace-git__diff min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain", props.className)} data-testid="git-diff">
-      {/* One shared width: the widest line of any file. Per-file widths let scrolling run on past a short file's rows. */}
-      <div className={wrap ? "" : "min-w-max"}>{displayed.map(file)}</div>
+    <div className={cn("workspace-git__diff min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain", props.className)} data-testid="git-diff">
+      {displayed.map(file)}
     </div>
   );
 }
