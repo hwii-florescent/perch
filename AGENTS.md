@@ -12,12 +12,15 @@ Keep the UI quiet and useful without an agent or Git.
 - [Testing](docs/TESTING.md): commands, isolated probes and known limitations.
 - [Decisions](docs/DECISIONS.md): approved UX; older proposals are not approval.
 - [Alpha contract](docs/PUBLIC-ALPHA.md): release gates, not a missing-feature list.
+- [Native client](docs/NATIVE.md): GPUI client contracts; working in `crates/perch-native` means
+  reading `crates/perch-native/AGENTS.md` first (script budgets, stock screens, tests).
 
 ## Architecture and constraints
 
 - Rust owns domain logic/data: `crates/perch-core` (axum HTTP/WS + SQLite).
   `packages/web` is a thin React view; `crates/perch-desktop` embeds the same
   core in Tauri. Detached `crates/perchd` owns PTYs across app/core restarts.
+  `crates/perch-native` is a GPUI client of the same core that runs the web's stock screens.
 - Read the affected module's `//!` header and trace callers before changing it.
   Reuse existing services/components; keep domain logic out of React.
 - Keep `crates/perch-core/src/protocol.rs` and

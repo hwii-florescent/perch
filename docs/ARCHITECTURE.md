@@ -33,18 +33,15 @@ shells, real agent CLIs
 - **Native client** (`crates/perch-native`, GPUI) is another view of the same core: it finds a
   running headless core through the `core.json` it writes and speaks the same protocol. Each
   terminal is its own libghostty-vt fed the same bytes as xterm.js (output and the daemon's repaint);
-  there is no cell stream. Tabs, splits and their layout are local to the window and are not restored.
-  It attaches a session by its saved launch provider, never the one seen running, and never
-  attaches one whose launch provider is unknown. A listed session nobody has launched anything in
-  (no provider, `cliStarted` false) lists the launch choices in its tab instead, and the one
-  picked attaches that session, as the web's `startCli` does; a session started with no recorded
-  provider keeps the refusal. Closing a tab ends its session as the web does
-  (`session.delete` over the terminal's own connection, the tab going only when the core confirms;
-  an agent's tab asks first while `warnCloseAgent` is on; a view that only watches, or has no
-  attached terminal, just closes). Links from terminal output
-  open only `http`, `https`, `mailto` and plain non-executable files.
-  What it cannot show (files, changes, browser, chat, settings beyond terminals) it hands to the
-  Tauri app with `perch://open`. It is not in default builds.
+  there is no cell stream. Tabs, splits and their layout are local to the window: a workspace's
+  strip is its sessions from the core plus file, review and browser tabs kept on this device
+  ([NATIVE](NATIVE.md)). It attaches a session by its saved launch provider, never the one seen
+  running, and never attaches one whose launch provider is unknown. A blank session lists the launch
+  choices in its tab, as the web's `startCli` does. Closing a tab ends its session as the web does
+  (`session.delete`, the tab going only when the core confirms; `warnCloseAgent` asks first).
+  Chrome (sidebar, tabs, files, Git, review, settings) is the web's stock screens run on a native
+  React runtime; Files, the editor, diffs and the browser are native engines under them. It is not
+  in default builds. Agent rules: `crates/perch-native/AGENTS.md`.
 - **Web** renders WS-driven state and owns view-local presentation. Do not
   confuse focus/layout with runtime authority.
 - **Stock screens** (`packages/web/src/stock-ui/<id>/`) are presentation only and

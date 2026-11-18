@@ -7,6 +7,27 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-18 — Review comments inline, per-file sideways scroll; native tabs follow the web (owner)
+
+Owner, for the review on both the web and the native client (replaces the composer part of 2026-11-16):
+
+- The comment composer opens inline under the selected line or range, inside the diff, as GitHub's
+  does. The agent session that receives the comments is chosen in the review header and sent with an
+  explicit send (Context Bridge). Test ids `git-diff`, `git-comment-composer`, `git-comment-body` stay.
+- Each file scrolls sideways on its own with a visible scrollbar; one wheel or trackpad gesture moves
+  one axis. The diff has a vertical scrollbar, and a tree click scrolls to the file instead of
+  filtering to it. Files fold and can be marked Viewed.
+
+Native client, by parity with the web (lead, from the owner's request the same day):
+
+- A workspace's strip lists every session of that workspace from the core, as `workspaceTabs.ts`
+  does, plus its file, review and browser tabs. Non-session tabs, their order, split sets, the active
+  tab and tabs closed without ending a session are kept on this device and come back after a relaunch.
+- The drawer's Files and Git follow the focused terminal's directory (`terminalScopeId`), and a file
+  tab opened from there outlives that terminal.
+- The sidebar's Sort by attention is off by default, as the web's, and its view settings are kept
+  on this device.
+
 ## 2026-11-16 — The review's comment composer stays below the diff (owner, SDK 1.12)
 
 Owner, for the review on both the web and the native client:
