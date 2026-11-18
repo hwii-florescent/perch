@@ -482,20 +482,34 @@ impl Workspace {
         self.sync_strips(cx);
     }
 
-    /// The workspace tab `id` belongs to: the strip it is in; else a file, review or browser tab
-    /// names its workspace, or a Files scope filed under one (a terminal's folder), in its id; a
+    /// The workspace tab `id` belongs to: the strip it is in, or the strip holding another tab of
+    /// its scope; else a file, review or browser tab names its workspace, or a Files scope filed
+    /// under one (a terminal's folder), in its id. A terminal's folder whose terminal has ended
+    /// and has no tab left stays on the strip on screen: a scope is never a strip of its own. A
     /// session is in the one the core records (an older record, the one at its folder). Empty when
     /// the session is unknown.
     fn tab_workspace(&self, id: &str, cx: &App) -> String {
         let store = &self.sidebar.read(cx).model().store;
         if let Some((scope, _)) = id.split_once('\n') {
-            if self.tabs.contains(id) && !self.tabs_of.is_empty() {
-                return self.tabs_of.clone();
+            let prefix = format!("{scope}\n");
+            let holds = |tabs: &Tabs, exact: bool| {
+                tabs.contains(id) || !exact && tabs.strip().iter().any(|t| t.starts_with(&prefix))
+            };
+            for exact in [true, false] {
+                if holds(&self.tabs, exact) && !self.tabs_of.is_empty() {
+                    return self.tabs_of.clone();
+                }
+                if let Some((home, _)) = self.parked.iter().find(|(_, (t, _))| holds(t, exact)) {
+                    return home.clone();
+                }
             }
-            if let Some((home, _)) = self.parked.iter().find(|(_, (t, _))| t.contains(id)) {
-                return home.clone();
-            }
-            return navigation::scope_workspace(store, scope).unwrap_or_else(|| scope.to_string());
+            return navigation::scope_workspace(store, scope).unwrap_or_else(|| {
+                if scope.starts_with("term:") {
+                    self.tabs_of.clone()
+                } else {
+                    scope.to_string()
+                }
+            });
         }
         store
             .sessions
