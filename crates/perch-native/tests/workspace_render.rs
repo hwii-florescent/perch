@@ -1234,6 +1234,16 @@ fn a_peek_is_a_terminal_over_the_window() {
         h.run("terminal.park", json!({})).is_err(),
         "nothing left to put away"
     );
+    // A tab out of sight whose terminal was warm before the peek keeps it after.
+    h.run("tab.select", json!({"id": "bravo"})).unwrap();
+    h.run("tab.select", json!({"id": "alpha"})).unwrap();
+    assert!(h.ws(|ws| ws.view("bravo").is_some()), "bravo is warm");
+    h.run("terminal.peek", json!({"id": "bravo"})).unwrap();
+    h.run("terminal.park", json!({})).unwrap();
+    assert!(
+        h.ws(|ws| ws.view("bravo").is_some()),
+        "a warm tab stays warm after a peek"
+    );
     // A second peek of the same session puts it away too.
     h.run("terminal.peek", json!({"id": "bravo"})).unwrap();
     h.run("terminal.peek", json!({"id": "bravo"})).unwrap();

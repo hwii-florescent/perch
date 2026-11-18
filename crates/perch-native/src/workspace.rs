@@ -239,6 +239,9 @@ pub struct Workspace {
     /// The session whose terminal is over the window for a moment (`terminal.peek`), with no tab
     /// of its own unless it is kept.
     peek: Option<String>,
+    /// The peeked tab's terminal was attached before the peek (a warm tab out of sight), so
+    /// putting the peek away keeps it.
+    peek_was_warm: bool,
     /// The leader chord was pressed; dropped when its time is up.
     leader: Option<Task<()>>,
     /// Resize mode is armed (the leader's `r`); each of its keys arms it afresh, and it is
@@ -355,7 +358,13 @@ impl Workspace {
         // The sidebar's own changes (hiding it, a count, a session's state) redraw the window.
         let observed = cx.observe(&sidebar, |this, sidebar, cx| {
             this.close_deleted(cx);
+            // A strip change that moves the keyboard (the core listed the active session under
+            // another workspace) shows the next tab as a click would: its terminal attaches.
+            let was = this.tabs.active().map(str::to_string);
             this.sync_strips(cx);
+            if was.is_some() && this.tabs.active() != was.as_deref() {
+                this.after_change(cx);
+            }
             let connected = sidebar.read(cx).model().connected;
             this.files_connected(connected, cx);
             this.refresh_bridge(cx);
@@ -377,6 +386,7 @@ impl Workspace {
             tick: 0,
             viewport_height: 0.0,
             peek: None,
+            peek_was_warm: false,
             leader: None,
             resizing: None,
             history: History::default(),
@@ -482,20 +492,34 @@ impl Workspace {
         self.sync_strips(cx);
     }
 
-    /// The workspace tab `id` belongs to: the strip it is in; else a file, review or browser tab
-    /// names its workspace, or a Files scope filed under one (a terminal's folder), in its id; a
+    /// The workspace tab `id` belongs to: the strip it is in, or the strip holding another tab of
+    /// its scope; else a file, review or browser tab names its workspace, or a Files scope filed
+    /// under one (a terminal's folder), in its id. A terminal's folder whose terminal has ended
+    /// and has no tab left stays on the strip on screen: a scope is never a strip of its own. A
     /// session is in the one the core records (an older record, the one at its folder). Empty when
     /// the session is unknown.
     fn tab_workspace(&self, id: &str, cx: &App) -> String {
         let store = &self.sidebar.read(cx).model().store;
         if let Some((scope, _)) = id.split_once('\n') {
-            if self.tabs.contains(id) && !self.tabs_of.is_empty() {
-                return self.tabs_of.clone();
+            let prefix = format!("{scope}\n");
+            let holds = |tabs: &Tabs, exact: bool| {
+                tabs.contains(id) || !exact && tabs.strip().iter().any(|t| t.starts_with(&prefix))
+            };
+            for exact in [true, false] {
+                if holds(&self.tabs, exact) && !self.tabs_of.is_empty() {
+                    return self.tabs_of.clone();
+                }
+                if let Some((home, _)) = self.parked.iter().find(|(_, (t, _))| holds(t, exact)) {
+                    return home.clone();
+                }
             }
-            if let Some((home, _)) = self.parked.iter().find(|(_, (t, _))| t.contains(id)) {
-                return home.clone();
-            }
-            return navigation::scope_workspace(store, scope).unwrap_or_else(|| scope.to_string());
+            return navigation::scope_workspace(store, scope).unwrap_or_else(|| {
+                if scope.starts_with("term:") {
+                    self.tabs_of.clone()
+                } else {
+                    scope.to_string()
+                }
+            });
         }
         store
             .sessions
@@ -1649,10 +1673,13 @@ impl Workspace {
         }
         match drag.drop {
             Drop::Strip(Some(slot)) => {
-                let before = self.strip_sessions(cx);
-                let index = drag.landing(slot, self.tabs.strip()).unwrap_or(slot + 1);
-                self.tabs.move_tab(&drag.id, index);
-                self.save_strip(before, cx);
+                // The neighbour the slot was beside is gone: nothing is moved, as `slot` counts
+                // only the tabs the strip drew.
+                if let Some(index) = drag.landing(slot, self.tabs.strip()) {
+                    let before = self.strip_sessions(cx);
+                    self.tabs.move_tab(&drag.id, index);
+                    self.save_strip(before, cx);
+                }
             }
             Drop::Pane {
                 target,
@@ -4361,6 +4388,7 @@ impl Workspace {
                 .ok_or("That session is gone.")?,
         };
         self.park_peek(cx);
+        self.peek_was_warm = self.panes.get(id).is_some_and(|pane| pane.view.is_some());
         let view = match self.panes.get(id).and_then(|pane| pane.view.clone()) {
             Some(view) => Some(view),
             None => self.attach(&open, cx),
@@ -4388,10 +4416,11 @@ impl Workspace {
         let Some(id) = self.peek.take() else {
             return false;
         };
-        // A tab on screen keeps its terminal; one out of sight lets go until it is shown.
+        // A tab on screen keeps its terminal, as does one out of sight that was warm before the
+        // peek; any other lets go until it is shown.
         if !self.every_tabs().any(|tabs| tabs.contains(&id)) {
             self.panes.remove(&id);
-        } else if !self.tabs.shown().contains(&id) {
+        } else if !self.tabs.shown().contains(&id) && !self.peek_was_warm {
             if let Some(pane) = self.panes.get_mut(&id) {
                 pane.view = None;
                 pane.retry = None;

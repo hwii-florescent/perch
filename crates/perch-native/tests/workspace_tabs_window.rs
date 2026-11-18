@@ -23,6 +23,11 @@ fn message(value: Value) -> ServerMessage {
 
 /// Projects `p` (checkout `w1`: alpha, bravo), `q` (`w2`: delta) and Quickchat (`w3`: chat).
 fn state() -> State {
+    state_with(|_| {})
+}
+
+/// `state`, with `edit` applied to each session as the core lists it.
+fn state_with(edit: impl Fn(&mut Value)) -> State {
     let project = |id: &str, path: &str| {
         json!({"id": id, "hostId": "local", "name": id, "path": path,
             "favorite": false, "createdAt": 0, "updatedAt": 0})
@@ -59,9 +64,11 @@ fn state() -> State {
     .iter()
     .enumerate()
     .map(|(i, (id, project, workspace, cwd))| {
-        json!({"id": id, "title": id, "cwd": cwd, "createdAt": i, "status": "idle",
-            "hostId": "local", "projectId": project, "workspaceId": workspace,
-            "cliProviderId": "claude"})
+        let mut session = json!({"id": id, "title": id, "cwd": cwd, "createdAt": i,
+            "status": "idle", "hostId": "local", "projectId": project, "workspaceId": workspace,
+            "cliProviderId": "claude"});
+        edit(&mut session);
+        session
     })
     .collect();
     state.apply(&message(
@@ -99,7 +106,7 @@ fn main() {
         })
         .unwrap();
     let workspace = window.entity(&cx).unwrap();
-    cx.update(|cx| mods::start_in(user, &workspace, window.into(), cx));
+    cx.update(|cx| mods::start_in(user.clone(), &workspace, window.into(), cx));
 
     let settle = |cx: &mut HeadlessAppContext| {
         for _ in 0..3 {
@@ -236,6 +243,8 @@ fn main() {
             })
         })
         .unwrap();
+    let workspace = window.entity(&cx).unwrap();
+    cx.update(|cx| mods::start_in(user, &workspace, window.into(), cx));
     settle(&mut cx);
     window
         .update(&mut cx, |ws, _, cx| {
@@ -262,10 +271,245 @@ fn main() {
     assert_eq!(active.as_deref(), Some("bravo"));
     assert!(split, "the split set comes back");
 
+    // A shell that left its workspace's folder: the drawer's Files follow it, a file opened there
+    // joins w1's strip, and stays after the terminal ends; the next file opened from that folder
+    // joins the same strip, never one of the folder's own.
+    let core_says = |cx: &mut HeadlessAppContext, state: State| {
+        let model = state.model();
+        window
+            .update(cx, |ws, _, cx| {
+                ws.sidebar().update(cx, |s, cx| {
+                    s.apply(perch_native::client::Update::Model(model), cx)
+                })
+            })
+            .unwrap();
+        settle(cx);
+    };
+    let tabs = |cx: &mut HeadlessAppContext| {
+        settle(cx);
+        window
+            .update(cx, |ws, _, _| {
+                (
+                    ws.tabs().strip().to_vec(),
+                    ws.tabs().active().map(str::to_string),
+                )
+            })
+            .unwrap()
+    };
+    let away = |s: &mut Value| {
+        if s["id"] == "alpha" {
+            s["currentCwd"] = json!("/away");
+        }
+    };
+    core_says(&mut cx, state_with(away));
+    window
+        .update(&mut cx, |ws, window, cx| {
+            ws.run_command("tab.select", Some(&json!({"id": "alpha"})), window, cx)
+                .unwrap();
+            ws.show_files("w1", cx);
+        })
+        .unwrap();
+    settle(&mut cx);
+    window.update(&mut cx, |_, _, cx| cx.notify()).unwrap();
+    settle(&mut cx);
+    let perch = cx.update(|cx| cx.global::<WindowMods>().perch.clone());
+    let drawer = |perch: &perch_native::mods::perch::Perch| {
+        perch
+            .props_of("files#drawer")
+            .map(|p| p["workspaceId"].clone())
+    };
+    let scope = "term:alpha:L2F3YXk"; // `/away`, base64url
+    assert_eq!(drawer(&perch), Some(json!(scope)), "Files follow the cd");
+    let a = format!("{scope}\na.rs");
+    window
+        .update(&mut cx, |ws, _, cx| ws.open_file(scope, "a.rs", false, cx))
+        .unwrap();
+    let (strip, active) = tabs(&mut cx);
+    assert_eq!(active.as_deref(), Some(a.as_str()));
+    assert!(
+        strip.contains(&"bravo".to_string()),
+        "still w1's strip: {strip:?}"
+    );
+    // The core says the terminal ended and was deleted.
+    let mut ended = state_with(away);
+    ended.apply(&message(
+        json!({"type": "session.deleted", "sessionId": "alpha"}),
+    ));
+    core_says(&mut cx, ended);
+    let (strip, _) = tabs(&mut cx);
+    assert!(
+        !strip.contains(&"alpha".to_string()),
+        "alpha ended: {strip:?}"
+    );
+    assert!(
+        strip.contains(&a),
+        "the file outlives its terminal: {strip:?}"
+    );
+    window
+        .update(&mut cx, |ws, window, cx| {
+            ws.run_command("tab.select", Some(&json!({"id": a.clone()})), window, cx)
+        })
+        .unwrap()
+        .unwrap();
+    window.update(&mut cx, |_, _, cx| cx.notify()).unwrap();
+    settle(&mut cx);
+    assert_eq!(
+        drawer(&perch),
+        Some(json!(scope)),
+        "Files stay on that folder"
+    );
+    window
+        .update(&mut cx, |ws, _, cx| ws.open_file(scope, "b.rs", false, cx))
+        .unwrap();
+    let (strip, active) = tabs(&mut cx);
+    assert_eq!(active, Some(format!("{scope}\nb.rs")));
+    assert!(
+        strip.contains(&a) && strip.contains(&"bravo".to_string()),
+        "the second file joins w1's strip too: {strip:?}"
+    );
+
     window
         .update(&mut cx, |_, window, _| window.remove_window())
         .unwrap();
     cx.run_until_parked();
+
+    // An older window state: open files in `files` and each workspace's last tab in
+    // `native-last-tabs.json` beside the mods folder. The first launch files both into w1's strip
+    // and writes strips in their place; later launches read the strips only.
+    let last_tabs = scratch.join("native-last-tabs.json");
+    std::fs::write(
+        &kept,
+        json!({"tools": "files", "files": ["w1\nsrc/old.rs"]}).to_string(),
+    )
+    .unwrap();
+    std::fs::write(&last_tabs, json!({"w1": "bravo"}).to_string()).unwrap();
+    let launch = |cx: &mut HeadlessAppContext| {
+        let model = state().model();
+        let window = cx
+            .open_window(size(px(1000.), px(900.)), |_, cx| {
+                cx.new(|cx| {
+                    Workspace::new(model, None, cx)
+                        .with_core(|| Err(anyhow::anyhow!("no core in this test")))
+                        .with_window_state(kept.clone())
+                })
+            })
+            .unwrap();
+        settle(cx);
+        window
+            .update(cx, |ws, window, cx| {
+                ws.run_command("workspace.open", Some(&json!({"id": "w1"})), window, cx)
+                    .unwrap();
+                cx.notify();
+            })
+            .unwrap();
+        settle(cx);
+        let shown = window
+            .update(cx, |ws, _, _| {
+                (
+                    ws.tabs().strip().to_vec(),
+                    ws.tabs().active().map(str::to_string),
+                )
+            })
+            .unwrap();
+        window
+            .update(cx, |_, window, _| window.remove_window())
+            .unwrap();
+        cx.run_until_parked();
+        shown
+    };
+    let (strip, active) = launch(&mut cx);
+    assert!(
+        strip.contains(&"w1\nsrc/old.rs".to_string()) && strip.contains(&"bravo".to_string()),
+        "the old file and last tab are in w1's strip: {strip:?}"
+    );
+    assert_eq!(active.as_deref(), Some("bravo"), "the last tab is shown");
+    let saved: Value = serde_json::from_slice(&std::fs::read(&kept).unwrap()).unwrap();
+    assert!(saved.get("files").is_none(), "the old key is gone: {saved}");
+    assert_eq!(saved["tools"], json!("files"), "the rest is kept: {saved}");
+    let kept_strip = saved["tabs"]["strips"]["w1"]["strip"].clone();
+    assert!(
+        kept_strip
+            .as_array()
+            .is_some_and(|s| s.contains(&json!("w1\nsrc/old.rs"))),
+        "w1's strip is written: {saved}"
+    );
+    // The old last-tab file says otherwise now: it is not read again.
+    std::fs::write(&last_tabs, json!({"w1": "alpha"}).to_string()).unwrap();
+    let (again, active) = launch(&mut cx);
+    assert_eq!(again, strip, "the strip comes back from strips");
+    assert_eq!(active.as_deref(), Some("bravo"), "not the old file's tab");
+
+    moved_active_session_shows_the_next(&mut cx, &scratch.join("moved.json"));
     let _ = std::fs::remove_dir_all(&scratch);
     println!("workspace_tabs_window: ok");
+}
+
+/// The core lists the active session under another workspace: it leaves the strip, and the tab
+/// shown in its place has its terminal, as if clicked, not a blank pane.
+fn moved_active_session_shows_the_next(cx: &mut HeadlessAppContext, kept: &std::path::Path) {
+    let settle = |cx: &mut HeadlessAppContext| {
+        for _ in 0..3 {
+            cx.advance_clock(POLL);
+            cx.run_until_parked();
+        }
+    };
+    let model = state().model();
+    let kept = kept.to_path_buf();
+    let window = cx
+        .open_window(size(px(1000.), px(900.)), |_, cx| {
+            cx.new(|cx| {
+                Workspace::new(model, None, cx)
+                    .with_core(|| Err(anyhow::anyhow!("no core in this test")))
+                    .with_window_state(kept)
+            })
+        })
+        .unwrap();
+    settle(cx);
+    window
+        .update(cx, |ws, _, cx| {
+            ws.sidebar().update(cx, |s, cx| {
+                s.open("local".into(), "alpha".into(), Some("claude".into()), cx)
+            })
+        })
+        .unwrap();
+    settle(cx);
+    let (strip, bravo_view) = window
+        .update(cx, |ws, _, _| {
+            (ws.tabs().strip().to_vec(), ws.view("bravo").is_some())
+        })
+        .unwrap();
+    assert_eq!(strip, strings(&["alpha", "bravo"]));
+    assert!(!bravo_view, "bravo waits, parked, until shown");
+    let model = state_with(|s| {
+        if s["id"] == "alpha" {
+            s["workspaceId"] = json!("w2");
+            s["projectId"] = json!("q");
+            s["cwd"] = json!("/other");
+        }
+    })
+    .model();
+    window
+        .update(cx, |ws, _, cx| {
+            ws.sidebar().update(cx, |s, cx| {
+                s.apply(perch_native::client::Update::Model(model), cx)
+            })
+        })
+        .unwrap();
+    settle(cx);
+    let (strip, active, bravo_view) = window
+        .update(cx, |ws, _, _| {
+            (
+                ws.tabs().strip().to_vec(),
+                ws.tabs().active().map(str::to_string),
+                ws.view("bravo").is_some(),
+            )
+        })
+        .unwrap();
+    assert_eq!(strip, strings(&["bravo"]), "alpha moved to w2");
+    assert_eq!(active.as_deref(), Some("bravo"));
+    assert!(bravo_view, "the tab shown in its place has its terminal");
+    window
+        .update(cx, |_, window, _| window.remove_window())
+        .unwrap();
+    cx.run_until_parked();
 }

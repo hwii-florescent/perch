@@ -34,7 +34,9 @@ inside `mods/`.
   a 40-session sidebar costs ~20-50 ms. Consequences:
   - no work per pointer move in script: hover, drag following and scrolling must be done by the
     Rust side (GPUI hover styles, `tab_drag.rs`, native scroll) with **zero script renders**
-    (`tests/mods_responsive.rs` asserts hover);
+    (`tests/mods_responsive.rs` asserts hover). One bounded exception: during a tab drag **no
+    screen other than the strip and its ghost re-renders**, and their script stays under 4 ms a
+    move with 20 tabs (`tests/tab_order_window.rs`, release);
   - keep props small and stable; memoise rows; never send a whole store to a screen per tick;
   - measure with `tests/screen_engine_measure.rs` before and after anything on a hot path.
 - The core owns every fact (sessions, their order, state, cwd). Unknown is shown as unknown,
