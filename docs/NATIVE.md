@@ -31,7 +31,8 @@ behave the same. Agents: start with [`crates/perch-native/AGENTS.md`](../crates/
 | Product targets | mounted tab switch p95 ≤ 50 ms, restore inactive view p95 ≤ 150 ms | `PRODUCT-STRATEGY.md` |
 
 QuickJS has no JIT. Hover, drag following and scrolling run in Rust with zero script renders
-(`tests/mods_responsive.rs`). Measure hot paths with `tests/screen_engine_measure.rs`.
+(`tests/mods_responsive.rs`). During a tab drag no screen other than the strip and its ghost
+re-renders; their script stays under 4 ms a move with 20 tabs (`tests/tab_order_window.rs`, release). Measure hot paths with `tests/screen_engine_measure.rs`.
 
 ## Workspaces and tabs
 

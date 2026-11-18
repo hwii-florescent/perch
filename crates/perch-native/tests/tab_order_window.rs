@@ -36,6 +36,11 @@ fn message(value: Value) -> ServerMessage {
 /// Project `p`, checkout `w1`: `leader` with its sub-sessions `p4` and `p7`, then `perf` and
 /// `leak`, oldest first; with the core's chat order `order`, when given.
 fn state(order: Option<&[&str]>) -> State {
+    state_with(order, 0)
+}
+
+/// `state`, plus `more` sessions `s0`.. after the five, for a long strip.
+fn state_with(order: Option<&[&str]>, more: usize) -> State {
     let project = json!({"id": "p", "hostId": "local", "name": "Work", "path": "/work",
         "favorite": false, "createdAt": 0, "updatedAt": 0});
     let checkout = json!({"id": "w1", "projectId": "p", "hostId": "local", "path": "/work",
@@ -52,6 +57,7 @@ fn state(order: Option<&[&str]>) -> State {
     state.apply(&message(json!({
         "type": "workspace.snapshot", "requestId": "r", "hostId": "local", "snapshotEpoch": "e",
         "snapshotRevision": 1, "projects": [project], "workspaces": [checkout]})));
+    let extra: Vec<String> = (0..more).map(|n| format!("s{n}")).collect();
     let sessions: Vec<Value> = [
         ("leader", None),
         ("p4", Some("leader")),
@@ -59,7 +65,8 @@ fn state(order: Option<&[&str]>) -> State {
         ("perf", None),
         ("leak", None),
     ]
-    .iter()
+    .into_iter()
+    .chain(extra.iter().map(|id| (id.as_str(), None)))
     .enumerate()
     .map(|(i, (id, parent))| {
         json!({"id": id, "title": id, "cwd": "/work", "createdAt": i, "status": "idle",
@@ -259,7 +266,8 @@ fn main() {
 
     // While a tab is dragged along the strip, each move re-renders the strip (its tabs slide)
     // and the drag's own screen, and no other screen: the sidebar, the status line and the rest
-    // read nothing that moves with the pointer.
+    // read nothing that moves with the pointer. That re-render is accepted because it is cheap:
+    // under 4 ms of script a move with 20 tabs in a release build (`drag_cost_with_twenty_tabs`).
     let at = |(x, y): (f32, f32)| point(px(x), px(y));
     let moving = |x: f32, y: f32| {
         PlatformInput::MouseMove(MouseMoveEvent {
@@ -393,6 +401,8 @@ fn main() {
     assert_eq!(rig.rows(), moved, "the sidebar takes the core's order");
     assert_eq!(rig.strip(), moved, "and so does the strip");
 
+    drag_cost_with_twenty_tabs(&mut rig, &perch);
+
     rig.cx
         .update_window(rig.window.into(), |_, window, _| window.remove_window())
         .unwrap();
@@ -400,6 +410,91 @@ fn main() {
     pointer_leaving_ends_hover(&mut rig.cx);
     let _ = std::fs::remove_dir_all(&scratch);
     println!("tab_order_window: ok");
+}
+
+/// What one pointer move costs in script while a tab is dragged along a 20-tab strip: the strip's
+/// own re-render (its tabs slide) plus the ghost's. Bounded at 4 ms per move in a release build,
+/// well inside a 60-120 Hz pointer and the 50 ms render budget; a debug build only prints it.
+fn drag_cost_with_twenty_tabs(rig: &mut Rig, perch: &perch_native::mods::perch::Perch) {
+    rig.core_says(state_with(None, 15));
+    for n in 0..15 {
+        rig.ws(|ws, _, cx| {
+            ws.sidebar().update(cx, |s, cx| {
+                s.open("local".into(), format!("s{n}"), Some("claude".into()), cx)
+            })
+        });
+    }
+    assert_eq!(rig.strip().len(), 20, "a 20-tab strip");
+    let at = |(x, y): (f32, f32)| point(px(x), px(y));
+    let moving = |x: f32, y: f32| {
+        PlatformInput::MouseMove(MouseMoveEvent {
+            position: at((x, y)),
+            pressed_button: Some(MouseButton::Left),
+            modifiers: Modifiers::default(),
+        })
+    };
+    // The strip scrolls to its active (last opened) tab: drag that one to the leftmost tab shown.
+    let mut shown: Vec<(f32, f32)> = rig
+        .draw()
+        .into_iter()
+        .filter(|r| r.name.starts_with("tab:") && f32::from(r.bounds.origin.x) >= 0.)
+        .map(|r| {
+            (
+                f32::from(r.bounds.center().x),
+                f32::from(r.bounds.center().y),
+            )
+        })
+        .collect();
+    shown.sort_by(|a, b| a.0.total_cmp(&b.0));
+    assert!(shown.len() >= 8, "most of the strip is shown: {shown:?}");
+    let (to, from) = (shown[0], *shown.last().unwrap());
+    rig.input(PlatformInput::MouseDown(MouseDownEvent {
+        button: MouseButton::Left,
+        position: at(from),
+        modifiers: Modifiers::default(),
+        click_count: 1,
+        first_mouse: false,
+    }));
+    rig.input(moving(from.0 - 10., from.1));
+    let host = rig.cx.update(|cx| cx.global::<WindowMods>().host.clone());
+    let before = (host.metrics(), perch.refreshes());
+    let steps = 40;
+    for i in 1..=steps {
+        let x = from.0 - 10. + (to.0 - from.0 + 10.) * i as f32 / steps as f32;
+        rig.input(moving(x, from.1));
+    }
+    assert!(
+        rig.ws(|ws, _, _| ws.screens_open()).contains(&"tab-drag"),
+        "the drag is on"
+    );
+    let spent = host.metrics().since(&before.0);
+    let strip_renders = perch.refreshes().get("tabs").copied().unwrap_or(0)
+        - before.1.get("tabs").copied().unwrap_or(0);
+    let per_move = spent.script_render_time() / steps;
+    println!(
+        "tab_order_window: 20-tab drag, {steps} moves: strip renders {strip_renders}, script \
+         renders {}, script render {:.2} ms per move (slowest render {:.2} ms)",
+        spent.script_renders(),
+        per_move.as_secs_f64() * 1000.,
+        spent.slowest_script_render().as_secs_f64() * 1000.,
+    );
+    if !cfg!(debug_assertions) {
+        assert!(
+            per_move < std::time::Duration::from_millis(4),
+            "a drag move costs under 4 ms of script with 20 tabs: {per_move:?}"
+        );
+    }
+    rig.input(PlatformInput::KeyDown(gpui::KeyDownEvent {
+        keystroke: gpui::Keystroke::parse("escape").unwrap(),
+        is_held: false,
+        prefer_character_input: false,
+    }));
+    rig.input(PlatformInput::MouseUp(MouseUpEvent {
+        button: MouseButton::Left,
+        position: at(to),
+        modifiers: Modifiers::default(),
+        click_count: 1,
+    }));
 }
 
 /// An element hovered when the pointer leaves the window is no longer hovered, though no move
