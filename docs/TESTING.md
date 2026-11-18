@@ -74,14 +74,14 @@ PERCH_E2E_WEBKIT=1 npx playwright test --project=webkit <spec>
   spec or config must never start an agent under the real home. To check a change, run a
   real-Claude spec such as `cli-sync.spec.ts` and read the TCC log for the test binary:
   `log show --last 5m --predicate 'subsystem == "com.apple.TCC" AND eventMessage CONTAINS "AUTHREQ_PROMPTING"'`
-  should list nothing for your worktree's `target/debug/perch-core`. `device-pairing.spec.ts`
-  and `workspace-recovery.spec.ts` fail with and without it (below).
+  should list nothing for your worktree's `target/debug/perch-core`. `workspace-recovery.spec.ts`
+  fails with and without it (below).
 - Known base failures (not regressions, same on a clean checkout): `federation.spec.ts` E2,
   `settings.spec.ts` D3, `sidebar.spec.ts` 2d, `wave2.spec.ts` X1, `remote-git.spec.ts` RG2 and
   `remote-workspace.spec.ts` RW4, `workspace-recovery.spec.ts` (its core's sidebar opens By status,
-  so the project tree it looks for is absent) and `device-pairing.spec.ts` (the resize check:
-  after the phone reloads, its new connection takes both leases from the laptop and resizes the PTY; the
-  "working" check passes now that its fixture agent is a `node` script, since the core never takes `sh` for an agent). Also, on a clean `8a02934` with the
+  so the project tree it looks for is absent). `device-pairing.spec.ts` passes again (2026-11-18, headless
+  Chromium, ~40 s): a phone fits a shared terminal to itself only on its first opening, remembered across a
+  reload, so a reload no longer takes the laptop's size lease. Also, on a clean `8a02934` with the
   2026-11-08 working-tree snapshot (Chromium, 2026-11-09): `workspace-tabs.spec.ts` W2 (leader `_`
   splits nothing: W1's sessions are Quickchat chats with no workspace) and `responsive.spec.ts` R9
   (the held row's `row-menu` never opens) fail alone and in the suite; `pane-splitting.spec.ts` P1
