@@ -26,7 +26,7 @@ use gpui::{
     div, fill, list, point, prelude::*, px, size, AnyElement, App, Axis, Bounds, Context,
     DispatchPhase, EventEmitter, FocusHandle, Focusable, Hitbox, HitboxBehavior, Hsla,
     KeyDownEvent, ListAlignment, ListOffset, ListState, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Rgba, ScrollWheelEvent, SharedString, TouchPhase, Window,
+    MouseMoveEvent, MouseUpEvent, Pixels, Rgba, ScrollEvent, SharedString, TouchPhase, Window,
 };
 use gpui_base::input::{InputEvent, Textarea, TextareaState};
 use perch_core::review::{ReviewComment, ReviewSide, ReviewStatus};
@@ -808,7 +808,7 @@ impl DiffView {
 
     /// A wheel step over a row of `file`. A gesture moves one axis only, the one it mostly moved in its first step:
     /// down the list, or sideways through that file's lines (Shift turns a mouse wheel sideways).
-    fn on_wheel(&mut self, file: usize, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+    fn on_wheel(&mut self, file: usize, event: &ScrollEvent, cx: &mut Context<Self>) {
         let delta = event.delta.pixel_delta(px(LINE_HEIGHT));
         let (dx, dy) = if event.modifiers.shift && delta.x == px(0.) {
             (f32::from(delta.y), 0.)
@@ -1057,7 +1057,7 @@ impl Frame {
         let view = self.view.clone();
         div()
             .w_full()
-            .on_scroll_wheel(move |event, window, cx| {
+            .on_scroll(move |event, window, cx| {
                 let _ = window;
                 view.update(cx, |view, cx| view.on_wheel(file, event, cx))
                     .ok();

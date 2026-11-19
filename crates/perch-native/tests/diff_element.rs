@@ -10,7 +10,7 @@
 use gpui::{
     point, px, size, AppContext as _, Entity, HeadlessAppContext, Keystroke, Modifiers,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, PlatformInput, Point,
-    ScrollDelta, ScrollWheelEvent, TouchPhase, Window, WindowHandle,
+    ScrollDelta, ScrollEvent, TouchPhase, Window, WindowHandle,
 };
 use perch_core::review::{
     AnchorConfidence, LineRange, ReviewAnchor, ReviewComment, ReviewSide, ReviewStatus,
@@ -252,7 +252,8 @@ impl Rig {
     }
 
     fn wheel(&mut self, delta: Point<f32>, modifiers: Modifiers) {
-        self.input(PlatformInput::ScrollWheel(ScrollWheelEvent {
+        self.input(PlatformInput::Scroll(ScrollEvent {
+            source: gpui::ScrollSource::Pointer,
             position: point(px(WIDTH / 2.), px(HEIGHT / 2.)),
             delta: ScrollDelta::Lines(point(delta.x, delta.y)),
             modifiers,
@@ -262,7 +263,8 @@ impl Rig {
 
     /// One wheel step at `at`, in lines, as the step of a gesture in `phase`.
     fn wheel_at(&mut self, at: Point<Pixels>, delta: Point<f32>, phase: TouchPhase) {
-        self.input(PlatformInput::ScrollWheel(ScrollWheelEvent {
+        self.input(PlatformInput::Scroll(ScrollEvent {
+            source: gpui::ScrollSource::Pointer,
             position: at,
             delta: ScrollDelta::Lines(point(delta.x, delta.y)),
             modifiers: Modifiers::default(),
@@ -317,7 +319,10 @@ impl Rig {
     fn key(&mut self, spec: &str) {
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {
-                window.dispatch_keystroke(Keystroke::parse(spec).unwrap(), cx);
+                window.dispatch_keystroke(
+                    Keystroke::parse_with_os(spec, gpui::OperatingSystem::Mac).unwrap(),
+                    cx,
+                );
             })
             .unwrap();
         self.draw();

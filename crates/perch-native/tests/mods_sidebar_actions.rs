@@ -167,7 +167,7 @@ impl Rig {
     }
 
     fn press(&mut self, spec: &str) {
-        let keystroke = Keystroke::parse(spec).unwrap();
+        let keystroke = Keystroke::parse_with_os(spec, gpui::OperatingSystem::Mac).unwrap();
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {
                 window.dispatch_keystroke(keystroke, cx)

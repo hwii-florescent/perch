@@ -58,7 +58,7 @@ use gpui::{
     canvas, div, fill, outline, point, prelude::*, px, rgb, size, App, BorderStyle, Bounds,
     Context, Corners, ElementInputHandler, EntityInputHandler, EventEmitter, FocusHandle,
     Focusable, Hsla, KeyDownEvent, Keystroke, Modifiers, MouseButton as GpuiButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, RenderImage, ScrollWheelEvent, SharedString, Size,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, RenderImage, ScrollEvent, SharedString, Size,
     Task, TextAlign, TextRun, UTF16Selection, Window, WindowAppearance,
 };
 use perch_core::agent_fleet::AgentState;
@@ -1798,7 +1798,7 @@ impl TerminalView {
 
     /// A wheel or trackpad event. The program gets it when it takes the mouse; on the alternate
     /// screen without the mouse it gets arrow keys; otherwise the scrollback moves.
-    pub fn scroll_wheel(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+    pub fn scroll_wheel(&mut self, event: &ScrollEvent, cx: &mut Context<Self>) {
         let Some(fit) = self.fitted else { return };
         let (cols, rows) = self.vt.size();
         let steps = scroll::steps(
@@ -2978,7 +2978,7 @@ impl gpui::Render for TerminalView {
                     this.drop_files(dropped.paths(), window.modifiers().alt, cx);
                 }),
             )
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
+            .on_scroll(cx.listener(|this, event: &ScrollEvent, _, cx| {
                 this.scroll_wheel(event, cx);
                 cx.stop_propagation();
             }))

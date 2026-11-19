@@ -362,7 +362,7 @@ mod tests {
     use super::*;
 
     fn stroke(text: &str) -> Keystroke {
-        Keystroke::parse(text).unwrap()
+        Keystroke::parse_with_os(text, gpui::OperatingSystem::Mac).unwrap()
     }
 
     fn sent(vt: &mut Vt, text: &str) -> Vec<u8> {

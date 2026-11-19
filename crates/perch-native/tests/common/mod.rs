@@ -393,7 +393,7 @@ impl Harness {
 
     /// A key through the window's own path. True when the window took it.
     pub fn press(&mut self, spec: &str) -> bool {
-        self.key(Keystroke::parse(spec).unwrap())
+        self.key(Keystroke::parse_with_os(spec, gpui::OperatingSystem::Mac).unwrap())
     }
 
     pub fn key(&mut self, keystroke: Keystroke) -> bool {

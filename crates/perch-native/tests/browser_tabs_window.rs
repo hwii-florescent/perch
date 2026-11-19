@@ -299,7 +299,10 @@ fn type_keys(rig: &mut Rig, keys: &[&str]) {
     for key in keys {
         rig.cx
             .update_window(rig.window.into(), |_, window: &mut Window, cx| {
-                window.dispatch_keystroke(gpui::Keystroke::parse(key).unwrap(), cx)
+                window.dispatch_keystroke(
+                    gpui::Keystroke::parse_with_os(key, gpui::OperatingSystem::Mac).unwrap(),
+                    cx,
+                )
             })
             .unwrap();
         probed(rig, "none");
