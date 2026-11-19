@@ -9,6 +9,9 @@
 //! acts on it). The link names a place and a session id and nothing else: no credential, no path,
 //! nothing to run.
 //!
+//! The native app registers the scheme itself (`scripts/reinstall-desktop-native.sh`) and reads
+//! the same grammar with [`parse_link`]; the window acts on it in `workspace/links.rs`.
+//!
 //! Only a click calls [`open_in_perch`]; nothing here runs on its own.
 
 use std::io;
@@ -25,6 +28,14 @@ pub enum Place {
 }
 
 impl Place {
+    const ALL: [Place; 5] = [
+        Place::Files,
+        Place::Changes,
+        Place::Browser,
+        Place::Chat,
+        Place::Settings,
+    ];
+
     fn name(self) -> &'static str {
         match self {
             Place::Files => "files",
@@ -54,6 +65,36 @@ pub fn perch_url(session_id: Option<&str>, place: Place) -> String {
         url.push_str(id);
     }
     url
+}
+
+/// A `perch://open` link read: where to go, and on which session.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Link {
+    pub place: Place,
+    pub session: Option<String>,
+}
+
+/// The request in `url`, or `None` for anything that is not exactly an open link: another scheme
+/// or host, an unknown place or option, a repeated option, an id with other characters. This is
+/// the grammar of `crates/perch-desktop/src/open_url.rs` and `packages/web/src/openRequest.ts`.
+/// Values are taken as written (no percent-decoding), so nothing is smuggled in by encoding.
+pub fn parse_link(url: &str) -> Option<Link> {
+    let query = url.strip_prefix("perch://open?")?;
+    let (mut place, mut session) = (None, None);
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=')?;
+        match key {
+            "place" if place.is_none() => {
+                place = Place::ALL.into_iter().find(|p| p.name() == value)
+            }
+            "session" if session.is_none() && is_session_id(value) => session = Some(value),
+            _ => return None,
+        }
+    }
+    Some(Link {
+        place: place?,
+        session: session.map(str::to_string),
+    })
 }
 
 /// Hand `url` to the system. Call it only from a click: it brings another app forward.
@@ -167,6 +208,58 @@ mod tests {
         ] {
             assert!(perch_url(None, place).ends_with(name));
         }
+    }
+
+    #[test]
+    fn a_link_made_here_reads_back() {
+        for place in Place::ALL {
+            for session in [None, Some("host:3f2a-b.9_x")] {
+                assert_eq!(
+                    parse_link(&perch_url(session, place)),
+                    Some(Link {
+                        place,
+                        session: session.map(str::to_string)
+                    })
+                );
+            }
+        }
+        // Order does not matter.
+        assert_eq!(
+            parse_link("perch://open?session=s1&place=settings"),
+            Some(Link {
+                place: Place::Settings,
+                session: Some("s1".into())
+            })
+        );
+    }
+
+    #[test]
+    fn anything_else_is_not_a_link() {
+        for url in [
+            "perch://open",
+            "perch://open?",
+            "perch://open?place=",
+            "perch://open?place=terminal",
+            "perch://open?place=Files",
+            "perch://open?session=s1",
+            "perch://open?place=files&place=chat",
+            "perch://open?place=files&session=s1&session=s2",
+            "perch://open?place=files&run=ls",
+            "perch://open?place=files&session=",
+            "perch://open?place=files&session=a%2Fb",
+            "perch://open?place=files&session=a b",
+            "perch://open?place=files&session=../x",
+            "perch://open?place=files&session=a#b",
+            "perch://open?place=files&&session=s1",
+            "perch://open/?place=files",
+            "perch://elsewhere?place=files",
+            "https://open?place=files",
+            "file:///etc/passwd",
+        ] {
+            assert_eq!(parse_link(url), None, "{url}");
+        }
+        let long = format!("perch://open?place=files&session={}", "x".repeat(129));
+        assert_eq!(parse_link(&long), None);
     }
 
     #[test]

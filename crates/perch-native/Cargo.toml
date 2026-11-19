@@ -208,6 +208,11 @@ path = "tests/workspace_session.rs"
 harness = false
 
 [[test]]
+name = "perch_links_window"
+path = "tests/perch_links_window.rs"
+harness = false
+
+[[test]]
 name = "workspace_shared_tabs"
 path = "tests/workspace_shared_tabs.rs"
 harness = false

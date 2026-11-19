@@ -165,6 +165,22 @@ fn a_tab_opens_its_page_where_its_pane_is_drawn() {
     assert_eq!(rig.shown(), [PAGE]);
 }
 
+/// `perch://open?place=browser` is `browser.open` on the session's workspace, or the shown one.
+fn a_perch_link_opens_a_blank_browser_tab() {
+    let mut rig = Rig::new();
+    rig.window
+        .update(&mut rig.cx, |ws, window, cx| {
+            ws.open_link("perch://open?place=browser", window, cx)
+        })
+        .unwrap();
+    rig.draw();
+    let shown = rig.shown();
+    assert!(
+        shown.len() == 1 && shown[0].starts_with("w1\n\0browser\nblank:"),
+        "{shown:?}"
+    );
+}
+
 fn another_tab_hides_the_page_and_closing_ends_it() {
     let mut rig = Rig::new();
     rig.run(
@@ -368,6 +384,7 @@ fn main() {
     typing_in_an_empty_tabs_address();
     new_file_from_the_strip();
     a_tab_opens_its_page_where_its_pane_is_drawn();
+    a_perch_link_opens_a_blank_browser_tab();
     another_tab_hides_the_page_and_closing_ends_it();
     the_address_goes_into_the_history_once_per_change();
     println!("browser_tabs_window: ok");

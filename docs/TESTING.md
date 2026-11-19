@@ -520,6 +520,10 @@ three failures for the same reason.
   and holding a link that launches the app until the page claims it) and `packages/web/src/openRequest.ts`
   (acting on it, once the session is listed) have their own tests; neither opens the system opener.
   `cargo test -p perch-desktop` needs the web bundle to exist, as every build of that crate does.
+  The native app reads the same grammar (`handoff::parse_link`, unit tests beside `perch_url`) and
+  `tests/perch_links_window.rs` feeds links to `Workspace::open_link` against a real core child (a link before the
+  core answers, files, changes, chat, malformed and unknown-session links); the browser place is in
+  `tests/browser_tabs_window.rs`. Neither runs `open perch://…`: that needs the installed bundle and takes focus.
 - A plain shell inside a project has no sidebar row (Show terminals off), so `terminal_session` starts shells in
   Chats; the render tests give their sessions an agent provider for the same reason.
 - Remote computers go through the core's hub on the same socket, so they are tested as messages in
