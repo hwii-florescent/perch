@@ -1512,6 +1512,12 @@ const ELEMENT_METHODS: &str = r#"    /**
      */
     measure<Self extends Element>(this: Self, key: string): Self;
     /**
+     * PERCH: keeps this element out of the test probe: one that is not shown
+     * keeps its name as its id (and what GPUI keeps under it) without being
+     * recorded as drawn.
+     */
+    unprobed<Self extends Element>(this: Self, value?: boolean): Self;
+    /**
      * PERCH: names this element as a hover group: a descendant's
      * `group_hover(name, ...)` styles apply while the pointer is over it.
      */
@@ -4049,6 +4055,7 @@ mod tests {
         "measure",      // PERCH: an element's box for the host (`measure`).
         "group",        // PERCH: a hover group (`group_hover`).
         "also_named",   // PERCH: one more name a test reads the box by (`probe`).
+        "unprobed",     // PERCH: kept out of the probe (`probe`).
         "on_item_click",
         "on_item_secondary_click",
         "on_change",

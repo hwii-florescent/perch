@@ -401,6 +401,9 @@ struct Behavior {
     measure: Option<SharedString>,
     /// PERCH: more names a test reads this element's box by, beside its `id` (`also_named`).
     also_named: Vec<SharedString>,
+    /// PERCH: kept out of the probe (`unprobed`): an element that is not shown keeps its name as
+    /// its id, so what GPUI keeps under it (a scroll position) survives, but is not recorded drawn.
+    unprobed: bool,
     /// The key-binding context this element and its subtree sit in.
     ///
     /// What a keymap's `context` predicate is matched against, so a chord can
@@ -880,7 +883,7 @@ fn materialize_node(
 
     // PERCH: a named node records its box, colours and font for tests (`probe`).
     #[cfg(feature = "render-test-support")]
-    let probe = behavior.key.clone().map(|name| {
+    let probe = behavior.key.clone().filter(|_| !behavior.unprobed).map(|name| {
         let also = behavior.also_named.clone();
         (name, also, Box::new(refinement.clone()))
     });
@@ -3598,6 +3601,8 @@ fn apply_behavior(behavior: &mut Behavior, name: &str, args: &[Bridged]) {
                 .and_then(|value| value.as_str().ok())
                 .map(SharedString::from);
         }
+        // PERCH: not recorded by the probe (`unprobed`).
+        "unprobed" => behavior.unprobed = flag.unwrap_or(true),
         // PERCH: one more name for the element's box in tests (`probe`).
         "also_named" => behavior.also_named.extend(
             args.first()

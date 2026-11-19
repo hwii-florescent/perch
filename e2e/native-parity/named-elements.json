@@ -3183,6 +3183,11 @@
           }
         },
         {
+          "name": "git-rail-toggle",
+          "selector": "[data-testid=\"git-rail-toggle\"]",
+          "description": "The header button that shows or hides the rail of changed files."
+        },
+        {
           "name": "git-changes",
           "selector": "[role=\"tree\"][aria-label=\"Changed paths\"]",
           "description": "The scrolling list of changed files in the rail."
