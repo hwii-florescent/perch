@@ -1224,7 +1224,12 @@ pub(super) fn handle_terminal_resize(
     }
 }
 
-pub(super) fn handle_terminal_kill(state: &Arc<ConnState>, raw_text: &str, terminal_id: String) {
+pub(super) fn handle_terminal_kill(
+    state: &Arc<ConnState>,
+    raw_text: &str,
+    terminal_id: String,
+    stop_sub_sessions: bool,
+) {
     // Route remote terminals through the hub.
     if let Some(host_id) = state.app.hub.route_for_terminal(&terminal_id) {
         state.app.hub.forward(&host_id, raw_text);
@@ -1238,16 +1243,11 @@ pub(super) fn handle_terminal_kill(state: &Arc<ConnState>, raw_text: &str, termi
             .get(&lifecycle_control_key(&key, ControlChannel::Input))
             .cloned();
         if let Some(lease) = lease {
-            // Stopping a lead stops what it started, each confirmed on its own, before the lead:
-            // its exit would otherwise promote them to ordinary sessions first.
             let app = state.app.clone();
             tokio::task::spawn_blocking(move || {
-                if let Err(error) = super::sub_sessions::stop_children_of(&app, &key.session_id) {
-                    tracing::warn!(%error, "children of a stopped lead may still be running");
-                }
-                if let Err(error) = app.agent_runtime.stop(&key, &lease, now_millis()) {
-                    tracing::warn!(?error, "could not stop a lead's agent");
-                }
+                super::sub_sessions::stop_lead(&app, &key, stop_sub_sessions, || {
+                    app.agent_runtime.stop(&key, &lease, now_millis())
+                });
             });
         }
         return;

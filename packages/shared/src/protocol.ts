@@ -1358,6 +1358,9 @@ export interface TerminalResizeMessage {
 export interface TerminalKillMessage {
   type: "terminal.kill";
   terminalId: string;
+  /** A lead's sub-sessions are stopped too, once the lead's stop is confirmed; otherwise they keep running as
+   * ordinary sessions. */
+  stopSubSessions?: boolean;
 }
 
 export interface AgentManifestListMessage {

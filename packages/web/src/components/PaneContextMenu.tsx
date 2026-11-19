@@ -4,7 +4,8 @@
  * `DockviewController` (split/close/maximize plumbing stays there), the split sets and the agent stop, for `panelId`.
  */
 import type { DockviewController } from "../dockview/dockviewController";
-import { canStopAgent, stopAgent } from "../agentTerminals";
+import { canStopAgent } from "../agentTerminals";
+import { requestStopAgent } from "../closeGuard";
 import { useSplitSets } from "../splitSets";
 import { splitActiveTab } from "../tiledPanes";
 import PaneMenu from "../stock-ui/pane-menu/main";
@@ -36,7 +37,7 @@ export function PaneContextMenu({ panelId, title, x, y, controller, sessionId, o
       showBesideTab: (left: number, top: number) => { if (sessionId) useSplitSets.getState().openMenu(sessionId, left, top); },
       toggleZoom: () => { controller.setActivePanel(panelId); controller.toggleMaximizeActive(); },
       rename: (name: string) => controller.renamePanel(panelId, name),
-      stopAgent: () => { if (sessionId) stopAgent(sessionId); },
+      stopAgent: () => { if (sessionId) requestStopAgent(sessionId); },
       close: () => { if (!controller.canClosePanel(panelId)) return; controller.setActivePanel(panelId); controller.closeActiveTerminalPanel(); },
     },
   };

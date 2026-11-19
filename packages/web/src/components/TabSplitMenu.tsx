@@ -7,7 +7,8 @@
 import { MAX_SPLIT, useSplitSets, visibleSplit } from "../splitSets";
 import { activateTab, entryLabel, type TabEntry } from "../workspaceTabs";
 import { closeTab, exitSplit, splitActiveTab } from "../tiledPanes";
-import { canStopAgent, stopAgent } from "../agentTerminals";
+import { canStopAgent } from "../agentTerminals";
+import { requestStopAgent } from "../closeGuard";
 import { effectiveWorkspace, usePerchStore } from "../store";
 import TabMenu from "../stock-ui/tab-menu/main";
 import { StockRoute } from "./mod-root";
@@ -47,7 +48,7 @@ export function TabSplitMenu({ entries, menu, onClose = useSplitSets.getState().
       showBeside: (otherId: string) => { useSplitSets.getState().split(menu.id, otherId); activateTab(self); },
       showFull: () => { exitSplit(menu.id); activateTab(self); },
       separateAll: () => { useSplitSets.getState().untile(menu.id); activateTab(self); },
-      stopAgent: () => stopAgent(self.id),
+      stopAgent: () => requestStopAgent(self.id),
       close: () => closeTab(self.id),
     },
   };

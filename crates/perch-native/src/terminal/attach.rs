@@ -34,8 +34,9 @@ pub enum ToCore {
     TakeSize,
     /// Give the size up, so another view sizes the shell.
     GiveSize,
-    /// End the shell. Needs the input lease.
-    Kill,
+    /// End the shell. Needs the input lease. A lead's sub-sessions stop too only with
+    /// `stop_sub_sessions`, once the lead has; otherwise they keep running as ordinary sessions.
+    Kill { stop_sub_sessions: bool },
     /// End the session, from this connection, which holds the keyboard: the core refuses to end
     /// a session another connection controls. It answers with [`FromCore::Ended`] or
     /// [`FromCore::EndRefused`]. A lead's sub-sessions stop with it only with
@@ -381,7 +382,9 @@ async fn run(
                         }
                         taken
                     }
-                    Some(ToCore::Kill) => connection.terminal_kill(&terminal).await,
+                    Some(ToCore::Kill { stop_sub_sessions }) => {
+                        connection.terminal_kill(&terminal, stop_sub_sessions).await
+                    }
                     Some(ToCore::Request { mut frame, reply }) => {
                         let id = connection.request_id();
                         frame["requestId"] = serde_json::Value::from(id.clone());

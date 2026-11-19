@@ -547,9 +547,10 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
             rows,
             generation,
         } => terminal::handle_terminal_resize(state, raw_text, terminal_id, cols, rows, generation),
-        ClientMessage::TerminalKill { terminal_id } => {
-            terminal::handle_terminal_kill(state, raw_text, terminal_id)
-        }
+        ClientMessage::TerminalKill {
+            terminal_id,
+            stop_sub_sessions,
+        } => terminal::handle_terminal_kill(state, raw_text, terminal_id, stop_sub_sessions),
 
         // -----------------------------------------------------------------------
         // Settings & hosts (Stage D)

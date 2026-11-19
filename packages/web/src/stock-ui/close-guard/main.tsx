@@ -6,7 +6,8 @@
 //! The decision stays Perch's: `onStop` stops the session (and, with `never`, turns this warning off in Settings),
 //! `onKeepRunning` only dismisses this view of it, `onCancel` does nothing. A lead with `subSessions` asks
 //! what becomes of them: "Keep them as sessions" (the default, Enter) leaves them running as ordinary sessions in
-//! the lead's place, "Close all sub-sessions" stops them with it. The question is `ConfirmDialog` from
+//! the lead's place, "Close all sub-sessions" stops them with it. A Stop of a lead (`action: "stop"`) asks the same
+//! question, and only that one. The question is `ConfirmDialog` from
 //! `@perch/sdk`, so a copy chosen for `stock:confirm` draws it.
 //!
 //! This file is the source of a package: `scripts/export-stock-ui.mjs` turns it into the plain JS the app runs and
@@ -15,9 +16,23 @@
 import { useState } from "react";
 import { ConfirmDialog, type CloseGuardProps } from "@perch/sdk";
 
-export default function CloseGuard({ label, subSessions = 0, onStop, onKeepRunning, onCancel }: CloseGuardProps) {
+export default function CloseGuard({ label, action = "close", subSessions = 0, onStop, onKeepRunning, onCancel }: CloseGuardProps) {
   const [never, setNever] = useState(false);
   const subs = subSessions === 1 ? "1 sub-session" : `${subSessions} sub-sessions`;
+  if (action === "stop") {
+    return (
+      <ConfirmDialog
+        message={`Stop "${label}"?\n\nIt has ${subs}: keep them running as sessions where it was, or close them too once it has stopped.`}
+        confirmLabel="Keep them as sessions"
+        onCancel={onCancel}
+        onConfirm={() => onStop(false, false)}
+      >
+        <button type="button" className="mb-4 block text-sm underline" data-testid="close-guard-stop-sub-sessions" onClick={() => onStop(false, true)}>
+          Close all sub-sessions
+        </button>
+      </ConfirmDialog>
+    );
+  }
   return (
     <ConfirmDialog
       message={subSessions > 0

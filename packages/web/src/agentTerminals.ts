@@ -129,11 +129,13 @@ export function resizeAgentTerminal(terminalId: string, cols: number, rows: numb
 }
 
 /** Kill the agent this client drives in `sessionId`. Only the view holding
- * input may stop it (the server checks the lease too). */
-export function stopAgent(sessionId: string): boolean {
+ * input may stop it (the server checks the lease too). A lead's sub-sessions
+ * stop too only with `stopSubSessions`, once the lead has; otherwise they keep
+ * running as ordinary sessions. A person's Stop asks first (`requestStopAgent`). */
+export function stopAgent(sessionId: string, stopSubSessions = false): boolean {
   for (const [terminalId, view] of views) {
     if (view.status.key.sessionId !== sessionId || !view.leases.input) continue;
-    socket.send({ type: "terminal.kill", terminalId });
+    socket.send(stopSubSessions ? { type: "terminal.kill", terminalId, stopSubSessions } : { type: "terminal.kill", terminalId });
     return true;
   }
   return false;

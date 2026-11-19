@@ -1755,6 +1755,8 @@ declare module "@perch/sdk" {
   export interface CloseGuardProps {
     sessionId: string;
     label: string;
+    /** `stop`: a Stop of the session asks only whether its sub-sessions stop too (absent: closing its tab). */
+    action?: "close" | "stop";
     /** How many sub-sessions the session has (absent: none). */
     subSessions?: number;
     /** Stops the session; `never` also turns this warning off. With sub-sessions, `stopSubSessions` stops

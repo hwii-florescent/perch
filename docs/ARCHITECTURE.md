@@ -507,7 +507,10 @@ the core, not the agent, decides:
   leaves nothing behind.
 - *Stop* is by the lead for its own children only. The record goes `stopping`, the core terminates the
   process and confirms it is gone (`stop_confirmed`, like session delete), and only then records
-  `stopped`. A person stopping a lead (terminal kill) stops its live children the same way.
+  `stopped`. A person stopping a lead (`terminal.kill`, after the close guard's question when it has
+  children) stops the lead first (`sub_sessions::stop_lead`); with `stopSubSessions` its live children
+  are stopped the same way once the lead's stop is confirmed (its exit does not promote them meanwhile),
+  otherwise they are promoted. If the lead's stop fails, its children keep running as its children.
 - *A confirmed stop closes the child* like a person's Close (`session::close_stopped_child`): its
   agents and shells end, its runtime records and saved snapshot go (so no restart restores it as
   `reconnecting`), and `session.deleted` reaches every window, which drops its tabs and sidebar row.

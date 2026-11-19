@@ -2279,7 +2279,12 @@ fn ownership_and_named_actions() {
 
     // Kill with the lease asks the core to end the shell.
     assert!(h.view(|v, cx| v.perform(Action::Kill, cx)));
-    assert_eq!(h.sent(), vec![ToCore::Kill]);
+    assert_eq!(
+        h.sent(),
+        vec![ToCore::Kill {
+            stop_sub_sessions: false
+        }]
+    );
 
     // A hibernated agent exits its terminal but is not lost.
     h.say(FromCore::Agent(info(
