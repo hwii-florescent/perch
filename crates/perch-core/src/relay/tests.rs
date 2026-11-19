@@ -326,10 +326,7 @@ async fn a_phone_pairs_and_works_through_the_relay_and_tampering_ends_its_sessio
         Arc::new(crate::db::HistoryDb::open(&db_path).unwrap()),
         root.display().to_string(),
     ));
-    let address = tokio::time::timeout(Duration::from_secs(5), ready_rx)
-        .await
-        .unwrap()
-        .unwrap();
+    let address = crate::server::ready_address(ready_rx).await;
     let mut desktop_request = loopback(address, "/ws").into_client_request().unwrap();
     desktop_request.headers_mut().insert(
         "authorization",

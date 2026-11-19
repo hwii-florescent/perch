@@ -878,10 +878,7 @@ mod tests {
             db.clone(),
             root.display().to_string(),
         ));
-        let address = tokio::time::timeout(Duration::from_secs(5), ready_rx)
-            .await
-            .unwrap()
-            .unwrap();
+        let address = crate::server::ready_address(ready_rx).await;
         lead_with_child(&db, &nest, SubState::Running);
         let (mut socket, _) = tokio_tungstenite::connect_async(
             crate::hub::socket_request(&format!("ws://{address}/ws"), Some(&token)).unwrap(),

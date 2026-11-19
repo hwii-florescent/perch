@@ -72,10 +72,7 @@ async fn a_loopback_caller_needs_a_token_on_every_route() {
         db.clone(),
         root.display().to_string(),
     ));
-    let address = tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx)
-        .await
-        .unwrap()
-        .unwrap();
+    let address = crate::server::ready_address(ready_rx).await;
     let token = local_ui.token().to_string();
     let agent = db
         .issue(&AgentKey::new("nest", "alpha", "claude").unwrap())
@@ -245,10 +242,7 @@ async fn a_sign_in_code_buys_the_local_cookie_once() {
         Arc::new(HistoryDb::open(&db_path).unwrap()),
         root.display().to_string(),
     ));
-    let address = tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx)
-        .await
-        .unwrap()
-        .unwrap();
+    let address = crate::server::ready_address(ready_rx).await;
     let code = local_ui.issue_login_code();
 
     assert_eq!(http(address, "GET", "/local-login", &[]).await.0, 403);
