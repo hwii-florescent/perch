@@ -49,9 +49,11 @@ projection differs from the core's:
 - order: remote's, unless local reordered the ids it shares with `base` (then local's, with remote's
   additions after their remote predecessor);
 - sets: local's if local changed them since `base`, else remote's; a set whose members are not all
-  in the result is dropped.
+  in the result is dropped. "Changed" compares a canonical form (the tree, sizes in thousandths,
+  no key order), so a set one client rewrote is not a change.
 
-With no `base` yet (first state after launch), `base` is the device's own projection: remote wins,
+The `base` survives a reconnect, so changes made offline are merged, not overwritten. With no
+`base` yet (first state after launch), `base` is the device's own projection: remote wins,
 and the device's unshareable tabs (mod tabs, terminal-scoped tabs) keep their places.
 Same function in TS (`sharedTabs.ts`) and Rust (`tabs.rs`).
 
@@ -59,7 +61,7 @@ Same function in TS (`sharedTabs.ts`) and Rust (`tabs.rs`).
 
 On connect the core seeds a workspace that has no row from its most recently updated
 `viewer_presentations` row whose layout is the web's v1 (`strip`, `sets`), filtered by the same
-rule. The per-viewer rows are never changed or deleted, so an older client still reads its own.
+rule, with ended sessions dropped; if that row leaves nothing, an older one is not used. The per-viewer rows are never changed or deleted, so an older client still reads its own.
 A workspace with no legacy row gets its first row from whichever device writes first (native's
 `.window.json` strips migrate this way). The native `.window.json` strips stay as a cache: they
 restore the window offline and before the core answers, and the core's state replaces them.

@@ -249,10 +249,15 @@ only) keeps one strip per workspace: tab ids (session ids and the web's `fileTab
 in order and split sets, written by the web (`sharedTabs.ts`) and native alike and
 broadcast to every connection. A write carries the revision it was made against; a
 stale one is refused to its writer alone, who merges (same rule in `sharedTabs.ts`
-and native `tabs::merge`) and writes again. Session ids only mark places: a client
-never removes one, the core drops ended ones. Mod tabs and terminal-scoped tabs stay
-on their device. A workspace with no row is seeded once from its newest per-viewer
-presentation, which is left as it was.
+and native `tabs::merge`, checked against the shared cases in
+`packages/shared/fixtures/shared-tabs-merge.json`; split sets compare in one canonical
+form) and writes again. A client keeps the state it last merged across a reconnect, so
+what changed while away is merged, and writes again whatever an unanswered write may
+have lost. Session ids only mark places: a client never removes one, the core drops
+ended ones and ones of another workspace (one it cannot look up stays). Mod tabs and
+terminal-scoped tabs stay on their device. A workspace with no row is seeded once from
+its newest per-viewer presentation alone, without ended sessions; that presentation is
+left as it was.
 
 Viewer focus (the active tab) is independent across windows and devices. Files/reviews have no
 session parent in the resource model, but the current WS client still resumes
