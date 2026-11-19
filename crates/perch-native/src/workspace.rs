@@ -613,11 +613,21 @@ impl Workspace {
 
     /// The strip's tabs as drawn, the web's rule (`workspaceTabs`): a file of a terminal's folder
     /// (its tab keyed by that terminal's `term:` scope) is left out while another session of the
-    /// workspace is on screen and its terminal is still open.
+    /// workspace is on screen and its terminal is still open. A session id this window cannot
+    /// resolve (the core does not list it, as a stopped sub-session, and no terminal of it is
+    /// open here) keeps its place in the strip, as it may resolve later, but draws nothing.
     pub fn drawn_strip(&self, cx: &App) -> Vec<String> {
         let store = &self.sidebar.read(cx).model().store;
         let active = self.tabs.active().filter(|id| Tabs::is_session(id));
+        let unknown = |id: &str| {
+            Tabs::is_session(id)
+                && !self.panes.contains_key(id)
+                && !store.sessions.iter().any(|s| s.id == id)
+        };
         let hidden = |id: &str| {
+            if unknown(id) {
+                return true;
+            }
             let Some(terminal) = id
                 .strip_prefix("term:")
                 .and_then(|rest| rest.split(':').next())

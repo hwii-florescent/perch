@@ -40,6 +40,11 @@ fn git(dir: &Path, args: &[&str]) {
 
 /// `POST {base}agent/spawn` as the lead's `perch spawn` sends it.
 fn spawn(base: &str, token: &str, body: Value) -> Value {
+    agent(base, token, "spawn", body)
+}
+
+/// `POST {base}agent/<verb>` as the lead's `perch <verb>` sends it.
+fn agent(base: &str, token: &str, verb: &str, body: Value) -> Value {
     let address = base
         .trim_start_matches("http://")
         .trim_end_matches('/')
@@ -48,7 +53,7 @@ fn spawn(base: &str, token: &str, body: Value) -> Value {
     let mut stream = std::net::TcpStream::connect(&address).unwrap();
     write!(
         stream,
-        "POST /agent/spawn HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {token}\r\n\
+        "POST /agent/{verb} HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {token}\r\n\
          Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )
@@ -56,7 +61,7 @@ fn spawn(base: &str, token: &str, body: Value) -> Value {
     let mut answer = String::new();
     stream.read_to_string(&mut answer).unwrap();
     let (head, json) = answer.split_once("\r\n\r\n").unwrap();
-    assert!(head.starts_with("HTTP/1.1 200"), "spawn refused: {answer}");
+    assert!(head.starts_with("HTTP/1.1 200"), "{verb} refused: {answer}");
     serde_json::from_str(json).unwrap()
 }
 
@@ -123,7 +128,7 @@ fn window(rig: &mut Rig) {
             Duration::from_millis(100),
         ))
     };
-    let mut h = Harness::new(core, commands, updates);
+    let mut h = Harness::new(core.clone(), commands, updates);
     let workspace_entity = h.window.entity(&h.cx).unwrap();
     let window_handle = h.window.into();
     let user = rig.scratch.join("native-mods");
@@ -243,6 +248,53 @@ fn window(rig: &mut Rig) {
     assert_eq!(
         (&line["cwd"], &line["branch"]),
         (&json!(folder), &json!("main"))
+    );
+
+    // A stopped sub-session leaves the core's list, but the core keeps its id in the lead's shared
+    // strip (a session row of this workspace). A window that starts after that (the app relaunched)
+    // takes the strip with an id it cannot resolve: it keeps its place there and draws no tab, never
+    // an invented "New session" one.
+    agent(
+        &base,
+        &token,
+        "stop",
+        json!({"session": lead, "target": plain}),
+    );
+    h.wait("the stopped sub-session to leave the core's list", |h| {
+        !store(h).sessions.iter().any(|s| s.id == plain)
+    });
+    h.settle();
+    assert!(
+        store(&mut h).shared_tabs[&workspace].strip.contains(&plain),
+        "the core keeps the stopped sub-session in the lead's strip"
+    );
+    h.close();
+    follower.abort();
+
+    let (commands, command_rx) = futures::channel::mpsc::unbounded();
+    let (update_tx, updates) = futures::channel::mpsc::unbounded();
+    let follower = {
+        let core = core.clone();
+        runtime.spawn(follow(
+            move || Ok(core.clone()),
+            command_rx,
+            update_tx,
+            Duration::from_millis(100),
+        ))
+    };
+    let mut h = Harness::new(core, commands, updates);
+    h.wait("the lead listed again", |h| {
+        store(h).sessions.iter().any(|s| s.id == lead)
+    });
+    h.show_tab(&lead);
+    h.wait("the relaunched window to take the core's strip", |h| {
+        h.ws(|ws, _| ws.tabs().strip().contains(&plain))
+    });
+    h.settle();
+    assert_eq!(
+        h.ws(|ws, cx| ws.drawn_strip(cx)),
+        [lead.clone(), review.clone(), terminal.clone()],
+        "no tab for the stopped sub-session"
     );
 
     h.close();
