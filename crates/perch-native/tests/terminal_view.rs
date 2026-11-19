@@ -7,6 +7,8 @@
 //! is created, shown or focused. The core, the shell and the daemon are stopped and checked gone
 //! by PID before the test returns.
 
+mod common;
+
 use gpui::{
     point, px, size, AppContext, HeadlessAppContext, KeyDownEvent, Keystroke, Modifiers,
     ScrollDelta, ScrollEvent, TouchPhase, Window, WindowHandle,
@@ -87,6 +89,7 @@ fn run_core(scratch: &Path) {
     std::env::set_var("PERCHD_IDLE_EXIT_SECS", "1");
     std::env::set_var("PERCH_CLEANUP_OWNER", cleanup_owner(scratch));
     std::env::remove_var("PERCH_LOCAL_TOKEN");
+    common::isolate_from_outer_perch();
     // Records the owner so every runtime this core starts is released by name afterwards.
     perch_core::daemon::run_if_requested();
 

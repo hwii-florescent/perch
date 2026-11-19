@@ -346,3 +346,8 @@ harness = false
 name = "tab_strip_overlap_window"
 path = "tests/tab_strip_overlap_window.rs"
 harness = false
+
+[[test]]
+name = "outer_perch_env"
+path = "tests/outer_perch_env.rs"
+harness = false
