@@ -301,6 +301,8 @@ pub struct Workspace {
     /// The in-flow mod whose own field has the keyboard (the sidebar's Add project form): the
     /// window leaves the keyboard there and types into it rather than running plain keys.
     keyboard_held: Option<(String, u64)>,
+    /// What had the window's focus when the hold was last looked at (`None`: nothing, or no hold).
+    held_focus: Option<gpui::WeakFocusHandle>,
     /// A press on a tab of the strip, which may become a drag (`tab.beginDrag`).
     drag: Option<TabDrag>,
     /// A press a mod follows (`pointer.follow`): its token while the press lasts, and the
@@ -421,6 +423,7 @@ impl Workspace {
             worktree_request: Value::Null,
             worktree_requests: 0,
             keyboard_held: None,
+            held_focus: None,
             drag: None,
             follow: None,
             pointer: Value::Null,
@@ -1187,6 +1190,35 @@ impl Workspace {
         if self.keyboard_held != now {
             self.keyboard_held = now;
             cx.notify();
+        }
+    }
+
+    /// While a field of an in-flow mod holds the keyboard, a move of the window's focus (a press
+    /// on a terminal) makes that screen render again: nothing it reads changed, and only a render
+    /// sees the keyboard gone, blurs its field and lets go (`screen.js`), so a rename ends.
+    fn look_again_when_focus_moves(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((key, _)) = &self.keyboard_held else {
+            self.held_focus = None;
+            return;
+        };
+        let focus = window.focused(cx);
+        let same = match (&self.held_focus, &focus) {
+            (Some(held), Some(focus)) => held == focus,
+            (None, None) => true,
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        self.held_focus = focus.map(|f| f.downgrade());
+        if let Some(view) = self
+            .screens
+            .inflow(key)
+            .and_then(|v| v.read(cx).script_view(cx))
+        {
+            window.defer(cx, move |_, cx| {
+                view.update(cx, |view, cx| view.refresh(cx))
+            });
         }
     }
 
@@ -5053,6 +5085,7 @@ impl gpui::Render for Workspace {
         let wanted = self.inflow_wanted(cx);
         self.let_go_of_stale_hold(&wanted, cx);
         self.screens.place(wanted.clone(), window, cx);
+        self.look_again_when_focus_moves(window, cx);
         self.browser_engine_frame(&wanted, window, cx);
         // A terminal that attaches takes the keyboard when it first draws; the tab that has it in
         // the layout keeps it. A modal screen has the keyboard while it is up.

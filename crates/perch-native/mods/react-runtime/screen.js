@@ -25,7 +25,8 @@
 // the window's: it closes the screen before the mod sees it. A screen without the option never takes the keyboard (the
 // notifications, over a terminal that keeps it). An in-flow screen (`options.keyboard: "in-flow"`, the sidebar) holds
 // the keyboard only while one of its own elements has the focus: it tells the window so (`holdKeyboard`), which then
-// leaves the keyboard there and types into it, and lets go once nothing of its own is focused (a form closed).
+// leaves the keyboard there and types into it, and lets go once nothing of its own is focused (a form closed). When the
+// keyboard goes elsewhere first (a press on a terminal), the focused element gets `blur`, as a page's field does.
 //
 // The web reads its per-viewer settings (`localStorage`, here the window's sidebar settings) once, when it mounts;
 // when they change anywhere but in the screen (a key such as `sidebar.organize`), the screen is mounted again.
@@ -278,7 +279,19 @@ export function screen(id, Component, options = {}) {
         }
         const ownFocus = this.keys.is_focused() || !!engine;
         // Nothing of its own is focused any more (its form closed), or the keyboard went elsewhere: it lets go.
-        if (this.held && (!focusedHere(this.handle.document) || (this.armed && !ownFocus))) this.hold(false);
+        if (this.held && (!focusedHere(this.handle.document) || (this.armed && !ownFocus))) {
+          // The keyboard went elsewhere while a field of its own had it: that field loses the focus, as in a page, so
+          // one that ends on blur (a rename) ends (after this frame: the blur re-renders the source).
+          if (focusedHere(this.handle.document)) {
+            cx.timer.after(0, (task) => {
+              if (copy.closed) return;
+              copy.enter();
+              this.handle.blur();
+              task.notify();
+            });
+          }
+          this.hold(false);
+        }
         // Not holding it, an in-flow screen takes no keyboard: a press on it leaves the keyboard where it was.
         if (options.keyboard === "in-flow" && !this.held) return draw(1, (drawn) => drawn);
         return draw(2, (drawn) => drawn.track_focus(this.keys).on_key_down((event, cx) => {

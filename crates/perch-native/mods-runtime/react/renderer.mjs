@@ -5,9 +5,9 @@
 //!
 //! The engine talks back through the handle `mount` returns: `dispatch(id, type, init)` runs a DOM event through
 //! the tree (capture on `window`, `document` and the ancestors, the target, then bubble, with React's `on<Type>`
-//! and `on<Type>Capture` props at their element), `hover(id, on)` and `focus(id)` set the interaction state the
-//! cascade reads for group variants, and `flush()` runs pending effects. An event is a discrete update: React
-//! commits it before `dispatch` returns.
+//! and `on<Type>Capture` props at their element), `hover(id, on)`, `focus(id)` and `blur()` (the keyboard gone
+//! elsewhere) set the interaction state the cascade reads for group variants, and `flush()` runs pending effects. An
+//! event is a discrete update: React commits it before `dispatch` returns.
 import Reconciler from "react-reconciler";
 import { unstable_recoverFromCut } from "scheduler";
 import { ConcurrentRoot, DefaultEventPriority, DiscreteEventPriority, NoEventPriority } from "react-reconciler/constants";
@@ -389,6 +389,17 @@ export function mount(perch, Component, options = {}) {
         if (previous && previous !== node && previous !== document.body) handle.dispatch(previous, "blur");
         document.focus(node);
         handle.dispatch(node, "focus");
+      });
+      render();
+    },
+    /** The keyboard left the screen (a press on a terminal): its focused element loses the focus and gets `blur`, as
+     * a page's field does when the focus moves out of it, so a field that ends on blur (a rename) ends. */
+    blur() {
+      const previous = document.activeElement;
+      if (!previous || previous === document.body) return;
+      discrete(() => {
+        handle.dispatch(previous, "blur");
+        document.blur(previous);
       });
       render();
     },

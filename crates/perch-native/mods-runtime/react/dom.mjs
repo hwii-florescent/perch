@@ -200,8 +200,9 @@ export class HostElement extends Target {
   get checked() { return this.ticked ?? !!(this.props.checked ?? this.props.defaultChecked); }
   set checked(on) { this.ticked = !!on; }
   /** Selection in a field: the caret stays at the end of its text, and the one selection kept is all of it
-   * (`selectedAll`: the next character typed replaces the text). */
-  select() { this.selectedAll = true; }
+   * (`selectedAll`: the next character typed replaces the text). `select()` focuses the field first, as WebKit and
+   * Chromium do: a source that only selects (the tab strip's rename) expects the keyboard there. */
+  select() { this.focus(); this.selectedAll = true; }
   setSelectionRange(start, end) { this.selectedAll = start === 0 && end >= this.value.length && end > 0; }
   /** Asks the scroll area around this element to show it (`toGpui`, on the next frame: the engine scrolls by the
    * fewest pixels, as `{ inline: "nearest", block: "nearest" }`, whatever the options). */
