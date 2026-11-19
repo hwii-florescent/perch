@@ -23,6 +23,9 @@ pub struct ProbeRecord {
     pub name: SharedString,
     /// Its box, in logical pixels from the window's top left.
     pub bounds: Bounds<Pixels>,
+    /// PERCH: the content mask it is drawn under (the clip of every overflow-hidden or scrolling
+    /// ancestor), so a test can tell what of `bounds` actually shows.
+    pub mask: Bounds<Pixels>,
     /// Its own background, when it sets a solid one.
     pub background: Option<Hsla>,
     /// Its own border colour, when it sets one.
@@ -139,6 +142,7 @@ impl Element for Probe {
         let record = ProbeRecord {
             name: self.name.clone(),
             bounds,
+            mask: window.content_mask().bounds,
             background: style
                 .background
                 .as_ref()
