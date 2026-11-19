@@ -148,6 +148,14 @@ impl HistoryDb {
                  VALUES (?1, 'user', ?2, ?3, ?4, NULL, ?5, ?6)",
                 params![session_id, content, agent, model, operation_id, now],
             )?;
+            // The session's first prompt names it until its provider does (see `cli_title`).
+            if let Some(title) = crate::cli_title::clean_prompt(content) {
+                conn.execute(
+                    "UPDATE sessions SET cli_title = ?2
+                     WHERE id = ?1 AND (cli_title IS NULL OR cli_title = '')",
+                    params![session_id, title],
+                )?;
+            }
             let row = get_prompt_operation_locked(&conn, operation_id)?
                 .ok_or_else(|| anyhow::anyhow!("prompt operation disappeared after insertion"))?;
             anyhow::Ok((row, true))

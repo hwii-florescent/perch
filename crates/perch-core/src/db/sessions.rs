@@ -69,9 +69,9 @@ pub struct SessionListRow {
     pub id: String,
     pub cwd: String,
     pub created_at: i64,
-    /// Display title: a user rename if set, else the first user-message
-    /// snippet (up to 40 chars) via a correlated subquery, else the CLI-mode
-    /// first-prompt title (`cli_title`), else empty.
+    /// Display title: a user rename if set, else the provider's own title
+    /// (`provider_title`), else the cleaned first prompt (`cli_title`), else
+    /// the first user-message snippet of a session older than that, else empty.
     pub title: String,
     /// Agent name from the most recent assistant message, if any.
     pub last_agent: Option<String>,
@@ -106,11 +106,12 @@ const SESSION_LIST_ROW_SELECT: &str = "SELECT
                 s.created_at,
                 COALESCE(
                     NULLIF(s.title_override, ''),
+                    NULLIF(s.provider_title, ''),
+                    NULLIF(s.cli_title, ''),
                     (SELECT SUBSTR(content, 1, 40)
                      FROM messages
                      WHERE session_id = s.id AND role = 'user'
                      ORDER BY id ASC LIMIT 1),
-                    NULLIF(s.cli_title, ''),
                     ''
                 ) AS title,
                 (SELECT agent
@@ -384,6 +385,18 @@ impl HistoryDb {
         let changed = self.conn.lock().unwrap().execute(
             "UPDATE sessions SET cli_title = ?2
              WHERE id = ?1 AND (cli_title IS NULL OR cli_title = '')",
+            params![id, title],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Record the title the session's provider gave it. Unlike `set_cli_title` this follows the
+    /// provider's later renames; `title_override` still outranks it in the title expression, so a
+    /// Perch rename is never overwritten. Returns whether the stored title changed.
+    pub fn set_provider_title(&self, id: &str, title: &str) -> anyhow::Result<bool> {
+        let changed = self.conn.lock().unwrap().execute(
+            "UPDATE sessions SET provider_title = ?2
+             WHERE id = ?1 AND IFNULL(provider_title, '') != ?2",
             params![id, title],
         )?;
         Ok(changed > 0)

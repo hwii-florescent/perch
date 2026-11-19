@@ -749,6 +749,12 @@ impl HistoryDb {
         if !existing_session_columns.contains("cli_title") {
             conn.execute("ALTER TABLE sessions ADD COLUMN cli_title TEXT", [])?;
         }
+        // The title the session's own provider gave it (Claude Code's `ai-title`, Codex's
+        // `thread_name`, OMP's header title): see `provider_title.rs`. Unlike `cli_title` it
+        // follows the provider's renames; a Perch rename (`title_override`) still outranks it.
+        if !existing_session_columns.contains("provider_title") {
+            conn.execute("ALTER TABLE sessions ADD COLUMN provider_title TEXT", [])?;
+        }
         if !existing_session_columns.contains("project_id") {
             conn.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT", [])?;
         }

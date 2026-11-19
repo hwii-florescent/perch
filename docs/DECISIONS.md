@@ -1671,3 +1671,8 @@ an exhaustive description of every component or a fresh acceptance result.
 - **Memory opt-out is per Project only**, not per session: one switch in the Memory dialog. Off refuses the
   Project's agents; people keep reading and editing the files.
 
+- **Sessions name themselves as their provider does.** A session's title is, in order: a Perch rename (never
+  overwritten), the provider's own title (Claude Code `ai-title`/`/rename`, Codex `thread_name`, OMP header
+  title; Pi and OpenCode write none), then the cleaned first prompt (leading `/command`, file paths and
+  pasted-image placeholders dropped; the command name if nothing else is left). Perch reads the provider's
+  local files at turn boundaries and follows its later renames; it makes no model call of its own.
