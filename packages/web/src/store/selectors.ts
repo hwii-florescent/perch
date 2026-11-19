@@ -75,8 +75,13 @@ export function effectiveActiveProject(state: ProjectNavState): ActiveProject | 
     if (activeIsUnpersisted) return pinned;
   }
   const first = projects[0];
-  return first ? { hostId, cwd: first.cwd } : null;
+  if (!first) return null;
+  // A store selector (`usePerchStore(effectiveActiveProject)`): the same project must be the same object, or
+  // React re-renders forever ("getSnapshot should be cached").
+  if (fallbackProject?.hostId !== hostId || fallbackProject.cwd !== first.cwd) fallbackProject = { hostId, cwd: first.cwd };
+  return fallbackProject;
 }
+let fallbackProject: ActiveProject | null = null;
 
 /** The workspace the tab strip is scoped to: `activeWorkspaceId`, else the
  * active session's `workspaceId`, resolved against `state.workspaces`. `null`

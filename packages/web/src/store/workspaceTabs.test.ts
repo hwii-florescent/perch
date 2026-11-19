@@ -1,7 +1,7 @@
 // selectors.ts only imports types from ./index, so no jsdom/socket stub needed.
 import { describe, it, expect } from "vitest";
 import type { SessionSummary } from "@perch/shared";
-import { activeWorkspaceSessions, effectiveWorkspace, type ProjectNavState } from "./selectors";
+import { activeWorkspaceSessions, effectiveActiveProject, effectiveWorkspace, type ProjectNavState } from "./selectors";
 import type { WorkspaceRecord } from "./index";
 
 const ws = (id: string, path: string): WorkspaceRecord =>
@@ -44,5 +44,17 @@ describe("activeWorkspaceSessions", () => {
     const s = nav({ activeWorkspaceId: "gone", workspaces: [tree], sessionId: "legacy" });
     expect(effectiveWorkspace(s)).toBeNull();
     expect(ids(s)).toEqual(["a", "legacy", "c", "other"]);
+  });
+});
+
+describe("effectiveActiveProject", () => {
+  it("returns the same fallback object on every call, so a store subscription settles", () => {
+    // The pin names a project with no sessions and the active session is persisted: fall back to the newest.
+    const state = nav({ activeProject: { hostId: "local", cwd: "/gone" } });
+    const first = effectiveActiveProject(state);
+    expect(first).toEqual({ hostId: "local", cwd: "/repo" });
+    expect(effectiveActiveProject({ ...state })).toBe(first);
+    expect(effectiveActiveProject(nav({ activeProject: null, sessions: [sess("only", { cwd: "/elsewhere" })] })))
+      .toEqual({ hostId: "local", cwd: "/elsewhere" });
   });
 });
