@@ -30,14 +30,13 @@ use uuid::Uuid;
 
 const STAGED_CLIPBOARD_IMAGE_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// Resolve `~/.perch/clipboard-images/` (mirrors `db.rs::default_db_path`).
-fn staging_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    Path::new(&home).join(".perch").join("clipboard-images")
+/// Resolve `<home>/.perch/clipboard-images/` (mirrors `db.rs::default_db_path`).
+fn staging_dir(home: &Path) -> PathBuf {
+    home.join(".perch").join("clipboard-images")
 }
 
-fn ensure_staging_dir() -> io::Result<PathBuf> {
-    let dir = staging_dir();
+fn ensure_staging_dir(home: &Path) -> io::Result<PathBuf> {
+    let dir = staging_dir(home);
     fs::create_dir_all(&dir)?;
     restrict_dir_permissions(&dir)?;
     Ok(dir)
@@ -104,8 +103,15 @@ fn cleanup_stale(dir: &Path) {
 /// `~/.perch/clipboard-images/` with the given (sanitized) extension.
 /// Returns the absolute path on success.
 pub fn stage(data: &[u8], extension: &str) -> io::Result<PathBuf> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    stage_under(Path::new(&home), data, extension)
+}
+
+/// `stage` with the home directory given, so tests need not change the
+/// process-wide `$HOME` that every other test's shells inherit.
+fn stage_under(home: &Path, data: &[u8], extension: &str) -> io::Result<PathBuf> {
     let extension = sanitize_extension(extension);
-    let dir = ensure_staging_dir()?;
+    let dir = ensure_staging_dir(home)?;
     cleanup_stale(&dir);
 
     for _ in 0..10 {
@@ -142,16 +148,11 @@ mod tests {
 
     #[test]
     fn stage_writes_bytes_and_returns_a_readable_path() {
-        // Isolate this test's HOME so it doesn't touch the real
-        // ~/.perch/clipboard-images/ directory.
+        // A scratch home keeps the real ~/.perch/clipboard-images/ untouched.
+        // Never set the process HOME here: the shells other tests spawn read it.
         let tmp = std::env::temp_dir().join(format!("perch-clipimg-test-{}", Uuid::new_v4()));
         fs::create_dir_all(&tmp).unwrap();
-        // Safety: test-only, no concurrent std::env::set_var in this crate's
-        // test suite touches HOME.
-        unsafe {
-            std::env::set_var("HOME", &tmp);
-        }
-        let path = stage(b"fake-image-bytes", "png").expect("stage should succeed");
+        let path = stage_under(&tmp, b"fake-image-bytes", "png").expect("stage should succeed");
         assert!(path.starts_with(tmp.join(".perch").join("clipboard-images")));
         assert_eq!(fs::read(&path).unwrap(), b"fake-image-bytes");
     }
