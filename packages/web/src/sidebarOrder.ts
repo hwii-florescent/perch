@@ -89,3 +89,27 @@ export function applySessionOrder<T extends { id: string }>(entries: T[], isSess
   const slot = (entry: T) => isSession(entry) && known.has(entry.id);
   return refillSlots(entries, slot, orderBy(entries.filter(slot), order, (entry) => entry.id));
 }
+
+/** The strip in the sidebar's order: `sessions` (the sidebar's order, nesting included) in that order, and every
+ * other entry of `entries` (files, review, browser) after the session it followed there, or first when none came
+ * before it. Never inside a stack: an entry that followed a lead or one of its sub-sessions goes after the whole
+ * stack. Native's `Tabs::follow` is the same rule. */
+export function followSessions<T extends { id: string; parentSessionId?: string }>(entries: T[], isSession: (entry: T) => boolean, sessions: T[]): T[] {
+  const listed = new Set(sessions.map((session) => session.id));
+  const front: T[] = [];
+  const after = new Map<string, T[]>();
+  let anchor: string | undefined;
+  for (const entry of entries) {
+    if (isSession(entry) && listed.has(entry.id)) anchor = entry.id;
+    else if (anchor === undefined) front.push(entry);
+    else after.set(anchor, [...(after.get(anchor) ?? []), entry]);
+  }
+  const out = [...front];
+  let pending: T[] = [];
+  for (const session of sessions) {
+    if (!isNestedIn(session, sessions)) { out.push(...pending); pending = []; }
+    out.push(session);
+    pending.push(...(after.get(session.id) ?? []));
+  }
+  return [...out, ...pending];
+}

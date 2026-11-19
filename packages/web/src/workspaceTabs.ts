@@ -2,7 +2,7 @@ import type { SessionSummary } from "@perch/shared";
 import { activeWorkspaceSessions, effectiveActiveProject, effectiveWorkspace, usePerchStore, type ProjectNavState } from "./store";
 import { fileTabKey, isBlankBrowser, useFileTabs, type FileTab } from "./fileTabs";
 import { applyStoredTabOrder, moveBeside, saveTabOrder, storedTabOrder } from "./tabOrder";
-import { applySessionOrder, refillSlots, writeScope } from "./sidebarOrder";
+import { applySessionOrder, followSessions, nestUnderLeads, refillSlots, writeScope } from "./sidebarOrder";
 import { useSplitSets } from "./splitSets";
 import { parseUrl } from "./links";
 import { useBrowserPages } from "./browserPages";
@@ -23,9 +23,9 @@ export function tabOrderKey(nav: ProjectNavState): string | null {
   return project ? `${project.hostId}:${project.cwd}` : null;
 }
 
-/** The strip's tabs in order: sessions by creation, then resources by opening,
- * then any drag order on top. TabBar, the Nth-tab chord and next/previous all
- * read this, so they cannot disagree. */
+/** The strip's tabs in order: the sessions in the sidebar's order, each other tab after the session it
+ * followed (this viewer's drag order, shared through the core). TabBar, the Nth-tab chord, next/previous
+ * and the sidebar all read this, so they cannot disagree. */
 export function workspaceTabs(nav: ProjectNavState, resources: FileTab[]): TabEntry[] {
   const ws = effectiveWorkspace(nav);
   const entries: TabEntry[] = [
@@ -36,10 +36,19 @@ export function workspaceTabs(nav: ProjectNavState, resources: FileTab[]): TabEn
   ];
   const key = tabOrderKey(nav);
   const stored = key ? applyStoredTabOrder(key, entries) : entries;
-  // Chats follow the core's order, so the strip, the sidebar and the phone agree.
-  // File tabs keep this viewer's slots.
+  // One order: the sessions are the sidebar's (oldest first, the core's chat order over them, each sub-session in its
+  // lead's stack), so the strip, the sidebar and the phone agree. Other tabs follow the session they were after.
   const hostId = ws?.hostId ?? nav.activeHostId;
-  return applySessionOrder(stored, (entry) => entry.kind === "session", nav.workspaceOrderByHost?.[hostId]?.sessions);
+  const isSession = (entry: TabEntry) => entry.kind === "session";
+  const lead = (entry: TabEntry) => ({ entry, id: entry.id, parentSessionId: entry.kind === "session" ? entry.session.parentSessionId : undefined });
+  const sessions = nestUnderLeads(applySessionOrder(entries.filter(isSession), isSession, nav.workspaceOrderByHost?.[hostId]?.sessions).map(lead));
+  // A tab not placed yet (opened since the last save) stays last rather than after whichever session ends the list.
+  const placed = new Set(key ? storedTabOrder(key) : []);
+  const fresh = (entry: TabEntry) => !isSession(entry) && !placed.has(entry.id);
+  return [
+    ...followSessions(stored.filter((entry) => !fresh(entry)).map(lead), (item) => isSession(item.entry), sessions).map((item) => item.entry),
+    ...stored.filter(fresh),
+  ];
 }
 
 type NavState = ReturnType<typeof usePerchStore.getState>;

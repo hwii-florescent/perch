@@ -208,6 +208,7 @@ function tabInfo(entry: TabEntry, state: TabPaneState, dirtyKeys: ReadonlySet<st
     return {
       id: s.id, kind: "session", label: sessionLabel(s), title: s.title, state, provider: s.currentProviderId ?? providers[s.id] ?? s.cliProviderId,
       activity: sessionDotState(s), blocked: s.blocked, unseen: s.unseen, dirty: false, preview: false, path: s.cwd,
+      parentId: s.parentSessionId,
     };
   }
   const tab = entry.tab;

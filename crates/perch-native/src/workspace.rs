@@ -1691,6 +1691,9 @@ impl Workspace {
                     let before = self.strip_sessions(cx);
                     self.tabs.move_tab(&drag.id, index);
                     self.save_strip(before, cx);
+                    // The sidebar's order and the stacks win over where it was let go: a tab
+                    // dropped inside a stack goes beside it, a sub-session stays in its own.
+                    self.sync_strips(cx);
                 }
             }
             Drop::Pane {
@@ -2404,8 +2407,16 @@ impl Workspace {
                 continue;
             }
             let live = navigation::sessions_of_workspace(&store, key);
-            let ordered = navigation::has_session_order(&store, key);
-            gone.extend(tabs.sync_sessions(&live, ordered, |id| left(key, id), away));
+            // A sub-session whose lead is listed too is in that lead's stack.
+            let in_stack = |id: &str| {
+                store
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == id)
+                    .and_then(|s| s.parent_session_id.as_ref())
+                    .is_some_and(|lead| live.contains(lead))
+            };
+            gone.extend(tabs.sync_sessions(&live, in_stack, |id| left(key, id), away));
         }
         for id in gone {
             if !self.every_tabs().any(|tabs| tabs.contains(&id)) {

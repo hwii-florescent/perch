@@ -309,27 +309,6 @@ pub fn set(
     })
 }
 
-/// Change `workspace_id`'s strip with `edit` (which says whether it changed anything), as a new
-/// revision: a sub-session the core places beside its lead. `None` when there is no strip or
-/// `edit` changed nothing: no strip is created.
-pub fn edit_strip(
-    db: &HistoryDb,
-    workspace_id: &str,
-    edit: impl FnOnce(&mut Vec<String>) -> bool,
-) -> anyhow::Result<Option<SharedTabs>> {
-    db.with_connection(|conn| {
-        let tx = conn.transaction()?;
-        let mut current = read(&tx, workspace_id)?;
-        if current.revision == 0 || !edit(&mut current.strip) {
-            return Ok(None);
-        }
-        current.revision += 1;
-        store(&tx, &current)?;
-        tx.commit()?;
-        Ok(Some(current))
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

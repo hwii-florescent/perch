@@ -188,11 +188,17 @@
     },
     {
       "id": "long-path",
-      "title": "A deep folder and a long branch are cut with an ellipsis; the branch keeps at most 45% of the left block",
+      "title": "A deep folder and a long branch are cut with an ellipsis; the branch keeps at most 45% of the left block (the focused session's own folder and branch)",
       "patch": {
         "status": {
           "cwd": "/Users/dev/code/perch-wt/ghostty-spike/crates/perch-native/src/terminal/render/glyph-cache",
           "branch": "spike/ghostty-terminal-renderer-with-a-very-long-branch-name"
+        },
+        "sessions": {
+          "s-perch-1": {
+            "currentCwd": "/Users/dev/code/perch-wt/ghostty-spike/crates/perch-native/src/terminal/render/glyph-cache",
+            "currentBranch": "spike/ghostty-terminal-renderer-with-a-very-long-branch-name"
+          }
         }
       }
     },

@@ -597,17 +597,16 @@ impl Tabs {
         !id.contains('\n')
     }
 
-    /// The workspace's sessions are `live`, in its strip's order (the core's), as the web derives
-    /// its strip from the core's list (`workspaceTabs`): each one not `away` (closed here without
-    /// ending) has a tab and every other tab keeps its slot. With `ordered` (the core keeps a chat
-    /// order) the session tabs take `live`'s order in their own slots; without one the strip's own
-    /// order stands, as the web's `applySessionOrder` changes nothing then. A session tab `live`
-    /// does not hold leaves when `left` says so (the caller knows whether the core's list says it
-    /// is gone). Returns the session tabs that left.
+    /// The workspace's sessions are `live`, in the sidebar's order, as the web derives its strip
+    /// (`workspaceTabs`): each one not `away` (closed here without ending) has a tab, the session
+    /// tabs take `live`'s order and every other tab follows the tab it was after, never inside a
+    /// stack (`in_stack`, [`Self::follow`]).
+    /// A session tab `live` does not hold leaves when `left` says so (the caller knows whether the
+    /// core's list says it is gone). Returns the session tabs that left.
     pub fn sync_sessions(
         &mut self,
         live: &[String],
-        ordered: bool,
+        in_stack: impl Fn(&str) -> bool,
         left: impl Fn(&str) -> bool,
         away: impl Fn(&str) -> bool,
     ) -> Vec<String> {
@@ -623,9 +622,7 @@ impl Tabs {
         for id in live.iter().filter(|id| !away(id)) {
             self.append(id);
         }
-        if ordered {
-            self.follow(live);
-        }
+        self.follow(live, in_stack);
         gone
     }
 
@@ -776,22 +773,34 @@ impl Tabs {
         true
     }
 
-    /// The tabs `order` lists take its order in their own slots; every other tab (a file, a
-    /// session of another workspace) keeps its place (the web's `refillSlots`). True when the
-    /// strip changed.
-    pub fn follow(&mut self, order: &[String]) -> bool {
-        let mut fill = order.iter().filter(|id| self.contains(id)).cloned();
-        let next: Vec<String> = self
-            .strip
-            .iter()
-            .map(|tab| {
-                if order.contains(tab) {
-                    fill.next().unwrap_or_else(|| tab.clone())
-                } else {
-                    tab.clone()
-                }
-            })
-            .collect();
+    /// The tabs `order` lists take its order; every other tab (a file, review or browser tab, a
+    /// session of another workspace) stays after the listed tab it followed, or first when none
+    /// came before it, and never inside a stack: one that followed a member of a lead's stack
+    /// (`in_stack`: a sub-session right after its lead or a sibling) goes after the whole stack
+    /// (the web's `followSessions`). True when the strip changed.
+    pub fn follow(&mut self, order: &[String], in_stack: impl Fn(&str) -> bool) -> bool {
+        let mut front = Vec::new();
+        let mut after: std::collections::HashMap<&str, Vec<String>> = Default::default();
+        let mut anchor: Option<&str> = None;
+        for tab in &self.strip {
+            if order.contains(tab) {
+                anchor = Some(tab);
+            } else if let Some(anchor) = anchor {
+                after.entry(anchor).or_default().push(tab.clone());
+            } else {
+                front.push(tab.clone());
+            }
+        }
+        let mut next = front;
+        let mut pending = Vec::new();
+        for id in order.iter().filter(|id| self.strip.contains(id)) {
+            if !in_stack(id) {
+                next.append(&mut pending);
+            }
+            next.push(id.clone());
+            pending.extend(after.remove(id.as_str()).unwrap_or_default());
+        }
+        next.append(&mut pending);
         let changed = next != self.strip;
         self.strip = next;
         changed
@@ -1671,7 +1680,7 @@ mod tests {
     fn the_core_s_sessions_fill_the_strip_around_files_and_splits() {
         let mut t = Tabs::default();
         assert!(t
-            .sync_sessions(&ids(&["a1", "a2", "t1"]), true, |_| true, |_| false)
+            .sync_sessions(&ids(&["a1", "a2", "t1"]), |_| false, |_| true, |_| false)
             .is_empty());
         assert_eq!(t.strip(), ["a1", "a2", "t1"]);
         assert_eq!(t.active(), None, "nothing takes the keyboard");
@@ -1682,24 +1691,32 @@ mod tests {
         // The core reorders, lists a new session and stops listing t1; one closed here stays out.
         let gone = t.sync_sessions(
             &ids(&["a2", "a1", "a3", "a4"]),
-            true,
+            |_| false,
             |_| true,
             |id| id == "a4",
         );
         assert_eq!(gone, ["t1"]);
-        assert_eq!(t.strip(), ["a2", "a1", "w\na.rs", "a3"]);
+        // The file stays after the session it followed.
+        assert_eq!(t.strip(), ["a2", "w\na.rs", "a1", "a3"]);
         assert_eq!(t.active(), Some("w\na.rs"));
         assert!(t.in_split("a2") && t.in_split("w\na.rs"));
 
         // A tab the caller does not know to be gone stays.
-        assert!(t.sync_sessions(&[], true, |_| false, |_| false).is_empty());
+        assert!(t
+            .sync_sessions(&[], |_| false, |_| false, |_| false)
+            .is_empty());
         assert_eq!(t.strip().len(), 4);
 
-        // Without a chat order the strip's own order (the core's shared tabs) stands: a sub-session
-        // the core placed after its lead stays there, though it is the newest.
-        let mut t = tabs(&["lead", "kid", "term"]);
-        t.sync_sessions(&ids(&["lead", "term", "kid"]), false, |_| true, |_| false);
-        assert_eq!(t.strip(), ["lead", "kid", "term"]);
+        // A file before every session stays first; one after a lead moves with its stack and
+        // stays out of it, after the last sub-session.
+        let mut t = tabs(&["w\nnotes.md", "term", "lead", "w\na.rs", "kid"]);
+        t.sync_sessions(
+            &ids(&["lead", "kid", "term"]),
+            |id| id == "kid",
+            |_| true,
+            |_| false,
+        );
+        assert_eq!(t.strip(), ["w\nnotes.md", "lead", "kid", "w\na.rs", "term"]);
     }
 
     #[test]

@@ -257,7 +257,10 @@ and native `tabs::merge`, checked against the shared cases in
 `packages/shared/fixtures/shared-tabs-merge.json`; split sets compare in one canonical
 form) and writes again. A client keeps the state it last merged across a reconnect, so
 what changed while away is merged, and writes again whatever an unanswered write may
-have lost. Session ids only mark places: a client never removes one, the core drops
+have lost. Session ids only mark places: the strip's sessions are always shown in the
+sidebar's order (the chat order, each sub-session in its lead's stack; web `followSessions`,
+native `Tabs::follow`), and each other tab follows the session it was after, never inside a
+stack. A client never removes a session id, the core drops
 ended ones and ones of another workspace (one it cannot look up stays). Mod tabs and
 terminal-scoped tabs stay on their device. A workspace with no row is seeded once from
 its newest per-viewer presentation alone, without ended sessions; that presentation is
@@ -526,7 +529,8 @@ the core, not the agent, decides:
   `cwd` is the checkout, which the sidebar marks with the branch. A worktree is not deleted while a
   session runs in it. Any failure discards the child, which never started.
 - *Placement:* a new sub-session goes right after its lead and the lead's earlier children in the chat
-  order and in the lead Workspace's shared tabs, when those already list the lead; a person may move it.
+  order, when it already lists the lead; clients nest it under its lead in the sidebar and the strip
+  anyway, and a person may reorder it only among its lead's sub-sessions.
 - *Reports are claims.* `perch list` returns lifecycle, whether the agent needs a person (Perch's own
   blocked state, never something the agent said), the dispatch record, and a report: the child's own
   `perch report` of its latest turn (kept per run, outliving it), else the running summary a cheap model

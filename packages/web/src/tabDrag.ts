@@ -100,11 +100,24 @@ function commit(drag: TabDragState): void {
   // The tab (or the target pane's) may have closed during the drag.
   if (!ids.includes(drag.id)) return;
   if (drag.insert && key) {
-    saveTabStrip(key, moveTab(ids, drag.id, drag.insert.index));
+    saveTabStrip(key, landTab(ids, drawnEntries(), drag.id, drag.insert.index));
     return;
   }
   const { drop } = drag;
   if (drop?.zone) dropTab(drag.id, drop.targetId, drop.zone);
+}
+
+const drawnEntries = () => [...(stripEl()?.querySelectorAll<HTMLElement>("[data-tab-entry]") ?? [])].map((el) => el.dataset.tabEntry!);
+
+/** `ids` with `dragged` moved to slot `index` of the tabs the strip drew (`drawn`: a folded stack draws only one,
+ * which stands for its lead): beside the drawn neighbour it landed after, else before the one it landed before. The
+ * strip's order then puts a session or file that landed inside a stack beside the whole stack. */
+export function landTab(ids: string[], drawn: string[], dragged: string, index: number): string[] {
+  if (!drawn.includes(dragged)) return moveTab(ids, dragged, index);
+  const landed = moveTab(drawn, dragged, index);
+  const at = landed.indexOf(dragged);
+  if (at > 0) return moveBeside(ids, dragged, landed[at - 1]!, true);
+  return landed.length > 1 ? moveBeside(ids, dragged, landed[1]!, false) : ids;
 }
 
 /** Split `dragged` onto the `zone` side of `target`: the one path for a drag, a shortcut and the menus. */

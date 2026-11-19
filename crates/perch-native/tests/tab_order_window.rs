@@ -234,6 +234,8 @@ fn main() {
             cx.new(|cx| {
                 Workspace::new(model, Some(tx), cx)
                     .with_core(|| Err(anyhow::anyhow!("no core in this test")))
+                    // Pages that only record: WebKit cannot run headless.
+                    .with_browser_pages(perch_native::browser::fake::browsers().0)
             })
         })
         .unwrap();
@@ -360,17 +362,17 @@ fn main() {
     assert_eq!(rig.rows(), moved, "perf is first in the sidebar");
     assert_eq!(rig.strip(), moved, "and in the strip");
 
-    // A sub-session dragged to the strip's start stays there, as on the web; the sidebar lists it
-    // first among leader's sub-sessions.
+    // A sub-session dragged out of its stack (to the strip's start) stays in it, first among
+    // leader's sub-sessions, in the strip and the sidebar alike.
     let p7 = rig.center("tab:p7");
     let start = rig.center("tab:perf");
     rig.drag(p7, &[(p7.0 - 10., p7.1)], (start.0 - 40., start.1));
+    let moved = strings(&["perf", "leader", "p7", "p4", "leak"]);
     assert_eq!(
         rig.strip(),
-        strings(&["p7", "perf", "leader", "p4", "leak"]),
-        "the drop slot is the final slot"
+        moved,
+        "a sub-session stays in its lead's stack"
     );
-    let moved = strings(&["perf", "leader", "p7", "p4", "leak"]);
     assert_eq!(rig.rows(), moved);
     rig.orders();
 
@@ -389,10 +391,7 @@ fn main() {
         !rig.ws(|ws, _, _| ws.screens_open()).contains(&"tab-drag"),
         "no tab drag started"
     );
-    assert_eq!(
-        rig.strip(),
-        strings(&["p7", "perf", "leader", "p4", "leak"])
-    );
+    assert_eq!(rig.strip(), moved);
     assert_eq!(rig.rows(), moved);
 
     // Another screen's move (the phone's), broadcast by the core, reorders both.
@@ -401,6 +400,7 @@ fn main() {
     assert_eq!(rig.rows(), moved, "the sidebar takes the core's order");
     assert_eq!(rig.strip(), moved, "and so does the strip");
 
+    stacks_among_other_tabs(&mut rig);
     drag_cost_with_twenty_tabs(&mut rig, &perch);
 
     rig.cx
@@ -410,6 +410,165 @@ fn main() {
     pointer_leaving_ends_hover(&mut rig.cx);
     let _ = std::fs::remove_dir_all(&scratch);
     println!("tab_order_window: ok");
+}
+
+/// A press and release at the centre of record `name`.
+fn click(rig: &mut Rig, name: &str) {
+    let (x, y) = rig.center(name);
+    let at = point(px(x), px(y));
+    rig.input(PlatformInput::MouseDown(MouseDownEvent {
+        button: MouseButton::Left,
+        position: at,
+        modifiers: Modifiers::default(),
+        click_count: 1,
+        first_mouse: false,
+    }));
+    rig.input(PlatformInput::MouseUp(MouseUpEvent {
+        button: MouseButton::Left,
+        position: at,
+        modifiers: Modifiers::default(),
+        click_count: 1,
+    }));
+}
+
+/// The strip agrees with the sidebar after every drop: its session tabs are the sidebar's rows (a
+/// folded stack shows only its lead in both), every sub-session's tab sits in its lead's stack,
+/// no other tab sits inside a stack, and no two drawn tabs overlap.
+fn agrees(rig: &mut Rig, folded: bool, what: &str) -> Vec<String> {
+    let strip = rig.strip();
+    let rows = rig.rows();
+    let sessions: Vec<String> = strip
+        .iter()
+        .filter(|id| !id.contains('\n'))
+        .cloned()
+        .collect();
+    let shown: Vec<String> = sessions
+        .iter()
+        .filter(|id| !(folded && (*id == "p4" || *id == "p7")))
+        .cloned()
+        .collect();
+    assert_eq!(
+        shown, rows,
+        "{what}: the strip's sessions are the sidebar's rows"
+    );
+    let lead = strip.iter().position(|id| id == "leader").unwrap();
+    let mut stack: Vec<&str> = strip[lead + 1..lead + 3]
+        .iter()
+        .map(String::as_str)
+        .collect();
+    stack.sort();
+    assert_eq!(stack, ["p4", "p7"], "{what}: the stack is whole: {strip:?}");
+    let mut boxes: Vec<(f32, f32, String)> = rig
+        .draw()
+        .into_iter()
+        .filter_map(|r| {
+            let id = r.name.strip_prefix("tab-slot:")?.to_string();
+            let x = f32::from(r.bounds.origin.x);
+            Some((x, x + f32::from(r.bounds.size.width), id))
+        })
+        .collect();
+    boxes.sort_by(|a, b| a.0.total_cmp(&b.0));
+    for pair in boxes.windows(2) {
+        assert!(
+            pair[0].1 <= pair[1].0 + 0.5,
+            "{what}: {} and {} overlap: {boxes:?}",
+            pair[0].2,
+            pair[1].2
+        );
+    }
+    strip
+}
+
+/// Stacks among files, a page and the review: the strip folds with the sidebar, a folded and an
+/// open stack each drag as one, a file dropped onto a stack lands beside it, a sub-session dragged
+/// away stays in its stack, and the strip agrees with the sidebar after every drop, in the strip
+/// or the sidebar, back and forth.
+fn stacks_among_other_tabs(rig: &mut Rig) {
+    rig.core_says(state(Some(&["leader", "p4", "p7", "perf", "leak"])));
+    for (command, args) in [
+        ("file.open", json!({"workspaceId": "w1", "path": "a.rs"})),
+        (
+            "browser.open",
+            json!({"workspaceId": "w1", "url": "example.com"}),
+        ),
+        ("review.open", json!({"workspaceId": "w1"})),
+    ] {
+        rig.ws(|ws, window, cx| ws.run_command(command, Some(&args), window, cx))
+            .unwrap();
+    }
+    let file = "w1\na.rs";
+    let strip = agrees(rig, false, "opened");
+    assert_eq!(
+        &strip[..5],
+        strings(&["leader", "p4", "p7", "perf", "leak"])
+    );
+    rig.orders();
+
+    // The file dropped between the lead and its first sub-session lands after the stack.
+    let at = rig.center(&format!("tab:{file}"));
+    let p4 = rig.center("tab:p4");
+    rig.drag(at, &[(at.0 - 10., at.1)], (p4.0 - 60., p4.1));
+    let strip = agrees(rig, false, "a file dropped onto the stack");
+    assert_eq!(&strip[..4], strings(&["leader", "p4", "p7", file]));
+
+    // The strip's count folds the stack in the sidebar too.
+    click(rig, "tab-stack-count:leader");
+    assert!(rig
+        .ws(|_, _, cx| cx.global::<WindowMods>().perch.clone())
+        .sidebar()
+        .folded_sessions
+        .contains(&"leader".to_string()));
+    agrees(rig, true, "folded from the strip");
+
+    // The folded stack dragged after leak moves whole, its file with it.
+    let lead = rig.center("tab:leader");
+    let leak = rig.center("tab:leak");
+    rig.drag(lead, &[(lead.0 + 10., lead.1)], (leak.0 + 40., leak.1));
+    let strip = agrees(rig, true, "the folded stack dragged");
+    let sessions: Vec<&String> = strip.iter().filter(|id| !id.contains('\n')).collect();
+    assert_eq!(sessions, ["perf", "leak", "leader", "p4", "p7"]);
+
+    // Opened from the sidebar, the open stack dragged back first.
+    click(rig, "session-fold-button:leader");
+    agrees(rig, false, "opened from the sidebar");
+    let lead = rig.center("tab:leader");
+    let perf = rig.center("tab:perf");
+    rig.drag(lead, &[(lead.0 - 10., lead.1)], (perf.0 - 60., perf.1));
+    let strip = agrees(rig, false, "the open stack dragged");
+    assert_eq!(&strip[..3], strings(&["leader", "p4", "p7"]));
+
+    // A sidebar row moved, then a strip tab moved back, twice: the two views stay one order.
+    let row = |rig: &mut Rig, id: &str| rig.center(&format!("session-button:{id}"));
+    for _ in 0..2 {
+        let leak = row(rig, "leak");
+        let leader = row(rig, "leader");
+        rig.drag(
+            leak,
+            &[(leak.0, leak.1 - 3.), (leak.0, leak.1 - 12.)],
+            (leader.0, leader.1 - 6.),
+        );
+        let strip = agrees(rig, false, "a sidebar row dragged");
+        assert_eq!(strip[0], "leak");
+        let leak = rig.center("tab:leak");
+        let end = rig.center("tab:perf");
+        rig.drag(leak, &[(leak.0 + 10., leak.1)], (end.0 + 60., end.1));
+        agrees(rig, false, "the tab dragged back");
+    }
+
+    // A sub-session dragged away from its stack stays in it.
+    let last = rig.strip().last().cloned().unwrap();
+    let p4 = rig.center("tab:p4");
+    let end = rig.center(&format!("tab:{last}"));
+    rig.drag(p4, &[(p4.0 + 10., p4.1)], (end.0 + 30., p4.1));
+    let strip = agrees(rig, false, "a sub-session dragged away");
+    let lead = strip.iter().position(|id| id == "leader").unwrap();
+    assert_eq!(&strip[lead..lead + 3], strings(&["leader", "p7", "p4"]));
+
+    for id in [file, "w1\n\0review", "w1\n\0browser\nhttps://example.com/"] {
+        rig.ws(|ws, window, cx| ws.run_command("tab.close", Some(&json!({"id": id})), window, cx))
+            .unwrap();
+    }
+    rig.orders();
 }
 
 /// What one pointer move costs in script while a tab is dragged along a 20-tab strip: the strip's

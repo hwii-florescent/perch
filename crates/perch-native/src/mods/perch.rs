@@ -2236,6 +2236,9 @@ impl Perch {
                     "path": session.map(|s| s.cwd.clone()).unwrap_or_default(),
                 });
                 if let Some(s) = session {
+                    if let Some(lead) = &s.parent_session_id {
+                        tab["parentId"] = json!(lead);
+                    }
                     if let Some(provider) = s
                         .current_provider_id
                         .as_ref()

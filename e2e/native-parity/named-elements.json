@@ -786,6 +786,17 @@
           "textSized": true
         },
         {
+          "name": "tab-stack-count",
+          "selector": "[data-testid^=\"tab-stack-count-\"]",
+          "description": "On a lead's tab, how many sub-sessions its stack holds (+N, folded) or − (open); it folds and opens the stack.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "tab-stack-count-"
+          },
+          "text": true
+        },
+        {
           "name": "tab-close",
           "selector": "[data-tab-entry] > button[aria-label^=\"Close\"]",
           "description": "The x at the tab's right edge.",

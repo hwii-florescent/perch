@@ -1468,7 +1468,7 @@ fn a_deleted_session_closes_its_tab_whenever_the_core_says_so() {
 }
 
 /// Every session of the workspace has a tab, sub-sessions too, as the web's strip lists them:
-/// oldest first, behind the tabs already there, leaving the keyboard where it is.
+/// in the sidebar's order, each sub-session in its lead's stack, leaving the keyboard where it is.
 fn sub_sessions_open_beside_their_lead() {
     let terminal = |parent: Option<&str>| match parent {
         Some(p) => json!({"cliProviderId": "terminal", "parentSessionId": p}),
@@ -1493,8 +1493,8 @@ fn sub_sessions_open_beside_their_lead() {
         Some("lead".into())
     );
 
-    // The lead spawns another: its tab opens in the order the core's list gives (oldest first), and
-    // the lead keeps the keyboard; so does a session of this workspace whose lead is elsewhere.
+    // The lead spawns another: its tab joins the lead's stack, and the lead keeps the keyboard; a
+    // session of this workspace whose lead is elsewhere goes by the core's order (oldest last).
     let more = model(&[
         ("lead", terminal(None)),
         ("k1", terminal(Some("lead"))),
@@ -1509,7 +1509,7 @@ fn sub_sessions_open_beside_their_lead() {
         })
         .unwrap();
     h.cx.run_until_parked();
-    assert_eq!(strip(&mut h), ["lead", "k1", "loose", "k2", "k3"]);
+    assert_eq!(strip(&mut h), ["lead", "k1", "k2", "loose", "k3"]);
     assert_eq!(
         h.ws(|ws| ws.tabs().active().map(str::to_string)),
         Some("lead".into())
@@ -1538,7 +1538,7 @@ fn sub_sessions_open_beside_their_lead() {
     h.cx.run_until_parked();
     assert_eq!(
         strip(&mut h),
-        ["lead", "loose", "k2", "k3"],
+        ["lead", "k2", "loose", "k3"],
         "put away, it stays away"
     );
     h.open("k1");

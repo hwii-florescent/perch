@@ -12,8 +12,7 @@ conventions, not automatic approval. AGENTS is only a brief contributor entry po
 Replaces the separate worktree row for sub-sessions started with `perch spawn --worktree`.
 
 - Every sub-session nests under its lead in the sidebar and sits right after it (and its earlier
-  sub-sessions) in the tab strip, whatever checkout it runs in. That is only the default place: a person
-  may still drag the tab anywhere.
+  sub-sessions) in the tab strip, whatever checkout it runs in (in its lead's stack: see "One order" above).
 - A `--worktree` sub-session keeps its own checkout and folder; its sidebar row carries the checkout's
   branch, small and muted, with the linked-checkout glyph. The checkout is not a separate Workspace row
   while it only hosts sub-sessions; it shows again when a person shows it on its own.

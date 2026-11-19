@@ -277,6 +277,8 @@ declare module "@perch/sdk" {
     provider?: string;
     /** A session's agent state. */
     activity?: AgentState;
+    /** A sub-session's lead: with the lead in the strip it is a member of the lead's stack. */
+    parentId?: string;
     blocked?: boolean;
     unseen?: boolean;
     /** A file with unsaved changes. */

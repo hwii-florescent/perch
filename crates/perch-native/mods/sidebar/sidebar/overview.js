@@ -45,8 +45,9 @@ function readOrganize() {
 /** The tree's order: the core's (manual, with drag and favourites) or by what needs you (no drag). */
 const SORT_KEY = "perch.sidebar.sort";
 const SHOW_TERMINALS_KEY = "perch.sidebar.showTerminals";
-/** Sent on `window` by a host that keeps these settings itself (the native window) when they change elsewhere: the
- * sidebar reads them again rather than being mounted again. The web never sends it. */
+/** Sent on `window` when these settings change elsewhere (by a host that keeps them itself, the native window, or by
+ * a screen that changed one, as the tab strip folding a stack): the sidebar reads them again rather than being
+ * mounted again. */
 export const SIDEBAR_SETTINGS_EVENT = "perch:sidebar-settings";
 export function WorkspaceOverview({ compact = false, onNavigate }) {
     const [showTerminals, setShowTerminals] = useState(() => readFlag(SHOW_TERMINALS_KEY, "1"));
@@ -91,7 +92,13 @@ export function WorkspaceOverview({ compact = false, onNavigate }) {
         return next;
     });
     const toggleCollapsed = idToggler(COLLAPSED_KEY, setCollapsed);
-    const toggleFolded = idToggler(FOLDED_SESSIONS_KEY, setFoldedSessions);
+    // The tab strip folds the same stacks: tell it (and any other screen reading these settings).
+    const toggleFolded = (id) => {
+        const next = toggledId(readIds(FOLDED_SESSIONS_KEY), id);
+        saveFlag(FOLDED_SESSIONS_KEY, JSON.stringify(next));
+        setFoldedSessions(next);
+        window.dispatchEvent(new Event(SIDEBAR_SETTINGS_EVENT));
+    };
     function nestHint(workspace) {
         const label = workspace.shortcut;
         return label ? _jsx("kbd", {
