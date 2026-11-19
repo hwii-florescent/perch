@@ -75,16 +75,15 @@ impl Render for TooltipLabel {
             // between the two, and it belongs to the content because the
             // positioner has no spacing of its own.
             .m(spacing.xs)
-            // PERCH: compact and distinct, as the system's own tooltips are: small
-            // text in a tight box that stands off the page by its shadow.
+            // PERCH: small and quiet: muted text in a tight box with a hairline
+            // border, no shadow, so a label never competes with what it names.
             .px(gpui::px(6.))
             .py(gpui::px(2.))
             .bg(colors.surface)
-            .text_color(colors.surface_foreground)
+            .text_color(colors.muted_foreground)
             .border_1()
-            .border_color(colors.border)
+            .border_color(colors.border.opacity(0.6))
             .rounded(radius.sm)
-            .shadow_md()
             .text_xs()
             .max_w(gpui::px(420.))
             .child(self.text.clone())
