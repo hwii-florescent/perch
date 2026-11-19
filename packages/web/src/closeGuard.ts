@@ -1,7 +1,8 @@
 /**
  * closeGuard.ts — the warning before closing an agent session. Closing a tab
  * ends its agent, so a click on ×, Cmd+W or a sidebar close asks first;
- * terminals close without asking. "Don't show this again" turns the
+ * terminals close without asking. A lead with sub-sessions always asks
+ * whether to keep them (as ordinary sessions) or close them too. "Don't show this again" turns the
  * `warnCloseAgent` setting off; Settings turns it back on.
  */
 import { create } from "zustand";
@@ -21,6 +22,11 @@ export function isAgentSession(session: SessionSummary): boolean {
   return provider !== undefined && provider !== "terminal";
 }
 
+/** How many sub-sessions of `leadId` the core lists. */
+export function subSessionsOf(leadId: string): number {
+  return usePerchStore.getState().sessions.filter((s) => s.parentSessionId === leadId).length;
+}
+
 /** The session waiting on the warning dialog, if any. */
 export const useCloseGuard = create<{ pending: SessionSummary | null }>(() => ({ pending: null }));
 
@@ -35,6 +41,7 @@ export function requestCloseSession(sessionId: string): void {
   const state = usePerchStore.getState();
   const session = state.sessions.find((candidate) => candidate.id === sessionId);
   if (isWatchingAgent(sessionId)) { dismissSessionView(sessionId); return; }
-  if (session && isAgentSession(session) && warnOnCloseAgent()) useCloseGuard.setState({ pending: session });
+  // A lead with sub-sessions always asks what becomes of them, even with the warning off.
+  if (session && (subSessionsOf(sessionId) > 0 || (isAgentSession(session) && warnOnCloseAgent()))) useCloseGuard.setState({ pending: session });
   else state.deleteSession(sessionId);
 }

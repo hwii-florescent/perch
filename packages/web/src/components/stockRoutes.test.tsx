@@ -17,10 +17,11 @@ vi.mock("../workspaceTabs", () => ({ sessionLabel: (s: { id: string }) => `label
 vi.mock("../closeGuard", () => ({
   useCloseGuard: Object.assign((select: (s: { pending: unknown }) => unknown) => select({ pending: h.pending }), { setState: (next: { pending: null }) => { h.pending = next.pending; h.calls.push(["dismiss"]); } }),
   dismissSessionView: (id: string) => h.calls.push(["dismissView", id]),
+  subSessionsOf: () => 2,
 }));
 vi.mock("../store", () => ({ usePerchStore: { getState: () => ({
   updateSettings: (patch: unknown) => h.calls.push(["settings", patch]),
-  deleteSession: (id: string) => h.calls.push(["delete", id]),
+  deleteSession: (id: string, stopSubSessions?: boolean) => h.calls.push(stopSubSessions === undefined ? ["delete", id] : ["delete", id, stopSubSessions]),
 }) } }));
 vi.mock("../agentTerminals", () => ({ canStopAgent: () => true, stopAgent: (id: string) => h.calls.push(["stop", id]) }));
 vi.mock("../splitSets", () => ({ useSplitSets: { getState: () => ({ openMenu: (...args: unknown[]) => h.calls.push(["beside", ...args]) }) } }));
@@ -48,7 +49,10 @@ it("routes the close warning as stock:close-guard; stop, keep running and cancel
   act(() => root.render(<CloseAgentGuard />));
   const { name, props } = h.routed.at(-1)!;
   expect(name).toBe("close-guard");
-  expect(props).toMatchObject({ sessionId: "s1", label: "label s1" });
+  expect(props).toMatchObject({ sessionId: "s1", label: "label s1", subSessions: 2 });
+  props.onStop(false, true);
+  expect(h.calls).toEqual([["delete", "s1", true], ["dismiss"]]);
+  h.calls = [];
   props.onStop(true);
   expect(h.calls).toEqual([["settings", { warnCloseAgent: false }], ["delete", "s1"], ["dismiss"]]);
   h.calls = [];

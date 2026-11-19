@@ -4,7 +4,7 @@
  * answer does (stop, keep running, cancel) is bound here.
  */
 import { sessionLabel } from "../workspaceTabs";
-import { dismissSessionView, useCloseGuard } from "../closeGuard";
+import { dismissSessionView, subSessionsOf, useCloseGuard } from "../closeGuard";
 import { usePerchStore } from "../store";
 import CloseGuard from "../stock-ui/close-guard/main";
 import { StockRoute } from "./mod-root";
@@ -16,11 +16,12 @@ export function CloseAgentGuard() {
   const props = {
     sessionId: pending.id,
     label: sessionLabel(pending),
+    subSessions: subSessionsOf(pending.id) || undefined,
     onCancel: dismiss,
     onKeepRunning: () => { dismissSessionView(pending.id); dismiss(); },
-    onStop: (never: boolean) => {
+    onStop: (never: boolean, stopSubSessions?: boolean) => {
       if (never) usePerchStore.getState().updateSettings({ warnCloseAgent: false });
-      usePerchStore.getState().deleteSession(pending.id);
+      usePerchStore.getState().deleteSession(pending.id, stopSubSessions);
       dismiss();
     },
   };

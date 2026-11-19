@@ -6,7 +6,7 @@
 // The close guard (`close-guard/`, the app's own export of `packages/web/src/stock-ui/close-guard`) asks through it:
 // props that are the close guard's (`label`, as the window gives when an agent's tab is closed) draw the close guard,
 // whose question is this confirmation drawn in place, with the guard's own rows in it; its answers close the screen
-// with `{ confirmed: true, never }`, `{ keepRunning: true }` or `{ confirmed: false }`.
+// with `{ confirmed: true, never, stopSubSessions }`, `{ keepRunning: true }` or `{ confirmed: false }`.
 //
 // The runtime files beside this one are `mods/react-runtime/`, which the mod host writes into this folder; `confirm/` and
 // `close-guard/` are written by `mods-runtime/react/build.mjs`. To change the confirmation, copy this folder from

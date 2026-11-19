@@ -4,7 +4,9 @@
 //! with the same props.
 //!
 //! The decision stays Perch's: `onStop` stops the session (and, with `never`, turns this warning off in Settings),
-//! `onKeepRunning` only dismisses this view of it, `onCancel` does nothing. The question is `ConfirmDialog` from
+//! `onKeepRunning` only dismisses this view of it, `onCancel` does nothing. A lead with `subSessions` asks
+//! what becomes of them: "Keep them as sessions" (the default, Enter) leaves them running as ordinary sessions in
+//! the lead's place, "Close all sub-sessions" stops them with it. The question is `ConfirmDialog` from
 //! `@perch/sdk`, so a copy chosen for `stock:confirm` draws it.
 //!
 //! This file is the source of a package: `scripts/export-stock-ui.mjs` turns it into the plain JS the app runs and
@@ -13,15 +15,23 @@
 import { useState } from "react";
 import { ConfirmDialog, type CloseGuardProps } from "@perch/sdk";
 
-export default function CloseGuard({ label, onStop, onKeepRunning, onCancel }: CloseGuardProps) {
+export default function CloseGuard({ label, subSessions = 0, onStop, onKeepRunning, onCancel }: CloseGuardProps) {
   const [never, setNever] = useState(false);
+  const subs = subSessions === 1 ? "1 sub-session" : `${subSessions} sub-sessions`;
   return (
     <ConfirmDialog
-      message={`Close "${label}"?\n\nClosing this tab stops its agent and shells for everyone watching. The agent's own transcript stays on disk.`}
-      confirmLabel="Stop for everyone"
+      message={subSessions > 0
+        ? `Close "${label}"?\n\nClosing this tab stops its agent and shells for everyone watching. It has ${subs}: keep them running as sessions where it was, or close them too.`
+        : `Close "${label}"?\n\nClosing this tab stops its agent and shells for everyone watching. The agent's own transcript stays on disk.`}
+      confirmLabel={subSessions > 0 ? "Keep them as sessions" : "Stop for everyone"}
       onCancel={onCancel}
-      onConfirm={() => onStop(never)}
+      onConfirm={() => onStop(never, false)}
     >
+      {subSessions > 0 && (
+        <button type="button" className="mb-4 block text-sm underline" data-testid="close-guard-stop-sub-sessions" onClick={() => onStop(never, true)}>
+          Close all sub-sessions
+        </button>
+      )}
       <button type="button" className="mb-4 text-sm underline" onClick={onKeepRunning}>Keep running and dismiss this view</button>
       <label className="mb-4 flex cursor-pointer items-center gap-2 text-[0.8rem] text-subtext-0">
         <input type="checkbox" data-testid="close-agent-never" checked={never} onChange={(e) => setNever(e.target.checked)} />

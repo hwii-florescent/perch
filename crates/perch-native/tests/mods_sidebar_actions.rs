@@ -626,7 +626,9 @@ fn sidebar_commands(rig: &mut Rig) {
     // Deleting a session asks the core; its tab stays until the core says it is gone.
     let (result, asked) = run(rig, "session.close", json!({"id": "bravo"}));
     assert_eq!(result, Ok(()));
-    assert!(matches!(&asked[..], [Command::DeleteSession { session_id }] if session_id == "bravo"));
+    assert!(
+        matches!(&asked[..], [Command::DeleteSession { session_id, .. }] if session_id == "bravo")
+    );
     assert!(
         rig.tabs().0.contains(&"bravo".to_string()),
         "the tab waits for the core"

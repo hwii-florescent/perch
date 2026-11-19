@@ -514,11 +514,15 @@ the core, not the agent, decides:
   out of every session list (`SESSION_VISIBILITY_FILTER`), and `perch list` shows it `exited`. The
   same applies when `stop_unknown` later settles to `stopped`. An unconfirmed stop changes nothing. On
   start, a `stopped` child that still has a runtime record or a shell (stopped by an older build) is
-  closed by the same rule; nothing else is touched. Deleting a lead (also what archiving its Workspace
-  does, which deletes the Workspace's sessions) first stops its live children, each confirmed; if one
+  closed by the same rule; nothing else is touched. A `session.delete` of a lead with
+  `stopSubSessions` (the close guard's "Close all sub-sessions"; archiving its Workspace, removing a
+  project and purging archived sessions always) first stops its live children, each confirmed; if one
   cannot be shown stopped (a stop not confirmed, a launch still in flight) the delete is refused and the
-  lead and its records are kept. Its closed children are deleted with it; children that exited on their
-  own remain as ordinary sessions without a parent. Deleting a child drops its record.
+  lead and its records are kept. Its closed children are deleted with it. Without it (the default, and an
+  older client) the live children are promoted (`promote_children_of`): their records go, their
+  `parent_session_id` is cleared and they take the lead's place in the chat order, running on as
+  ordinary sessions; a lead whose agent exits on its own promotes them the same way. Children that
+  exited on their own remain as ordinary sessions without a parent. Deleting a child drops its record.
   **Esc in the chat is not a stop:** it interrupts the lead's own turn (a keystroke into its prompt), and
   its children keep running; only a terminal kill, a delete and `perch stop` stop them.
 - *`--worktree`*: after the child is recorded, the core makes a new checkout of the lead's repository

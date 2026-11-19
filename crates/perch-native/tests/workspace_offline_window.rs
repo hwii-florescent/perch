@@ -104,7 +104,7 @@ fn main() {
     .expect("the core is back");
     let sent = asked(&mut rx);
     assert!(
-        matches!(&sent[..], [Command::DeleteSession { session_id }] if session_id == "alpha"),
+        matches!(&sent[..], [Command::DeleteSession { session_id, .. }] if session_id == "alpha"),
         "{sent:?}"
     );
 

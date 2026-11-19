@@ -1755,8 +1755,11 @@ declare module "@perch/sdk" {
   export interface CloseGuardProps {
     sessionId: string;
     label: string;
-    /** Stops the session; `never` also turns this warning off. */
-    onStop(never: boolean): void;
+    /** How many sub-sessions the session has (absent: none). */
+    subSessions?: number;
+    /** Stops the session; `never` also turns this warning off. With sub-sessions, `stopSubSessions` stops
+     * them too; otherwise the running ones become ordinary sessions where the lead was and keep running. */
+    onStop(never: boolean, stopSubSessions?: boolean): void;
     /** Dismisses this view of it; the session keeps running. */
     onKeepRunning(): void;
     onCancel(): void;

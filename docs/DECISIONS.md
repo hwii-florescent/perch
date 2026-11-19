@@ -7,6 +7,37 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-18 — Closing a lead asks what becomes of its sub-sessions; keeping them is the default (owner)
+
+Amends 2026-11-15 "A stopped sub-session closes like a person's Close" (a deleted lead no longer stops its
+children by itself):
+
+- Closing a lead that has sub-sessions always asks, in Perch's close guard (`stock:close-guard`, both apps),
+  even with "Warn before closing an agent" off: **Keep them as sessions** (the default button, Enter) or
+  **Close all sub-sessions** (stop them, as before). Cancel keeps everything.
+- Kept children are detached: they become top-level sessions, keep running and take the lead's place in the
+  order. Their sub-session records go, so `perch list` and reports no longer route to the lead.
+- A lead that exits on its own promotes its children the same way, without asking.
+- A person's Stop of a lead (terminal kill), `perch stop` of a lead and bulk deletes (archiving a Workspace,
+  removing a project, purging archived sessions) still stop its children first.
+
+## 2026-11-18 — One order: the tab strip follows the sidebar, and a lead's sub-sessions are a stack (owner)
+
+Amends the shared-tabs entry below (the strip's session order) and the sub-session placement entry.
+
+- A workspace's sessions have one order, the sidebar's: the core's chat order (oldest first where it lists
+  nothing), each sub-session right after its lead. The strip shows its session and terminal tabs in exactly
+  that order, in the web and the native app. A drag in the strip writes the chat order as a sidebar drag
+  does; a sidebar drag moves the strip's tabs at once. A device's own drag order no longer reorders sessions.
+- Files, review and browser tabs keep the place a person gave them, after the session tab they followed
+  (shared through `workspace.tabs`, whose session ids are now only those anchors); one opened since stays last.
+- A lead and its sub-sessions are a stack in the strip, Vivaldi-style. Folded: one tab (the lead, or the
+  member on screen) with an edge and a `+N` count; open: the members side by side on one quiet band, the
+  lead's count showing `−`. The count folds and opens it, and the fold is the sidebar's own (per device):
+  folding in either place folds both.
+- A stack drags as one (by its lead, or folded). A tab dropped inside a stack lands beside the whole stack;
+  files, review and browser tabs are never in a stack. A sub-session reorders only inside its lead's stack.
+
 ## 2026-11-18 — Sub-sessions sit with their lead everywhere; the status bar follows the tab (owner)
 
 Replaces the separate worktree row for sub-sessions started with `perch spawn --worktree`.
@@ -104,8 +135,8 @@ cards keep their limits. This supersedes the "total per run 8" default in 2026-1
 Owner, after `perch stop` left stopped children's tabs and rows behind ("Agent unavailable", and
 `reconnecting [stopped]` after a core restart) in both apps:
 
-- A **confirmed** stop of a sub-session (`perch stop`, a person's Stop in its menu, a stopped or
-  deleted lead) closes it in every window: its tabs and its sidebar row go. An unconfirmed stop
+- A **confirmed** stop of a sub-session (`perch stop`, a person's Stop in its menu, a stopped lead, or a
+  deleted one whose close chose "Close all sub-sessions") closes it in every window: its tabs and its sidebar row go. An unconfirmed stop
   changes nothing and says so.
 - The lead keeps what the run keeps: `perch list` still shows the child, as `exited` with dispatch
   `stopped`, its title and its last report. Deleting the lead deletes its closed children too.

@@ -1165,6 +1165,12 @@
           "description": "The row of buttons, right aligned, 8px apart."
         },
         {
+          "name": "close-guard-stop-sub-sessions",
+          "selector": "[data-testid=\"close-guard-stop-sub-sessions\"]",
+          "description": "On a lead's close warning: Close all sub-sessions (the default button keeps them as sessions).",
+          "text": true
+        },
+        {
           "name": "confirm-cancel",
           "selector": "[data-testid=\"confirm-cancel\"]",
           "description": "The Cancel button.",

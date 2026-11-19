@@ -1280,7 +1280,10 @@ fn asked(rx: &mut UnboundedReceiver<ToCore>) -> Vec<ToCore> {
 
 /// How many times the core was asked to end the session.
 fn ends(rx: &mut UnboundedReceiver<ToCore>) -> usize {
-    asked(rx).iter().filter(|m| **m == ToCore::End).count()
+    asked(rx)
+        .iter()
+        .filter(|m| matches!(m, ToCore::End { .. }))
+        .count()
 }
 
 /// Closing a tab ends its session as the web does: a terminal at once, an agent only through the
@@ -1302,7 +1305,9 @@ fn closing_a_tab_ends_its_session() {
     let (mut rx, core) = h.live();
     assert_eq!(h.run("tabs.close", json!({})), Ok(()));
     assert!(
-        asked(&mut rx).contains(&ToCore::End),
+        asked(&mut rx)
+            .iter()
+            .any(|m| matches!(m, ToCore::End { .. })),
         "a terminal ends at once"
     );
     assert!(h.notice().unwrap().starts_with("Ending the session"));
@@ -1388,9 +1393,9 @@ fn a_tab_that_cannot_end_its_session_is_put_away() {
     assert_eq!(h.run("tabs.close", json!({})), Ok(()));
     let asked: Vec<Command> = std::iter::from_fn(|| sent.try_recv().ok()).collect();
     assert!(
-        asked
-            .iter()
-            .any(|c| matches!(c, Command::DeleteSession { session_id } if session_id == "blank")),
+        asked.iter().any(
+            |c| matches!(c, Command::DeleteSession { session_id, .. } if session_id == "blank")
+        ),
         "the core is asked to delete it: {asked:?}"
     );
     assert!(
@@ -1427,7 +1432,9 @@ fn a_deleted_session_closes_its_tab_whenever_the_core_says_so() {
     h.draw();
     let (mut rx, core) = h.live();
     assert_eq!(h.run("tabs.close", json!({})), Ok(()));
-    assert!(asked(&mut rx).contains(&ToCore::End));
+    assert!(asked(&mut rx).contains(&ToCore::End {
+        stop_sub_sessions: false
+    }));
     h.cx.advance_clock(std::time::Duration::from_secs(6));
     h.cx.run_until_parked();
     assert!(
@@ -1447,7 +1454,9 @@ fn a_deleted_session_closes_its_tab_whenever_the_core_says_so() {
     h.draw();
     let (mut rx, core) = h.live();
     assert_eq!(h.run("tabs.close", json!({})), Ok(()));
-    assert!(asked(&mut rx).contains(&ToCore::End));
+    assert!(asked(&mut rx).contains(&ToCore::End {
+        stop_sub_sessions: false
+    }));
     core.unbounded_send(FromCore::EndRefused("another view controls it".into()))
         .unwrap();
     h.cx.run_until_parked();
