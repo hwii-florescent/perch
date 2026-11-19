@@ -5898,6 +5898,15 @@ globalThis.__gpui = (() => {
     __apply(this.__id, "track_scroll", [handle.__handle]);
     return this;
   };
+  // PERCH: the scroll area (a `ScrollHandle` it tracks) that shows this element once it is laid
+  // out, scrolled just enough (`scrollIntoView({ block: "nearest" })`). Checked as `track_scroll` is.
+  methods.reveal_in = function (handle) {
+    if (typeof handle?.__handle !== "number") {
+      throw new TypeError("reveal_in(handle) expects a ScrollHandle");
+    }
+    __apply(this.__id, "reveal_in", [handle.__handle]);
+    return this;
+  };
   // The second handle a combobox root needs: the one the keyboard moves to when
   // the surface opens. Checked here for the same reason `track_focus` is — a
   // name or an element would otherwise be dropped on the Rust side and the
@@ -8519,6 +8528,7 @@ impl ShellRuntime {
             | "aria_active_descendant"
             | "track_focus"
             | "track_scroll"
+            | "reveal_in" // PERCH: the scroll area that shows the element.
             | "with_item_to_measure_index"
             | "content_focus_handle"
             | "key_context"
@@ -8579,6 +8589,7 @@ impl ShellRuntime {
                     "aria_active_descendant" => "aria_active_descendant",
                     "track_focus" => "track_focus",
                     "track_scroll" => "track_scroll",
+                    "reveal_in" => "reveal_in", // PERCH: the scroll area that shows the element.
                     "with_item_to_measure_index" => "with_item_to_measure_index",
                     "content_focus_handle" => "content_focus_handle",
                     "key_context" => "key_context",

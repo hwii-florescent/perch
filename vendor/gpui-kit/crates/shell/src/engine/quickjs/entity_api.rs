@@ -1179,7 +1179,8 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
             Ok(())
         }),
     )?;
-    // PERCH: a child's box as the area's last layout placed it, in window coordinates, as
+    // PERCH: a child's box as the area's last layout placed it, moved by where the area is scrolled
+    // to now (where it is drawn, as the DOM's `getBoundingClientRect`), in window coordinates, as
     // `[x, y, width, height]`.
     let item_bounds = runtime.clone();
     globals.set(
@@ -1190,10 +1191,11 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                     .entities()
                     .scroll(handle)
                     .ok_or_else(|| Exception::throw_type(&ctx, "this scroll handle has been released"))?;
+                let offset = scroll.handle.offset();
                 Ok(scroll.handle.bounds_for_item(index).map(|b| {
                     vec![
-                        f32::from(b.origin.x),
-                        f32::from(b.origin.y),
+                        f32::from(b.origin.x + offset.x),
+                        f32::from(b.origin.y + offset.y),
                         f32::from(b.size.width),
                         f32::from(b.size.height),
                     ]

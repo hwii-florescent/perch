@@ -295,6 +295,7 @@ const DirRow = memo(function DirRow({ row, act }: { row: Extract<TreeRow, { kind
       role="treeitem"
       aria-expanded={row.open}
       data-change-row
+      data-testid={`git-dir-${row.key}`}
       onClick={() => act.current.toggleDir(row.key)}
     >
       <span className="w-[0.7rem] shrink-0 text-[0.6rem]" aria-hidden="true">{row.open ? "▾" : "▸"}</span>

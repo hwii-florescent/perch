@@ -483,6 +483,8 @@ struct Behavior {
     dock_chrome: crate::dock::DockChromeHooks,
     /// The retained scroll position a plain area or `VirtualList` was told to drive.
     virtual_scroll: Option<crate::entities::EntityHandle>,
+    /// PERCH: the scroll area that shows this element once it is laid out (`reveal_in`).
+    reveal: Option<crate::entities::EntityHandle>,
     /// This item's one-based position in its collection, and the collection's
     /// size — "tab 2 of 5". Announced, never drawn.
     position_in_set: Option<(usize, usize)>,
@@ -2262,6 +2264,7 @@ fn flex_element(
         && behavior.key_context.is_none()
         && !behavior.scroll_x
         && !behavior.scroll_y
+        && behavior.reveal.is_none()
     {
         return finish(element, refinement, children);
     }
@@ -2299,6 +2302,12 @@ fn flex_element(
         stateful = stateful.on_click(move |event, window, cx| {
             dispatch_click(&runtime, callback, event, window, cx);
         });
+    }
+    // PERCH: asked to be shown (`reveal_in`): once laid out, its area scrolls just enough to show it.
+    // ponytail: the box is reported by a canvas child, which comes before the script's children; a
+    // revealed element that is itself a tracked scroll area would see its item indices shift by one.
+    if let Some(area) = behavior.reveal.and_then(|handle| runtime.entities().scroll(handle)) {
+        stateful = stateful.on_prepaint(move |bounds, window, _| reveal(&area.handle, bounds, window));
     }
     if let Some(callback) = behavior.on_mouse_move {
         let bounds = Rc::clone(&seen);
@@ -2570,6 +2579,40 @@ fn warn_ignored_key(behavior: &Behavior, component: &str) {
              passed to {component}.new(...)"
         );
     }
+}
+
+/// PERCH: scrolls `area` the least that shows `target` (this frame's box, in window coordinates),
+/// as the web's `scrollIntoView({ block: "nearest", inline: "nearest" })` does, on each axis: not at
+/// all when it is in view, its start to the area's start when it is before the view or larger than
+/// it, else its end to the end. The area laid this frame's children out already, so the new
+/// position is drawn by the next frame.
+fn reveal(area: &gpui::ScrollHandle, target: Bounds<Pixels>, window: &mut Window) {
+    let view = area.bounds();
+    if view.size.width <= gpui::px(0.) || view.size.height <= gpui::px(0.) {
+        return;
+    }
+    let nearest = |start: Pixels, end: Pixels, from: Pixels, to: Pixels| {
+        if start < from || end - start > to - from {
+            from - start
+        } else if end > to {
+            to - end
+        } else {
+            gpui::px(0.)
+        }
+    };
+    let shift = gpui::point(
+        nearest(target.left(), target.right(), view.left(), view.right()),
+        nearest(target.top(), target.bottom(), view.top(), view.bottom()),
+    );
+    if shift == gpui::Point::default() {
+        return;
+    }
+    let (offset, most) = (area.offset(), area.max_offset());
+    area.set_offset(gpui::point(
+        (offset.x + shift.x).clamp(-most.x, gpui::px(0.)),
+        (offset.y + shift.y).clamp(-most.y, gpui::px(0.)),
+    ));
+    window.refresh();
 }
 
 /// The script's name for an element, or its address in the description.
@@ -3681,6 +3724,15 @@ fn apply_behavior(behavior: &mut Behavior, name: &str, args: &[Bridged]) {
         // script.
         "track_scroll" => {
             behavior.virtual_scroll = match args.first() {
+                Some(Bridged::Number(handle)) if *handle >= 0.0 && handle.fract() == 0.0 => {
+                    Some(*handle as crate::entities::EntityHandle)
+                }
+                _ => None,
+            };
+        }
+        // PERCH: the scroll area to show this element in, as `track_scroll` takes it.
+        "reveal_in" => {
+            behavior.reveal = match args.first() {
                 Some(Bridged::Number(handle)) if *handle >= 0.0 && handle.fract() == 0.0 => {
                     Some(*handle as crate::entities::EntityHandle)
                 }

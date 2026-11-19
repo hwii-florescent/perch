@@ -1731,6 +1731,12 @@ const ELEMENT_METHODS: &str = r#"    /**
      */
     track_scroll<Self extends Element>(this: Self, handle: import("gpui-base").VirtualListScrollHandle | import("gpui-base").ScrollHandle): Self;
     /**
+     * PERCH: once laid out, the scroll area tracking `handle` scrolls just enough
+     * to show this element (none when it is in view), as the web's
+     * `scrollIntoView({ block: "nearest" })`.
+     */
+    reveal_in<Self extends Element>(this: Self, handle: import("gpui-base").ScrollHandle): Self;
+    /**
      * Which item a virtual list measures to infer its size across the axis it
      * scrolls: a vertical list takes its width from this item, a horizontal
      * one its height. Defaults to the first.
@@ -4060,6 +4066,7 @@ mod tests {
         "aria_active_descendant",
         "track_focus",
         "track_scroll",
+        "reveal_in",
         "with_item_to_measure_index",
         "content_focus_handle",
         "tab_index",

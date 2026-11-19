@@ -243,6 +243,7 @@ const DirRow = memo(function DirRow({ row, act }) {
         role: "treeitem",
         "aria-expanded": row.open,
         "data-change-row": true,
+        "data-testid": `git-dir-${row.key}`,
         onClick: () => act.current.toggleDir(row.key),
         children: [
             _jsx("span", {

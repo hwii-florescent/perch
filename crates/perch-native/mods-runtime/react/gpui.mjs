@@ -132,6 +132,19 @@ const drawn = (child) => child.style?.display !== "hidden";
  * pointer over such a group is reported to the script, which describes the tree again. Every other group variant is
  * drawn by the engine alone. Set by `describeToGpui` for the tree it builds. */
 let layoutGroups = new Set();
+/** The nodes from a scroll area down to the element `scrollIntoView()` asked for, while the area's children are built
+ * (see the area): none of them is the last build's element, so the element is built and shown. */
+let revealing = null;
+/** The nodes under `node` down to the one with `id`, that one last; empty when it is not there. */
+function pathTo(node, id) {
+  for (const child of node.children ?? []) {
+    if (child.kind === "text") continue;
+    if (child.id === id) return [child];
+    const below = pathTo(child, id);
+    if (below.length) return [child, ...below];
+  }
+  return [];
+}
 /** The overlay being built: its own box and every shown absolute box inside it, which may lie past its edge (a
  * submenu beside a menu). A press is outside the overlay only when it is outside all of them. */
 let outside = null;
@@ -194,7 +207,7 @@ function sameValues(a, b) {
  * description, and nothing under it is built again. The handlers it keeps read only that node, which is unchanged. */
 export function toGpui(node, kit, handle, files, overlay = false, unseen = false, color = null, text = {}, rowItem = false, snapped = new Map(), hoverIcon = null) {
   if (node.kind === "text") return snapped.get(node)?.text ?? node.text;
-  const key = retain && !overlay && !holdsScroller(node) ? retainKey(node, unseen, color, text, rowItem, hoverIcon, snapped) : null;
+  const key = retain && !overlay && !holdsScroller(node) && !revealing?.has(node.id) ? retainKey(node, unseen, color, text, rowItem, hoverIcon, snapped) : null;
   if (key !== null && retain.clean.has(node)) {
     const was = retain.from.get(node);
     const kept = was?.key === key ? kit.reuse(was.id, retain.generation) : null;
@@ -248,6 +261,10 @@ function buildGpui(node, kit, handle, files, overlay, unseen, color, text, rowIt
   if (tip) el = el.tooltip(tip, !node.meta.attrs.title && tip === node.meta.attrs["data-overflow-title"]);
   // Its laid-out box is kept for the source, which measured it (`HostDocument.measure`).
   if (node.measure) el = el.measure(node.measure);
+  if (revealing?.has(node.id) && !(node.children ?? []).some((child) => revealing.has(child.id))) {
+    revealing = null;
+    el = el.reveal_in(kit.scroll);
+  }
   // More parity names for the same element (two of the page's selectors find it).
   if (node.name && el.also_named) for (const name of node.also ?? []) el = el.also_named(name);
   el = applyStyle(el, { ...node.style, ...snapped.get(node) });
@@ -266,15 +283,18 @@ function buildGpui(node, kit, handle, files, overlay, unseen, color, text, rowIt
     const { display: _layout, ...drawnStyle } = style;
     if (Object.keys(drawnStyle).length) el = el.group_hover(over, (s) => applyStyle(s, drawnStyle));
   }
-  // `scrollIntoView()`: the scroll area holding the element shows the child it is in. ponytail: the kit's one
-  // `ScrollHandle` (`kit.scroll`) serves the first scroll area asked; a second one would need a handle per area.
+  // `scrollIntoView()`: the scroll area holding the element scrolls just enough to show it, and not at all when it is
+  // in view (the web's `block: "nearest"`), by the element's own box: a row deep in a list scrolls to the row, not to
+  // the top of the list around it (which put a file tree back at its top on every click). The element is drawn below
+  // (`revealing`). ponytail: the kit's one `ScrollHandle` (`kit.scroll`) serves the first scroll area asked; a second
+  // one would need a handle per area.
   if (kit.scroll && (node.style.overflow_x === "scroll" || node.style.overflow_y === "scroll")) {
     const target = handle.document?.scrollTarget;
     const at = target ? (node.children ?? []).filter(drawn).findIndex((child) => holds(child, target.id)) : -1;
     if (at >= 0 && (handle.scroller ?? node.id) === node.id) {
       handle.document.scrollTarget = null;
       handle.scroller = node.id;
-      kit.scroll.scroll_to_item(at);
+      revealing = new Set(pathTo(node, target.id).map((on) => on.id));
     }
     // Before any area asks, the first one drawn takes the handle, so its children's boxes are known.
     handle.scroller ??= node.id;
@@ -501,6 +521,7 @@ export function describeToGpui(description, kit, handle, files, scale = 0, windo
     if (keep) Object.assign(keep, { built: retain?.next ?? new Map(), overrides: before, generation: kit.renderGeneration() ?? -1 });
   } finally {
     retain = null;
+    revealing = null;
   }
   let over = windowLayer && description.overlays.length ? kit.div().relative().size_full().window_layer() : layer;
   for (const overlay of description.overlays) over = over.child(toGpui(overlay, kit, handle, files, true, false, null, {}, false, snapped));
