@@ -321,3 +321,8 @@ harness = false
 name = "files_media"
 path = "tests/files_media.rs"
 harness = false
+
+[[test]]
+name = "tab_strip_overlap_window"
+path = "tests/tab_strip_overlap_window.rs"
+harness = false

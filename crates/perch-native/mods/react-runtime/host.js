@@ -784,8 +784,10 @@ export function copyFor(cx, screen) {
         const looked = revision !== null && lookedAt === revision;
         const revisions = revision === null ? null : (perch.revisions?.() ?? null);
         for (const entry of snapshots.values()) {
+          // `next` is undefined when nothing is kept; a kept null (a drag that ended: `tabSlide()`) is a value.
+          const kept = entry.next !== undefined ? entry.next : entry.value;
           const value = looked && entry.next !== undefined ? entry.next
-            : !partsMoved(entry, revisions) ? (entry.next ?? entry.value)
+            : !partsMoved(entry, revisions) ? kept
             : share(entry.value, readTracked(entry, revisions));
           entry.next = tell || revision === null ? undefined : value;
           if (value === entry.value) continue;
