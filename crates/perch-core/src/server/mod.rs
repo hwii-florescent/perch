@@ -794,6 +794,7 @@ pub async fn run(
         });
     }
 
+    spawn_legacy_chats_task(state.clone());
     spawn_git_poll_task(state.clone());
     spawn_agent_idle_sweep_task(state.clone());
     spawn_daemon_health_task(state.clone());
@@ -1796,6 +1797,28 @@ fn spawn_agent_hibernation_task(state: AppState) {
                     ),
                 }
             }
+        }
+    });
+}
+
+/// Remove the old Chats project (`session::remove_legacy_chats`): now, then again each minute
+/// while a session of it still runs, until none is left.
+// ponytail: a one-minute poll, not a hook on session exit; it stops once the project is gone.
+fn spawn_legacy_chats_task(state: AppState) {
+    tokio::spawn(async move {
+        loop {
+            let app = state.clone();
+            let waiting =
+                tokio::task::spawn_blocking(move || session::remove_legacy_chats(&app)).await;
+            match waiting {
+                Ok(Ok(0)) => return,
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => {
+                    tracing::warn!(%error, "could not remove the old Chats project yet")
+                }
+                Err(_) => return,
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         }
     });
 }

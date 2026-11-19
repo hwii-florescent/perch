@@ -407,6 +407,70 @@ pub(super) fn is_quickchat_project(project: &crate::db::ProjectRow) -> bool {
         && project.path == crate::db::canonical_path_for_host("local", &home_dir())
 }
 
+/// Before Quickchat ran in the home folder, sessions with no project were filed under a "Chats"
+/// project at `~/.perch/scratch`. That project goes, with its sessions: each only once it is shown
+/// ended (`ended`; unknown is not exit), and only after a copy of the database is kept beside it.
+/// The folder stays on disk. Returns how many of its sessions are still waiting to end.
+pub(super) fn remove_legacy_chats(app: &AppState) -> anyhow::Result<usize> {
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let legacy: Vec<_> = app
+        .db
+        .list_projects("local", true)?
+        .into_iter()
+        .filter(|p| p.path.ends_with("/.perch/scratch"))
+        .collect();
+    let mut waiting = 0;
+    for project in legacy {
+        let sessions = app.db.project_session_ids(&project.id)?;
+        let (gone, live): (Vec<_>, Vec<_>) = sessions.into_iter().partition(|id| ended(app, id));
+        if !gone.is_empty() || live.is_empty() {
+            app.db.back_up_once(".pre-quickchat.bak")?;
+        }
+        for id in &gone {
+            delete_session(app, id)?;
+        }
+        waiting += live.len();
+        if live.is_empty() {
+            let _foundation_guard = app.foundation_lock.lock().unwrap();
+            app.db.delete_project(&project.id)?;
+            if let Err(error) = crate::memory::remove_project(&app.memory_root, &project.id) {
+                tracing::warn!(project = %project.id, "could not remove the Project's memory: {error}");
+            }
+            super::workspace::publish_project_deleted(app, project.id);
+        }
+    }
+    Ok(waiting)
+}
+
+/// Whether everything `session_id` ran is shown stopped: its agents, its terminal and its shells
+/// (perchd confirms each), and it leads no sub-session that has not stopped.
+fn ended(app: &AppState, session_id: &str) -> bool {
+    use crate::daemon::{session_state, RuntimeState::Exited};
+    let agents = app.agent_runtime.lifecycle().list();
+    let agents_ended = agents
+        .iter()
+        .filter(|snapshot| snapshot.key.session_id == session_id)
+        .all(|snapshot| {
+            snapshot.state == crate::agent_fleet::AgentState::Exited
+                && session_state(&crate::agent_runtime::terminal_key(&snapshot.key)) == Exited
+        });
+    let shells_ended = app
+        .workspace_terminals
+        .list(session_id)
+        .is_ok_and(|shells| {
+            shells
+                .iter()
+                .all(|shell| session_state(&format!("shell-{}", shell.id)) == Exited)
+        });
+    let children_ended = app.db.sub_sessions_of(session_id).is_ok_and(|children| {
+        children
+            .iter()
+            .all(|child| child.state == crate::sub_sessions::SubState::Stopped)
+    });
+    agents_ended && shells_ended && children_ended && session_state(session_id) == Exited
+}
+
 /// Files/Git follow the terminal, not just the workspace: the id
 /// `term:<session id>:<base64url directory>` names one local terminal and a
 /// directory its shell has actually been in (the client uses it only once the
@@ -1064,6 +1128,77 @@ mod quickchat_tests {
         );
         drop(db);
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// The old Chats project goes with its ended sessions, after a backup; a live session keeps it
+    /// until perchd shows it ended. The folder stays.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_old_chats_project_goes_once_its_sessions_end_and_its_folder_stays() {
+        let root = std::env::temp_dir().join(format!("perch-legacy-chats-{}", Uuid::new_v4()));
+        let folder = root.join("home/.perch/scratch");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("note.txt"), "kept").unwrap();
+        let (address, db) = super::super::sub_sessions::tests::boot(&root).await;
+        let app = super::super::booted_state(address);
+        let (project, workspace) = db
+            .create_project("local", &folder.to_string_lossy(), Some("Chats"), None)
+            .unwrap();
+        db.create_session_in_workspace("ended", &workspace, &home_dir())
+            .unwrap();
+        let live = format!("legacy-live-{}", Uuid::new_v4());
+        db.create_session_in_workspace(&live, &workspace, &folder.to_string_lossy())
+            .unwrap();
+        let daemon = crate::daemon::client().unwrap();
+        daemon
+            .create(
+                &live,
+                vec!["/bin/sh".into(), "-c".into(), "sleep 60".into()],
+                None,
+                vec![],
+                80,
+                24,
+            )
+            .unwrap();
+        assert_eq!(
+            crate::daemon::session_state(&live),
+            crate::daemon::RuntimeState::Alive
+        );
+
+        assert_eq!(
+            remove_legacy_chats(&app).unwrap(),
+            1,
+            "the live session waits"
+        );
+        assert!(db.get_session("ended").unwrap().is_none());
+        assert!(db.get_session(&live).unwrap().is_some());
+        assert_eq!(
+            crate::daemon::session_state(&live),
+            crate::daemon::RuntimeState::Alive,
+            "nothing was stopped"
+        );
+        assert!(db
+            .list_projects("local", true)
+            .unwrap()
+            .iter()
+            .any(|p| p.id == project.id));
+        assert!(
+            root.join("history.sqlite.pre-quickchat.bak").exists(),
+            "a copy was kept first"
+        );
+
+        assert!(crate::daemon::terminate(&live));
+        assert_eq!(remove_legacy_chats(&app).unwrap(), 0);
+        assert!(db.get_session(&live).unwrap().is_none());
+        assert!(!db
+            .list_projects("local", true)
+            .unwrap()
+            .iter()
+            .any(|p| p.id == project.id));
+        assert_eq!(
+            std::fs::read_to_string(folder.join("note.txt")).unwrap(),
+            "kept"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     fn project_to_wire_quickchat(project: &crate::db::ProjectRow) -> Option<bool> {

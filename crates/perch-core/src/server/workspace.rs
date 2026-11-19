@@ -20,6 +20,21 @@ fn next_snapshot_revision_locked(app: &AppState) -> u64 {
         + 1
 }
 
+/// Tell every client `project_id` (local) is gone. Callers hold `foundation_lock`.
+pub(super) fn publish_project_deleted(app: &AppState, project_id: String) {
+    let revision = next_snapshot_revision_locked(app);
+    broadcast_foundation(
+        app,
+        ServerMessage::ProjectDeleted {
+            request_id: None,
+            project_id,
+            host_id: "local".to_string(),
+            snapshot_epoch: app.snapshot_epoch.clone(),
+            snapshot_revision: revision,
+        },
+    );
+}
+
 /// Broadcast a project and one of its workspaces at a single revision.
 /// Callers hold `foundation_lock`.
 pub(super) fn publish_project_pair(
