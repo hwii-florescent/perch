@@ -22,6 +22,9 @@
 /// auto-title uses, so both kinds of session truncate the same way in the nav.
 const MAX_TITLE_CHARS: usize = 40;
 
+use regex::Regex;
+use std::sync::OnceLock;
+
 /// Hard cap on the pending buffer so a session where the user pastes a novel
 /// and never presses Enter can't grow this without bound. Larger than
 /// `MAX_TITLE_CHARS` because the leading characters are the ones we keep, and
@@ -110,7 +113,7 @@ impl CliTitleBuffer {
                             let trimmed = self.text.trim_end();
                             self.text = trimmed[..trimmed.len() - 1].to_string();
                             self.text.push(' ');
-                        } else if let Some(title) = normalize(&self.text) {
+                        } else if let Some(title) = clean_prompt(&self.text) {
                             self.text.clear();
                             // Keep scanning the rest of the chunk (the state
                             // machine must stay consistent), but the first
@@ -148,18 +151,49 @@ impl CliTitleBuffer {
     }
 }
 
-/// Collapse whitespace and truncate to a nav-sized label. Returns `None` for
-/// anything that wouldn't make a meaningful title (empty, or whitespace only),
-/// which is the signal to keep waiting for a real prompt.
-fn normalize(raw: &str) -> Option<String> {
-    let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.is_empty() {
-        return None;
+/// Turn a submitted prompt into a nav-sized title: drop a leading `/command`, file paths (bare or
+/// quoted) and pasted-image placeholders, collapse whitespace, and cut at [`MAX_TITLE_CHARS`]. When
+/// nothing else is left the command's own name stands in (`/ak-debug '/x.png'` is `ak-debug`).
+/// `None` only for a prompt with no words at all, the signal to keep waiting for a real one.
+pub fn clean_prompt(raw: &str) -> Option<String> {
+    static NOISE: OnceLock<Regex> = OnceLock::new();
+    let noise = NOISE.get_or_init(|| {
+        Regex::new(r#"'(?:~|\.\.?)?/[^']*'|"(?:~|\.\.?)?/[^"]*"|\[(?:Image|Pasted text)[^\]]*\]"#)
+            .expect("valid prompt noise pattern")
+    });
+    let text = noise.replace_all(raw, " ");
+    let mut words: Vec<&str> = text.split_whitespace().collect();
+    let mut command = None;
+    if let Some(first) = words.first().and_then(|word| word.strip_prefix('/')) {
+        // A command name ends at the first character a command cannot hold; a `/` there means
+        // the word is a path (`/Users/…`), not a command. A Tab-completed command can run into
+        // what follows (`/ak-debu'/Users/…`), so the rest of the word is kept as its own word.
+        let end = first
+            .find(|c: char| !(c.is_alphanumeric() || matches!(c, '-' | '_' | ':' | '.')))
+            .unwrap_or(first.len());
+        if end > 0 && !first[end..].starts_with('/') {
+            command = Some(&first[..end]);
+            words[0] = &first[end..];
+        }
     }
-    if collapsed.chars().count() <= MAX_TITLE_CHARS {
-        return Some(collapsed);
-    }
-    Some(collapsed.chars().take(MAX_TITLE_CHARS).collect())
+    let kept = words
+        .into_iter()
+        .filter(|word| !word.is_empty() && !is_path(word))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let title = if kept.is_empty() {
+        command?.to_string()
+    } else {
+        kept
+    };
+    Some(title.chars().take(MAX_TITLE_CHARS).collect())
+}
+
+fn is_path(word: &str) -> bool {
+    let word = word.trim_start_matches(['\'', '"', '`', '(', '<']);
+    ["/", "~/", "./", "../", "file://"]
+        .iter()
+        .any(|prefix| word.starts_with(prefix))
 }
 
 #[cfg(test)]
@@ -292,5 +326,46 @@ mod tests {
             buf.feed(&"y".repeat(100));
         }
         assert!(buf.text.chars().count() <= MAX_BUFFER_CHARS);
+    }
+
+    #[test]
+    fn prompts_are_cleaned_into_titles() {
+        let cases = [
+            ("/ak-debug '/Users/hwiii/.perch/x.png'", Some("ak-debug")),
+            ("/ak-debu'/Users/hwiii/.perch/x.png'", Some("ak-debu")),
+            (
+                "/ak-debug '/Users/me/x.png' why does login fail",
+                Some("why does login fail"),
+            ),
+            (
+                "fix   the\tbug in ~/proj/a.rs and ./b.rs",
+                Some("fix the bug in and"),
+            ),
+            (
+                "[Image #1] what is wrong here?",
+                Some("what is wrong here?"),
+            ),
+            ("look at \"/tmp/a b/c.png\" please", Some("look at please")),
+            ("/Users/me/screenshot.png", None),
+            ("/review", Some("review")),
+            ("explain and/or summarize", Some("explain and/or summarize")),
+            ("   ", None),
+        ];
+        for (raw, expected) in cases {
+            assert_eq!(clean_prompt(raw).as_deref(), expected, "{raw:?}");
+        }
+        assert_eq!(
+            clean_prompt(&"word ".repeat(30)).unwrap().chars().count(),
+            40
+        );
+    }
+
+    #[test]
+    fn a_submitted_command_with_only_a_pasted_path_is_titled_by_the_command() {
+        let mut buf = CliTitleBuffer::new();
+        assert_eq!(
+            buf.feed("/ak-debug '/Users/hwiii/.perch/x.png'\r"),
+            Some("ak-debug".to_string())
+        );
     }
 }

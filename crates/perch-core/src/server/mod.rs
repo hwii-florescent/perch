@@ -527,6 +527,7 @@ pub async fn run(
             if became_running {
                 if let Some(app) = agent_activity_state.get() {
                     agent_history::observe_session(app, session_id);
+                    refresh_provider_title(app, session_id);
                 }
                 let _ = agent_activity_events_tx.send(SessionUpdatedEvent {
                     session_id: session_id.to_string(),
@@ -2952,9 +2953,27 @@ fn notify_session_updated(app: &AppState, session_id: &str) {
     // it is where an agent turn's Git boundary is recorded (see
     // `agent_history`); the call is a no-op unless the flag actually moved.
     agent_history::observe_session(app, session_id);
+    refresh_provider_title(app, session_id);
     let _ = app.session_events_tx.send(SessionUpdatedEvent {
         session_id: session_id.to_string(),
     });
+}
+
+/// Adopt the title the session's provider gave it (`provider_title.rs`) before its update goes
+/// out. Every turn boundary reaches here, which is when providers write their titles.
+fn refresh_provider_title(app: &AppState, session_id: &str) {
+    let Some(roots) = crate::provider_title::Roots::from_env() else {
+        return;
+    };
+    let live = app
+        .agent_runtime
+        .lifecycle()
+        .list()
+        .into_iter()
+        .filter(|snapshot| snapshot.key.session_id == session_id)
+        .filter_map(|snapshot| Some((snapshot.provider_id, snapshot.provider_session_id?)))
+        .collect();
+    crate::provider_title::refresh(&roots, &app.db, session_id, live);
 }
 
 /// Look up a configured host and return it only if it is a `mode: "direct"`

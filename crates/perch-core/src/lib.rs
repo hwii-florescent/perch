@@ -37,6 +37,7 @@ pub mod permissions;
 pub mod protocol;
 pub mod provider_config;
 mod provider_environment;
+pub mod provider_title;
 pub mod relay;
 pub mod reporter;
 pub mod review;

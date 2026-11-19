@@ -603,7 +603,9 @@ pub(super) fn control(
                 }
                 let reply = bridge.enqueue_prompt(operation, text, steer)?;
                 if let Some(input) = input { crate::native_ui::claude::write_input(&input, write)?; }
-                let _ = state.app.db.set_cli_title(&session_id, text);
+                if let Some(title) = crate::cli_title::clean_prompt(text) {
+                    let _ = state.app.db.set_cli_title(&session_id, &title);
+                }
                 Ok(Some(reply))
             } else {
                 Ok(Some(queue_cancel(&bridge_key, &bridge, &request_id, write)?))
