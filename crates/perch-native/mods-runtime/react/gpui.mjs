@@ -224,7 +224,10 @@ export function toGpui(node, kit, handle, files, overlay = false, unseen = false
 function buildGpui(node, kit, handle, files, overlay, unseen, color, text, rowItem, snapped, hoverIcon) {
   const underPointer = UNDER_POINTER.has(node);
   unseen ||= node.style.opacity === 0 || node.style.visibility === "invisible" || node.style.display === "hidden";
-  if (unseen && (node.name || node.range_name)) node = { ...node, name: undefined, range_name: undefined, also: undefined };
+  // A named node that is not shown keeps its name as its engine id (what the engine keeps under it, a scroll position,
+  // survives its being hidden) but is not recorded as drawn (`unprobed`).
+  const unprobed = unseen && !!node.name;
+  if (unseen && (node.name || node.range_name)) node = { ...node, range_name: undefined, also: undefined };
   // A colour of its own ends the hover colour of the node around it.
   if (node.style.text_color !== undefined) hoverIcon = null;
   color = node.style.text_color ?? color;
@@ -257,6 +260,7 @@ function buildGpui(node, kit, handle, files, overlay, unseen, color, text, rowIt
   const tip = unseen ? "" : tooltipText(node);
   const id = engineId(node, events, !!region, !!tip);
   if (id) el = el.id(id);
+  if (unprobed && el.unprobed) el = el.unprobed();
   // `data-overflow-title` repeats the element's own text: the engine shows it only while that text is cut short.
   if (tip) el = el.tooltip(tip, !node.meta.attrs.title && tip === node.meta.attrs["data-overflow-title"]);
   // Its laid-out box is kept for the source, which measured it (`HostDocument.measure`).

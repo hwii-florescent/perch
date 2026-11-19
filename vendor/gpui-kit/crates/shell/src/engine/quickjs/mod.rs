@@ -7447,6 +7447,7 @@ impl ShellRuntime {
                 "measure",      // PERCH: an element's box for the host (`measure`).
                 "group",        // PERCH: names the element for a descendant's `group_hover`.
                 "also_named",   // PERCH: one more name a test reads the box by (`probe`).
+                "unprobed",     // PERCH: kept out of the probe (`probe`).
                 "on_item_click",
                 "on_item_secondary_click",
                 "on_change",
@@ -8538,6 +8539,7 @@ impl ShellRuntime {
             | "measure" // PERCH: an element's box for the host.
             | "group" // PERCH: a hover group.
             | "also_named" // PERCH: one more test name.
+            | "unprobed" // PERCH: kept out of the probe.
             | "tab_index"
             | "tab_stop"
             | "href"
@@ -8599,6 +8601,7 @@ impl ShellRuntime {
                     "measure" => "measure", // PERCH: an element's box for the host.
                     "group" => "group", // PERCH: a hover group.
                     "also_named" => "also_named", // PERCH: one more test name.
+                    "unprobed" => "unprobed", // PERCH: kept out of the probe.
                     "tab_index" => "tab_index",
                     "tab_stop" => "tab_stop",
                     "id" => "id",

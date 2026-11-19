@@ -5,7 +5,7 @@
 //! commented, the prepared packet and its send operation id, a send in flight) is kept by the host under the
 //! workspace's key (`useResourceState`), so every copy of this screen for one workspace shares it. Only
 //! transient UI (an open confirmation, a busy flag of a request this copy is awaiting) is the copy's own.
-import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import {
   cn,
   DiffView,
@@ -33,6 +33,8 @@ import {
 
 /** The narrow layout applies at or under this width of the review itself. */
 const NARROW_WIDTH = 700;
+/** A hidden rail: laid out over the diff's area, but neither drawn nor reached by the pointer. */
+const RAIL_HIDDEN: CSSProperties = { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, visibility: "hidden" };
 const EYEBROW = "text-accent text-[0.63rem] font-bold tracking-[0.09em] uppercase";
 const CONNECTION = "rounded-[999px] bg-surface-1 px-[0.42rem] py-[0.18rem] text-[0.7rem] whitespace-nowrap";
 const CONNECTION_READY = "text-green";
@@ -242,7 +244,7 @@ type LineCount = { added: number; removed: number };
 
 /** The changed paths, drawn only around the view (a script render of every row of a long change list ran past the
  * native client's render budget): the chunks in view sit between two spacers that hold the rest's height. */
-function ChangesTree({ rows, active, selected, lineCounts, scroller, onScroll, act }: {
+function ChangesTree({ rows, active, selected, lineCounts, scroller, onScroll, act, shown }: {
   rows: TreeRow[];
   active: string | undefined;
   selected: Set<string>;
@@ -250,30 +252,57 @@ function ChangesTree({ rows, active, selected, lineCounts, scroller, onScroll, a
   scroller: RefObject<HTMLDivElement | null>;
   onScroll: RefObject<(() => void) | null>;
   act: RefObject<TreeAct>;
+  /** Whether the rail is shown: rows kept while it is hidden are not measured. */
+  shown: boolean;
 }) {
   const listRef = useRef<HTMLDivElement | null>(null);
   // Until measured, a short drawer's worth: each row drawn costs the native client's render budget about half a
   // millisecond, so the first draw must not guess tall.
   const [view, setView] = useState({ top: 0, shown: 24 });
-  const rowHeight = () => listRef.current?.querySelector<HTMLElement>("[data-change-row]")?.getBoundingClientRect().height || 24;
+  // A folder row and a file row differ in height, and a spacer stands for rows of both: each kind is measured, so the
+  // rows above the view take their height and a fold keeps the rows in view where they were. A kind's height is the
+  // mean of its drawn rows (a box laid on device pixels may be half a pixel off its own height, and a spacer multiplies
+  // that by its rows), measured when the list scrolls or its rows change, while the rail is shown: rows kept while it
+  // is hidden are not laid out, so the heights stay and the rail comes back where it was.
+  const heights = useRef({ dir: 0, file: 0 });
+  const measured = (selector: string) => {
+    const drawn = [...(listRef.current?.querySelectorAll<HTMLElement>(selector) ?? [])].map((row) => row.getBoundingClientRect().height).filter((h) => h > 0);
+    return drawn.length ? drawn.reduce((sum, h) => sum + h, 0) / drawn.length : 0;
+  };
+  /** Whether a kind's height changed. */
+  const measure = () => {
+    const known = heights.current;
+    const was = { ...known };
+    known.dir = measured("button[data-change-row]") || known.dir;
+    known.file = measured("div[data-change-row]") || known.file;
+    return known.dir !== was.dir || known.file !== was.file;
+  };
+  const known = heights.current;
+  const rowHeight = { dir: known.dir || known.file || 24, file: known.file || known.dir || 24 };
+  const spacer = (from: number, to: number) => {
+    let sum = 0;
+    for (let i = from; i < to; i++) sum += rows[i]!.kind === "dir" ? rowHeight.dir : rowHeight.file;
+    return sum;
+  };
   const { start, end } = treeWindow(rows.length, view.top, view.shown, TREE_CHUNK);
   onScroll.current = () => {
+    if (!shown) return;
+    const remeasured = measure();
     const area = scroller.current?.getBoundingClientRect();
     const list = listRef.current?.getBoundingClientRect();
     if (!area || !list) return;
-    const height = rowHeight();
+    const height = heights.current.file || rowHeight.file;
     const now = { top: Math.max(0, (area.top - list.top) / height), shown: Math.ceil(area.height / height) };
     const next = treeWindow(rows.length, now.top, now.shown, TREE_CHUNK);
-    if (next.start !== start || next.end !== end) setView(now);
+    if (remeasured || next.start !== start || next.end !== end) setView(now);
   };
-  // Measured once drawn, and again when the rows change (a filter, a folded folder).
-  useEffect(() => onScroll.current?.(), [rows]);
-  const height = rowHeight();
+  // Measured once drawn, and again when the rows change (a filter, a folded folder) or the rail is shown again.
+  useEffect(() => onScroll.current?.(), [rows, shown]);
   const chunks: number[] = [];
   for (let first = start; first < end; first += TREE_CHUNK) chunks.push(first);
   return (
     <div ref={listRef} className="min-w-0 shrink-0">
-      <div aria-hidden style={{ height: start * height }} />
+      <div aria-hidden style={{ height: spacer(0, start) }} />
       {chunks.map((first) => (
         <div key={first} className="flex min-w-0 flex-col">
           {rows.slice(first, Math.min(end, first + TREE_CHUNK)).map((row) => row.kind === "dir"
@@ -281,7 +310,7 @@ function ChangesTree({ rows, active, selected, lineCounts, scroller, onScroll, a
             : <FileRow key={`file:${row.key}`} row={row} active={active === row.entry.path} checked={selected.has(row.entry.path)} counts={lineCounts.get(row.entry.path)} act={act} />)}
         </div>
       ))}
-      <div aria-hidden style={{ height: (rows.length - end) * height }} />
+      <div aria-hidden style={{ height: spacer(end, rows.length) }} />
     </div>
   );
 }
@@ -894,8 +923,10 @@ export function WorkspaceGitReview({
 
   const showRail = narrow ? narrowView === "files" : railOpen;
   const showDiff = !narrow || narrowView === "diff";
-  const rail = showRail ? (
-    <aside className="flex min-h-0 w-[17rem] min-w-[13rem] shrink-0 flex-col [border-left:1px_solid_var(--git-border)]" style={narrow ? { width: "100%", minWidth: 0, flex: "1 1 auto", borderLeft: "none" } : undefined} data-testid="git-status">
+  // The rail stays mounted while hidden (a diff shown in a narrow drawer, or closed), out of the flow and unseen, so it
+  // comes back scrolled where it was.
+  const rail = (
+    <aside className="flex min-h-0 w-[17rem] min-w-[13rem] shrink-0 flex-col [border-left:1px_solid_var(--git-border)]" style={{ ...(narrow ? { width: "100%", minWidth: 0, flex: "1 1 auto", borderLeft: "none" } : {}), ...(showRail ? {} : RAIL_HIDDEN) }} aria-hidden={showRail ? undefined : true} data-testid="git-status">
       <div className="flex items-center justify-between gap-[0.6rem] px-[0.7rem] py-[0.35rem]">
         <button
           type="button"
@@ -935,6 +966,7 @@ export function WorkspaceGitReview({
             scroller={treeRef}
             onScroll={treeScrolled}
             act={treeAct}
+            shown={showRail}
           />
           {statusState !== "loading" && changedFiles.length === 0 && <div className={STATUS_NOTE}>Working tree is clean.</div>}
           {changedFiles.length > 0 && treeShown.length === 0 && <div className={STATUS_NOTE}>No changed file matches.</div>}
@@ -954,7 +986,7 @@ export function WorkspaceGitReview({
         </div>
       </div>
     </aside>
-  ) : null;
+  );
 
   return (
     <section ref={rootRef} className="workspace-git" data-testid="workspace-git-review" aria-label="Git and review">
@@ -981,7 +1013,7 @@ export function WorkspaceGitReview({
         <IconButton icon="refresh" label="Refresh" testId="git-refresh" onClick={() => { actions.refreshStatus(); actions.listComments(); }} />
       </header>
 
-      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" style={narrow ? { flexDirection: "column" } : undefined}>
+      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden" style={narrow ? { flexDirection: "column" } : undefined}>
         {narrow && rail}
 
         {showDiff && <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

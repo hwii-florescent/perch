@@ -11,6 +11,8 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { cn, DiffView, FileIcon, GitMarker, newId, Select, useResourceState, } from "@perch/sdk";
 /** The narrow layout applies at or under this width of the review itself. */
 const NARROW_WIDTH = 700;
+/** A hidden rail: laid out over the diff's area, but neither drawn nor reached by the pointer. */
+const RAIL_HIDDEN = { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, visibility: "hidden" };
 const EYEBROW = "text-accent text-[0.63rem] font-bold tracking-[0.09em] uppercase";
 const CONNECTION = "rounded-[999px] bg-surface-1 px-[0.42rem] py-[0.18rem] text-[0.7rem] whitespace-nowrap";
 const CONNECTION_READY = "text-green";
@@ -181,27 +183,54 @@ export function treeWindow(count, top, shown, chunk) {
 }
 /** The changed paths, drawn only around the view (a script render of every row of a long change list ran past the
  * native client's render budget): the chunks in view sit between two spacers that hold the rest's height. */
-function ChangesTree({ rows, active, selected, lineCounts, scroller, onScroll, act }) {
+function ChangesTree({ rows, active, selected, lineCounts, scroller, onScroll, act, shown }) {
     const listRef = useRef(null);
     // Until measured, a short drawer's worth: each row drawn costs the native client's render budget about half a
     // millisecond, so the first draw must not guess tall.
     const [view, setView] = useState({ top: 0, shown: 24 });
-    const rowHeight = () => listRef.current?.querySelector("[data-change-row]")?.getBoundingClientRect().height || 24;
+    // A folder row and a file row differ in height, and a spacer stands for rows of both: each kind is measured, so the
+    // rows above the view take their height and a fold keeps the rows in view where they were. A kind's height is the
+    // mean of its drawn rows (a box laid on device pixels may be half a pixel off its own height, and a spacer multiplies
+    // that by its rows), measured when the list scrolls or its rows change, while the rail is shown: rows kept while it
+    // is hidden are not laid out, so the heights stay and the rail comes back where it was.
+    const heights = useRef({ dir: 0, file: 0 });
+    const measured = (selector) => {
+        const drawn = [...(listRef.current?.querySelectorAll(selector) ?? [])].map((row) => row.getBoundingClientRect().height).filter((h) => h > 0);
+        return drawn.length ? drawn.reduce((sum, h) => sum + h, 0) / drawn.length : 0;
+    };
+    /** Whether a kind's height changed. */
+    const measure = () => {
+        const known = heights.current;
+        const was = { ...known };
+        known.dir = measured("button[data-change-row]") || known.dir;
+        known.file = measured("div[data-change-row]") || known.file;
+        return known.dir !== was.dir || known.file !== was.file;
+    };
+    const known = heights.current;
+    const rowHeight = { dir: known.dir || known.file || 24, file: known.file || known.dir || 24 };
+    const spacer = (from, to) => {
+        let sum = 0;
+        for (let i = from; i < to; i++)
+            sum += rows[i].kind === "dir" ? rowHeight.dir : rowHeight.file;
+        return sum;
+    };
     const { start, end } = treeWindow(rows.length, view.top, view.shown, TREE_CHUNK);
     onScroll.current = () => {
+        if (!shown)
+            return;
+        const remeasured = measure();
         const area = scroller.current?.getBoundingClientRect();
         const list = listRef.current?.getBoundingClientRect();
         if (!area || !list)
             return;
-        const height = rowHeight();
+        const height = heights.current.file || rowHeight.file;
         const now = { top: Math.max(0, (area.top - list.top) / height), shown: Math.ceil(area.height / height) };
         const next = treeWindow(rows.length, now.top, now.shown, TREE_CHUNK);
-        if (next.start !== start || next.end !== end)
+        if (remeasured || next.start !== start || next.end !== end)
             setView(now);
     };
-    // Measured once drawn, and again when the rows change (a filter, a folded folder).
-    useEffect(() => onScroll.current?.(), [rows]);
-    const height = rowHeight();
+    // Measured once drawn, and again when the rows change (a filter, a folded folder) or the rail is shown again.
+    useEffect(() => onScroll.current?.(), [rows, shown]);
     const chunks = [];
     for (let first = start; first < end; first += TREE_CHUNK)
         chunks.push(first);
@@ -211,7 +240,7 @@ function ChangesTree({ rows, active, selected, lineCounts, scroller, onScroll, a
         children: [
             _jsx("div", {
                 "aria-hidden": true,
-                style: { height: start * height }
+                style: { height: spacer(0, start) }
             }),
             chunks.map((first) => (_jsx("div", {
                 className: "flex min-w-0 flex-col",
@@ -230,7 +259,7 @@ function ChangesTree({ rows, active, selected, lineCounts, scroller, onScroll, a
             }, first))),
             _jsx("div", {
                 "aria-hidden": true,
-                style: { height: (rows.length - end) * height }
+                style: { height: spacer(end, rows.length) }
             })
         ]
     }));
@@ -918,9 +947,12 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
     }
     const showRail = narrow ? narrowView === "files" : railOpen;
     const showDiff = !narrow || narrowView === "diff";
-    const rail = showRail ? (_jsxs("aside", {
+    // The rail stays mounted while hidden (a diff shown in a narrow drawer, or closed), out of the flow and unseen, so it
+    // comes back scrolled where it was.
+    const rail = (_jsxs("aside", {
         className: "flex min-h-0 w-[17rem] min-w-[13rem] shrink-0 flex-col [border-left:1px_solid_var(--git-border)]",
-        style: narrow ? { width: "100%", minWidth: 0, flex: "1 1 auto", borderLeft: "none" } : undefined,
+        style: { ...(narrow ? { width: "100%", minWidth: 0, flex: "1 1 auto", borderLeft: "none" } : {}), ...(showRail ? {} : RAIL_HIDDEN) },
+        "aria-hidden": showRail ? undefined : true,
         "data-testid": "git-status",
         children: [
             _jsxs("div", {
@@ -995,7 +1027,8 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                                 lineCounts: lineCounts,
                                 scroller: treeRef,
                                 onScroll: treeScrolled,
-                                act: treeAct
+                                act: treeAct,
+                                shown: showRail
                             }),
                             statusState !== "loading" && changedFiles.length === 0 && _jsx("div", {
                                 className: STATUS_NOTE,
@@ -1066,7 +1099,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                 ]
             })
         ]
-    })) : null;
+    }));
     return (_jsxs("section", {
         ref: rootRef,
         className: "workspace-git",
@@ -1158,7 +1191,7 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                 ]
             }),
             _jsxs("div", {
-                className: "flex min-h-0 min-w-0 flex-1 overflow-hidden",
+                className: "relative flex min-h-0 min-w-0 flex-1 overflow-hidden",
                 style: narrow ? { flexDirection: "column" } : undefined,
                 children: [
                     narrow && rail,

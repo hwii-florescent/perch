@@ -3,8 +3,11 @@
 //! the first screenful: the tree measured its list unscrolled), and a click on a file, a folder
 //! expanded and collapsed and the tree loaded again leave it where it was (each click put it back
 //! at its top). A reveal does scroll, and only as far as its row: the keyboard walking the cursor
-//! past the bottom moves it a row. In the Git rail a click on a change row and a refresh leave it
-//! where it was, and a fold moves it less than two rows (see `FOLD_SLACK`).
+//! past the bottom moves it a row. In the Git rail a click on a change row, a refresh and a fold
+//! leave it where it was: the folder clicked stays under the pointer (the rail's spacers took one
+//! row height for folder and file rows alike, so a fold moved it up to a row). In a narrow drawer a
+//! click on a change row shows its diff in place of the rail, and Show files brings the rail back
+//! where it was scrolled (it came back at its top).
 //!
 //! Each check reads where a row in view is drawn before and after.
 
@@ -12,25 +15,21 @@ mod common;
 
 use common::{Harness, Rig};
 use gpui::{
-    point, px, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, ScrollDelta,
-    ScrollEvent, ScrollSource, TouchPhase, Window,
+    point, px, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PlatformInput,
+    ScrollDelta, ScrollEvent, ScrollSource, TouchPhase, Window,
 };
 use gpui_shell::probe::{self, ProbeRecord};
 use perch_native::client::follow;
 use perch_native::sidebar::LOCAL;
 use std::path::Path;
 use std::process::Command;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const FOLDERS: usize = 30;
 const FILES: usize = 60;
-/// How far a fold in the Git rail may move it: under two rows (a jump to the top is the whole
-/// scroll). The rail draws only the rows around the view, between spacers sized by one row's
-/// height, and its folder rows are a few pixels shorter than its file rows, so when a fold moves
-/// the drawn window the spacer above is off by a little (3.5 and 28.5 px measured). A browser
-/// hides that with scroll anchoring, which the native client has none of.
-/// ponytail: equal row heights in the source (`review.tsx`) would make the spacers exact.
-const FOLD_SLACK: f32 = 40.;
+/// A fold changes how many rows the rail's spacers stand for, and a box is laid on the window's
+/// device pixels: its edge may land up to a pixel from where it was (a drift was a row or more).
+const ROUNDING: f32 = 1.;
 
 fn git(repo: &Path, args: &[&str]) {
     let status = Command::new("git")
@@ -111,6 +110,43 @@ fn scroll(h: &mut Harness, area: &str, by: f32) {
             delta: ScrollDelta::Pixels(point(px(0.), px(-by))),
             modifiers: Modifiers::default(),
             touch_phase: TouchPhase::Moved,
+        }),
+    );
+    h.settle();
+}
+
+/// A press at `from`, the pointer dragged to `to` and let go there.
+fn drag(h: &mut Harness, from: (f32, f32), to: (f32, f32)) {
+    let at = |(x, y): (f32, f32)| point(px(x), px(y));
+    dispatch(
+        h,
+        PlatformInput::MouseDown(MouseDownEvent {
+            button: MouseButton::Left,
+            position: at(from),
+            modifiers: Modifiers::default(),
+            click_count: 1,
+            first_mouse: false,
+        }),
+    );
+    for step in 1..=10 {
+        let x = from.0 + (to.0 - from.0) * step as f32 / 10.;
+        let y = from.1 + (to.1 - from.1) * step as f32 / 10.;
+        dispatch(
+            h,
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: at((x, y)),
+                pressed_button: Some(MouseButton::Left),
+                modifiers: Modifiers::default(),
+            }),
+        );
+    }
+    dispatch(
+        h,
+        PlatformInput::MouseUp(MouseUpEvent {
+            button: MouseButton::Left,
+            position: at(to),
+            modifiers: Modifiers::default(),
+            click_count: 1,
         }),
     );
     h.settle();
@@ -341,16 +377,77 @@ fn scenario(rig: &mut Rig) {
         folder.trim_start_matches("git-dir:")
     );
     let open = records(&mut h).iter().any(|r| r.name == inner);
+    let clicked = (
+        folder.clone(),
+        place(&mut h, &folder).expect("the folder is drawn").0,
+    );
     click(&mut h, &folder);
     h.wait("the Git folder folded or unfolded", |h| {
         records(h).iter().any(|r| r.name == inner) != open
     });
-    stays(&mut h, &anchor, "folding a Git folder", FOLD_SLACK);
+    stays(&mut h, &clicked, "folding a Git folder", ROUNDING);
+    stays(&mut h, &anchor, "folding a Git folder", ROUNDING);
     click(&mut h, &folder);
     h.wait("the Git folder back", |h| {
         records(h).iter().any(|r| r.name == inner) == open
     });
-    stays(&mut h, &anchor, "unfolding it", FOLD_SLACK);
+    stays(&mut h, &clicked, "unfolding it", ROUNDING);
+    stays(&mut h, &anchor, "unfolding it", ROUNDING);
+
+    // A narrow drawer: the drawer's edge dragged until the Git screen is narrower than 700 px.
+    let root = records(&mut h)
+        .into_iter()
+        .find(|r| r.name == "review-root")
+        .expect("the Git screen is drawn")
+        .bounds;
+    let edge = (f32::from(root.left()) - 4., f32::from(root.center().y));
+    drag(&mut h, edge, (edge.0 + 260., edge.1));
+    h.wait("the narrow Git layout", |h| {
+        records(h)
+            .iter()
+            .any(|r| r.name == "review-root" && r.bounds.size.width < px(700.))
+            && records(h).iter().any(|r| r.name == "git-rail-toggle")
+    });
+    if !records(&mut h).iter().any(|r| r.name == "git-changes") {
+        click(&mut h, "git-rail-toggle");
+    }
+    h.wait("the rail in the narrow drawer", |h| {
+        records(h).iter().any(|r| r.name == "git-changes")
+    });
+    scroll(&mut h, "git-changes", 300.);
+    scroll(&mut h, "git-changes", 300.);
+    let rows = in_view(&mut h, "git-changes", "git-change:");
+    let anchor = rows.first().expect("change rows in view").clone();
+    let change = rows
+        .get(2)
+        .expect("a change row below the anchor")
+        .0
+        .clone();
+    click(&mut h, &change);
+    h.wait("the diff in place of the rail", |h| {
+        !records(h).iter().any(|r| r.name == "git-changes")
+    });
+    // What the hidden rail costs the Git screen while its diff shows, reported: script time over
+    // refreshes (125-143 ms for five with the rail kept, 80-106 ms with it unmounted).
+    let host =
+        h.cx.update(|cx| cx.global::<perch_native::mods::WindowMods>().host.clone());
+    let (before, started) = (host.metrics(), Instant::now());
+    for _ in 0..5 {
+        click(&mut h, "git-refresh");
+    }
+    let spent = host.metrics().since(&before);
+    eprintln!(
+        "drawer_scroll_window: 5 refreshes with the diff shown: {} script renders, {:?} script render time, {:?} native, {:?} wall",
+        spent.script_renders(),
+        spent.script_render_time(),
+        spent.native_time(),
+        started.elapsed()
+    );
+    click(&mut h, "git-rail-toggle");
+    h.wait("the rail back", |h| {
+        records(h).iter().any(|r| r.name == anchor.0)
+    });
+    stays(&mut h, &anchor, "showing the files again after a diff", 0.);
 
     h.close();
     follower.abort();
