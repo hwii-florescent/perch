@@ -178,3 +178,83 @@ it("the size moves to the view a person types into, once, and a drag resizes the
   expect(resizes).toEqual([[{ type: "terminal.resize", terminalId: "typed", cols: 100, rows: 24, generation: 4 }]]);
   binding.release();
 });
+
+it.each([
+  ["a desktop window holds it", { clientId: "laptop", deviceId: "local", generation: 3, acquiredAtMs: 0, lastActivityMs: 0 }],
+  ["nobody holds it", undefined],
+] as const)("a phone showing a tab takes its size when %s", async (_, holder) => {
+  const binding = openAgentTerminal("session", "claude", 40, 20, () => {}, () => {}, () => {}, () => ({ cols: 40, rows: 20 }), true);
+  const leave = binding.showOnPhone();
+  const reply = opened(0, "shown-tab");
+  handleAgentTerminalMessage({ ...reply, status: { ...reply.status, ...(holder ? { resizeOwner: holder } : {}) } });
+  await binding.ready;
+  const acquires = () => transport.send.mock.calls.map(([m]) => m).filter((m) => m.type === "agent.control.acquire" && m.channel === "resize");
+  await vi.waitFor(() => expect(acquires()).toHaveLength(1));
+  // One rule: an explicit take, never the "only if vacant" claim.
+  expect(acquires()[0].ifUnowned).toBeUndefined();
+  leave();
+  binding.release();
+});
+
+it("a phone takes the size of the tab it shows, once, and gives it back when it leaves it or goes to the background", async () => {
+  let hidden = false;
+  Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+  const size = { cols: 40, rows: 20 };
+  const binding = openAgentTerminal("session", "claude", 40, 20, () => {}, () => {}, () => {}, () => size, true);
+  const sent = (type: string) => transport.send.mock.calls.map(([m]) => m).filter((m) => m.type === type && m.channel === "resize");
+  const answer = (message: { requestId: string }, lease?: AgentControlLease) => handleAgentTerminalMessage({ type: "agent.control", requestId: message.requestId, sessionId: "session", agentId: "claude", channel: "resize", ...(lease ? { lease } : {}) });
+  const leave = binding.showOnPhone();
+  handleAgentTerminalMessage(opened(0, "phone-tab"));
+  await binding.ready;
+  // Shown: it takes the size from the desktop that holds it, with no typing and no Take control.
+  await vi.waitFor(() => expect(sent("agent.control.acquire")).toHaveLength(1));
+  expect(sent("agent.control.acquire")[0].ifUnowned).toBeUndefined();
+  const lease: AgentControlLease = { clientId: "phone", deviceId: "local", generation: 5, acquiredAtMs: 0, lastActivityMs: 0 };
+  answer(sent("agent.control.acquire")[0], lease);
+  // To the background: given back, by its generation.
+  hidden = true;
+  document.dispatchEvent(new Event("visibilitychange"));
+  await vi.waitFor(() => expect(sent("agent.control.release")).toHaveLength(1));
+  expect(sent("agent.control.release")[0].generation).toBe(5);
+  answer(sent("agent.control.release")[0]);
+  // Back to the foreground on this tab: taken again, once.
+  hidden = false;
+  document.dispatchEvent(new Event("visibilitychange"));
+  await vi.waitFor(() => expect(sent("agent.control.acquire")).toHaveLength(2));
+  answer(sent("agent.control.acquire")[1], { ...lease, generation: 7 });
+  // Another tab is shown: this one gives its size back, and is not taken again while hidden.
+  await vi.waitFor(() => expect(transport.send.mock.calls.some(([m]) => m.type === "terminal.resize")).toBe(true), { timeout: 200 });
+  leave();
+  await vi.waitFor(() => expect(sent("agent.control.release")).toHaveLength(2));
+  expect(sent("agent.control.release")[1].generation).toBe(7);
+  answer(sent("agent.control.release")[1]);
+  hidden = true; document.dispatchEvent(new Event("visibilitychange"));
+  hidden = false; document.dispatchEvent(new Event("visibilitychange"));
+  expect(sent("agent.control.acquire")).toHaveLength(2);
+  binding.release();
+});
+
+it("a desktop view sizes the PTY again when the core gives it back the size a phone took", async () => {
+  const size = { cols: 132, rows: 40 };
+  const onStatus = vi.fn();
+  const binding = openAgentTerminal("session", "claude", 132, 40, () => {}, () => {}, onStatus, () => size, true);
+  handleAgentTerminalMessage(opened(0, "laptop-tab"));
+  await binding.ready;
+  const taking = binding.takeResize();
+  const acquire = transport.send.mock.calls.at(-1)![0];
+  const mine: AgentControlLease = { clientId: "laptop", deviceId: "local", generation: 4, acquiredAtMs: 0, lastActivityMs: 0 };
+  handleAgentTerminalMessage({ type: "agent.control", requestId: acquire.requestId, sessionId: "session", agentId: "claude", channel: "resize", lease: mine });
+  await taking;
+  // The phone shows this tab: the size is its.
+  handleAgentTerminalMessage({ type: "agent.lifecycle.changed", hostId: "local", status: { ...snapshot("claude", 2), resizeOwner: { ...mine, clientId: "phone", generation: 5 } } });
+  expect(onStatus).toHaveBeenLastCalledWith(expect.anything(), false, false);
+  // The phone left it: the core hands this connection a new lease, which it uses at once.
+  handleAgentTerminalMessage({ type: "agent.lifecycle.changed", hostId: "local", status: { ...snapshot("claude", 3), resizeOwner: { ...mine, generation: 6 } } });
+  expect(onStatus).toHaveBeenLastCalledWith(expect.anything(), false, true);
+  vi.useFakeTimers();
+  transport.send.mockClear();
+  resizeAgentTerminal("laptop-tab", 120, 40);
+  await vi.advanceTimersByTimeAsync(RESIZE_QUIET_MS);
+  expect(transport.send).toHaveBeenCalledExactlyOnceWith({ type: "terminal.resize", terminalId: "laptop-tab", cols: 120, rows: 40, generation: 6 });
+  binding.release();
+});

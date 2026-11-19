@@ -218,6 +218,17 @@ Terminal-specific contracts:
   Take control or Take back), never on window focus; its holder sends a size
   only after 25 ms without change (`RESIZE_QUIET` in the native view,
   `RESIZE_QUIET_MS` in `agentTerminals.ts`). Every resize makes a TUI repaint.
+  A phone (a connection made with `?viewer=phone`, `ClientKind::Mobile`) takes
+  the lease of the terminal it shows, without typing, and releases it when it
+  stops showing it or goes to the background (`showOnPhone`). The core
+  remembers the desktop holder and PTY size it took the lease from and, on the
+  phone's release or detach, grants that view a new lease and restores the size
+  (`AgentRuntimeAdapter::give_size_back`); the view adopts a lease naming its
+  own client id (web `agentTerminals.ts`, native `Terminal::follow_owners`).
+  `terminal.resize` checks the runtime's current lease, not one cached per
+  connection. A lease taken or handed back is broadcast at once, so the view
+  that lost it stops answering terminal queries. Leases are per terminal, so
+  other tabs never move.
   Shared CLI input does not acquire stop authority. Only the resize
   owner answers terminal queries; replay must not replay live side effects.
 - Agent and ordinary shell terminals accept user-dropped files/images up to 1 GiB per file on

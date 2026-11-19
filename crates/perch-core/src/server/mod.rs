@@ -2080,9 +2080,13 @@ async fn ws_upgrade(
     Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     match authorize_request(&state, &peer, &headers, &params) {
-        Ok(device_id) => ws
-            .on_upgrade(move |socket| handle_socket(socket, state, device_id))
-            .into_response(),
+        Ok(device_id) => {
+            // A phone says so as it connects (`?viewer=phone`): it takes a terminal's size while it
+            // shows it and gives it back after (`AgentRuntimeAdapter::give_size_back`).
+            let phone = params.get("viewer").is_some_and(|viewer| viewer == "phone");
+            ws.on_upgrade(move |socket| handle_socket(socket, state, device_id, phone))
+        }
+        .into_response(),
         Err(status) => (status, "device access denied").into_response(),
     }
 }
@@ -2232,6 +2236,8 @@ struct ConnState {
     conn_id: String,
     /// Authenticated pairing identity; local clients have no paired device.
     device_id: Option<String>,
+    /// The page connected as a phone (`?viewer=phone`): its leases are `ClientKind::Mobile`.
+    phone: bool,
     out_tx: Outbox,
     runtimes: Mutex<HashMap<String, SessionRuntime>>,
     terminals: TerminalManager,
@@ -2269,7 +2275,6 @@ struct ConnState {
     agent_views: Mutex<HashMap<AgentKey, HashSet<String>>>,
     released_agent_views: Mutex<std::collections::VecDeque<String>>,
     agent_input_leases: Mutex<HashMap<String, crate::agent_fleet::ControlLease>>,
-    agent_resize_leases: Mutex<HashMap<String, crate::agent_fleet::ControlLease>>,
     /// Mod formats this page said it loads in its last `mods.list` (`accepts`); empty for an older
     /// page, which is then never shown a package (`mods::state_message`).
     mod_formats: Mutex<Vec<String>>,
@@ -2287,7 +2292,7 @@ impl Drop for ConnCountGuard {
     }
 }
 
-async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<String>) {
+async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<String>, phone: bool) {
     let mut revoked = app.devices.subscribe_revocations();
     if device_id
         .as_ref()
@@ -2429,6 +2434,7 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
         app: app.clone(),
         conn_id: conn_id.clone(),
         device_id: device_id.clone(),
+        phone,
         out_tx,
         runtimes: Mutex::new(HashMap::new()),
         terminals: TerminalManager::new(on_data, on_exit),
@@ -2442,7 +2448,6 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
         agent_views: Mutex::new(HashMap::new()),
         released_agent_views: Mutex::new(std::collections::VecDeque::new()),
         agent_input_leases: Mutex::new(HashMap::new()),
-        agent_resize_leases: Mutex::new(HashMap::new()),
         mod_formats: Mutex::new(Vec::new()),
     });
 

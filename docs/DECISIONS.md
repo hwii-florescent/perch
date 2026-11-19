@@ -16,6 +16,16 @@ conventions, not automatic approval. AGENTS is only a brief contributor entry po
   that holds the size still resizes the PTY for its own layout changes (window, sidebar, drawer, split).
 - **Resizes are coalesced.** The native and web views tell the core a new size only after it has held still for
   25 ms, as Ghostty does, so a drag or an animation is one resize.
+- **Amended for phones (owner, 2026-11-19): a phone takes the size of the tab it shows.** The size stays per tab (per
+  session's PTY): a phone showing tab A never changes tab B. A phone takes A's size as soon as it shows A (opens it,
+  switches to it, returns to the foreground on it), with no Take control and no typing, even from a desktop window that
+  holds it. When it stops showing A (another tab, the background, a lock, a disconnect) it gives the size back, and the
+  core hands it to the desktop view it took it from, at that view's size, if the view still watches A; an unclean drop
+  gives it back through the watcher detach. A person typing on the desktop while the phone shows A takes the size as
+  before, and then nothing is given back. Desktop windows keep the typing rule between themselves.
+  A phone is a connection that says so (`/ws?viewer=phone`, the core's `ClientKind::Mobile`): the web page on a touch
+  phone or through a relay (`isTouchPhone`), and a native phone client (`Core::phone`). A narrow mouse-driven window is
+  the computer, so it follows the typing rule; it no longer fits the PTY to itself once on opening.
 - **Why:** every PTY resize makes Claude Code repaint over its reflowed screen, which leaves duplicated lines and
   blocks cut or wrapped at an older width in its history. Perch draws this exactly as Ghostty does for the same
   bytes (study: `plans/261118-1429-mobile-route/task-12-study.md`); the fix is fewer resizes.

@@ -81,9 +81,19 @@ pub struct Core {
     /// The core's base path, always starting and ending with `/`.
     base_path: String,
     token: String,
+    /// Connect as a phone (`?viewer=phone`): the core lends a phone the size of the terminal it
+    /// shows and gives it back to the desktop view it took it from ([`Self::phone`]).
+    phone: bool,
 }
 
 impl Core {
+    /// This core, connected to as a phone: a phone takes a terminal's size while it shows it
+    /// ([`Connection::take_resize`]) and gives it back after ([`Connection::release_resize`]).
+    pub fn phone(mut self) -> Self {
+        self.phone = true;
+        self
+    }
+
     /// A core whose local UI token is already known (a headless core publishes it in `core.json`).
     pub fn with_token(base_url: &str, token: &str) -> Result<Self> {
         let (authority, base_path) = split_base_url(base_url)?;
@@ -94,6 +104,7 @@ impl Core {
             authority,
             base_path,
             token: token.to_string(),
+            phone: false,
         })
     }
 
@@ -385,7 +396,8 @@ impl Core {
 
     /// Open the core's WebSocket.
     pub async fn connect(&self) -> Result<Connection> {
-        let mut request = format!("ws://{}{}ws", self.authority, self.base_path)
+        let viewer = if self.phone { "?viewer=phone" } else { "" };
+        let mut request = format!("ws://{}{}ws{viewer}", self.authority, self.base_path)
             .into_client_request()
             .context("invalid core address")?;
         request.headers_mut().insert(
@@ -455,6 +467,9 @@ pub struct Terminal {
     /// typing and resizing only from the holder; `None` means another view holds it.
     input: Option<u64>,
     resize: Option<u64>,
+    /// This connection's client id, as the core names it in a lease it granted: a lease the core
+    /// hands back under it (a phone giving the size back) is this terminal's.
+    client_id: Option<String>,
     pub workspace_id: String,
     /// The agent's lifecycle as of the last broadcast this terminal followed.
     pub status: AgentLifecycleStatus,
@@ -462,8 +477,9 @@ pub struct Terminal {
 
 impl Terminal {
     /// Follow a lifecycle status the core broadcast: a lease whose generation the status no
-    /// longer names was taken by another view, and this connection no longer holds it. Returns
-    /// whether either lease was lost.
+    /// longer names was taken by another view, and this connection no longer holds it; a size
+    /// the core names this connection's (a phone gave it back) is held again. Returns whether
+    /// either lease was lost.
     pub fn follow_owners(&mut self, status: &AgentLifecycleStatus) -> bool {
         let key = &status.key;
         if key.session_id != self.session_id || key.agent_id != self.provider {
@@ -481,6 +497,13 @@ impl Terminal {
                 *mine = None;
                 lost = true;
             }
+        }
+        if let Some(owner) = status
+            .resize_owner
+            .as_ref()
+            .filter(|o| self.resize.is_none() && Some(&o.client_id) == self.client_id.as_ref())
+        {
+            self.resize = Some(owner.generation);
         }
         lost
     }
@@ -604,52 +627,34 @@ impl Connection {
             })
             .await?;
         let workspace_id = status.key.workspace_id.clone();
-        let input = self
-            .acquire(session_id, provider, &workspace_id, "input", true)
-            .await?;
-        let resize = self
-            .acquire(session_id, provider, &workspace_id, "resize", true)
-            .await?;
-        Ok(Terminal {
+        let mut terminal = Terminal {
             id: terminal_id,
             replay,
             session_id: session_id.to_string(),
             provider: provider.to_string(),
             view_id: id,
-            input,
-            resize,
+            input: None,
+            resize: None,
+            client_id: None,
             workspace_id,
             status,
-        })
+        };
+        terminal.input = self.acquire(&mut terminal, "input", true).await?;
+        terminal.resize = self.acquire(&mut terminal, "resize", true).await?;
+        Ok(terminal)
     }
 
     /// Take the input and size of a terminal another view holds, as the web's "Take control"
     /// does: the input first, then the size.
     pub async fn take_control(&mut self, terminal: &mut Terminal) -> Result<()> {
-        terminal.input = self
-            .acquire(
-                &terminal.session_id,
-                &terminal.provider,
-                &terminal.workspace_id,
-                "input",
-                false,
-            )
-            .await?;
+        terminal.input = self.acquire(terminal, "input", false).await?;
         self.take_resize(terminal).await
     }
 
     /// Take only the size of a terminal another view or a phone holds, as the web's "Take back
     /// all tabs" does for each terminal a phone holds.
     pub async fn take_resize(&mut self, terminal: &mut Terminal) -> Result<()> {
-        terminal.resize = self
-            .acquire(
-                &terminal.session_id,
-                &terminal.provider,
-                &terminal.workspace_id,
-                "resize",
-                false,
-            )
-            .await?;
+        terminal.resize = self.acquire(terminal, "resize", false).await?;
         Ok(())
     }
 
@@ -703,31 +708,36 @@ impl Connection {
         self.send(delete_frame(session_id, stop_sub_sessions)).await
     }
 
+    /// The generation of the `channel` lease the core granted, if it did; the lease also tells
+    /// `terminal` its connection's client id.
     async fn acquire(
         &mut self,
-        session_id: &str,
-        provider: &str,
-        workspace_id: &str,
+        terminal: &mut Terminal,
         channel: &str,
         if_unowned: bool,
     ) -> Result<Option<u64>> {
         let id = self.request_id();
         self.send(acquire_frame_as(
             &id,
-            session_id,
-            provider,
-            workspace_id,
+            &terminal.session_id,
+            &terminal.provider,
+            &terminal.workspace_id,
             channel,
             if_unowned,
         ))
         .await?;
-        self.reply(Some(&id), |m| match m {
-            ServerMessage::AgentControl {
-                request_id, lease, ..
-            } if *request_id == id => Some(lease.as_ref().map(|lease| lease.generation)),
-            _ => None,
-        })
-        .await
+        let lease = self
+            .reply(Some(&id), |m| match m {
+                ServerMessage::AgentControl {
+                    request_id, lease, ..
+                } if *request_id == id => Some(lease.clone()),
+                _ => None,
+            })
+            .await?;
+        Ok(lease.map(|lease| {
+            terminal.client_id = Some(lease.client_id);
+            lease.generation
+        }))
     }
 
     /// Type into a terminal: under the input lease when this connection holds it, otherwise, when
