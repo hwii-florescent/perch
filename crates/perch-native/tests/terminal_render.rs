@@ -1595,6 +1595,18 @@ fn background_bands_match_their_rows(bg: [u8; 3]) {
     // The padded row's last 20 written cells wrap onto a row of their own.
     assert!(near(shot.center(10, 2), green) && near(shot.center(25, 2), bg));
     assert!(shot.ink(0, 3, 3, bg) > 4, "then the text after it");
+
+    // Widened back (the wider window takes the size again), the wrapped band rejoins its row.
+    h.output("\x1b[8;8;60t");
+    let shot = h.draw();
+    assert!(
+        near(shot.center(50, 1), green),
+        "the padded row is whole again"
+    );
+    assert!(
+        shot.ink(0, 2, 3, bg) > 4,
+        "and the text after it moves back up"
+    );
 }
 
 fn wide_and_emoji(bg: [u8; 3]) {
