@@ -1900,7 +1900,10 @@ mod tests {
         assert_eq!(listed["mods"][0]["id"], "board");
         assert_eq!(listed["mods"][0]["enabled"], true);
         assert_eq!(call("open", json!({"id": "board"})).await.0, 200);
-        let shown = screen.try_recv().expect("the screen is told");
+        // The watcher's own ModsChanged (every 2 s, when files differ) may be queued too.
+        let shown = std::iter::from_fn(|| screen.try_recv().ok())
+            .find(|message| !matches!(&**message, ServerMessage::ModsChanged {}))
+            .expect("the screen is told");
         assert!(matches!(&*shown, ServerMessage::ModsOpen { mod_id } if mod_id == "board"));
 
         // `check` answers from what the page reported for the mod's current revision only.
@@ -2072,7 +2075,11 @@ mod tests {
             200
         );
         assert_eq!(call("open", json!({"id": "board"})).await.0, 400);
-        assert!(screen.try_recv().is_err());
+        assert!(
+            std::iter::from_fn(|| screen.try_recv().ok())
+                .all(|message| matches!(&*message, ServerMessage::ModsChanged {})),
+            "a disabled mod is not opened on the screens"
+        );
         assert_eq!(
             call("enable", json!({"id": "nope", "enabled": false}))
                 .await

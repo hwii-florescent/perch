@@ -870,15 +870,20 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        for _ in 0..100 {
-            if tui_pid.is_file() {
+        // Both children write their pid when they start. A file can exist before its
+        // content does, so wait until both parse; a busy run can take seconds.
+        let read_pid = |path: &std::path::Path| -> Option<i32> {
+            std::fs::read_to_string(path).ok()?.trim().parse().ok()
+        };
+        for _ in 0..1000 {
+            if read_pid(&server_pid).is_some() && read_pid(&tui_pid).is_some() {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
         let children: Vec<i32> = [&server_pid, &tui_pid]
             .into_iter()
-            .filter_map(|path| std::fs::read_to_string(path).ok()?.trim().parse().ok())
+            .filter_map(|path| read_pid(path))
             .collect();
         unsafe {
             libc::kill(parent.id() as i32, libc::SIGHUP);

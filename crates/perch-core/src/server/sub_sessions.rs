@@ -1043,7 +1043,7 @@ pub(super) mod tests {
             db.clone(),
             root.display().to_string(),
         ));
-        let address = tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx)
+        let address = tokio::time::timeout(std::time::Duration::from_secs(30), ready_rx)
             .await
             .unwrap()
             .unwrap();
