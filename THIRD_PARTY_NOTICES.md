@@ -169,7 +169,8 @@ SOFTWARE.
 
 `perchd`'s terminal screen is [Ghostty](https://github.com/ghostty-org/ghostty)'s
 terminal engine, commit `291fd050b9e9c293c8adb6a140742649b7e42d3a`, vendored as the
-`third_party/ghostty` git submodule and compiled with Zig by `crates/ghostty-sys`.
+`third_party/ghostty` git submodule and compiled with Zig by `crates/ghostty-sys`,
+modified by the patches in `crates/ghostty-sys/patches/`.
 `crates/perchd/src/screen.rs` is Perch's own code, written against Ghostty's public C
 headers. Ghostty is distributed under this notice:
 
