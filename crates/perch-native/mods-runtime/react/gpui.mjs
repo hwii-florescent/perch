@@ -114,7 +114,7 @@ const holdsText = (node) => (node.children ?? []).some((c) => (c.kind === "text"
 function tooltipText(node) {
   const attrs = node.meta?.attrs;
   if (!attrs) return "";
-  return attrs.title || (node.meta.tag === "button" && attrs["aria-label"] && !holdsText(node) ? attrs["aria-label"] : "");
+  return attrs.title || (node.meta.tag === "button" && attrs["aria-label"] && !holdsText(node) ? attrs["aria-label"] : "") || attrs["data-overflow-title"] || "";
 }
 
 /** Whether `node` holds text of its own, or text with a space in a column inside it, that the row it is in could
@@ -244,7 +244,8 @@ function buildGpui(node, kit, handle, files, overlay, unseen, color, text, rowIt
   const tip = unseen ? "" : tooltipText(node);
   const id = engineId(node, events, !!region, !!tip);
   if (id) el = el.id(id);
-  if (tip) el = el.tooltip(tip);
+  // `data-overflow-title` repeats the element's own text: the engine shows it only while that text is cut short.
+  if (tip) el = el.tooltip(tip, !node.meta.attrs.title && tip === node.meta.attrs["data-overflow-title"]);
   // Its laid-out box is kept for the source, which measured it (`HostDocument.measure`).
   if (node.measure) el = el.measure(node.measure);
   // More parity names for the same element (two of the page's selectors find it).

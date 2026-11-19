@@ -459,7 +459,8 @@ test("a title, or the aria-label of an icon-only button, is the node's tooltip a
       h("button", { type: "button", title: "Close" }, "x"),
       h("button", { type: "button", "aria-label": "Refresh" }, icon),
       h("button", { type: "button", "aria-label": "Reload" }, "Reload"),
-      h("span", null, "no tip"));
+      h("span", null, "no tip"),
+      h("span", { "data-overflow-title": "a-long-name.md" }, "a-long-name.md"));
   }
   const perch = { isMac: true, render() {}, error: (e) => { throw e; } };
   const handle = runtime.mount(perch, Probe, { container: { width: 200, height: 100 } });
@@ -467,7 +468,10 @@ test("a title, or the aria-label of an icon-only button, is the node's tooltip a
     await new Promise((r) => setTimeout(r, 0));
     const { kit } = recordingKit();
     const tipped = records(describeToGpui(handle.description, kit, handle, files)).filter(tipOf);
-    assert.deepEqual(tipped.map(tipOf).sort(), ["Close", "Refresh"], "a button with its own text and a plain span get none");
+    assert.deepEqual(tipped.map(tipOf).sort(), ["Close", "Refresh", "a-long-name.md"], "a button with its own text and a plain span get none");
+    // A name's own text as its tooltip is shown only while the name is cut short; a title always is.
+    const overflowOnly = (record) => (record.styles ?? []).find(([name]) => name === "tooltip")?.[2];
+    assert.deepEqual(tipped.map((record) => [tipOf(record), overflowOnly(record)]).sort(), [["Close", false], ["Refresh", false], ["a-long-name.md", true]]);
     for (const record of tipped) assert.ok(record.id, `the tooltip of ${tipOf(record)} needs an element with an id`);
   } finally {
     handle.unmount();

@@ -5,7 +5,7 @@
 //! commented, the prepared packet and its send operation id, a send in flight) is kept by the host under the
 //! workspace's key (`useResourceState`), so every copy of this screen for one workspace shares it. Only
 //! transient UI (an open confirmation, a busy flag of a request this copy is awaiting) is the copy's own.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   cn,
   DiffView,
@@ -60,7 +60,8 @@ const ICONS = {
 const ICON_BTN = "inline-flex shrink-0 items-center justify-center rounded-ui p-[0.35rem] disabled:cursor-not-allowed! disabled:opacity-[0.45] [&:hover:not(:disabled)]:bg-surface-1";
 const ICON_TONE = {
   default: "bg-transparent text-subtext-0 [&:hover:not(:disabled)]:text-fg",
-  on: "bg-transparent text-accent",
+  // A toggle that is on reads as on at a glance: filled and tinted, as an editor's option toggles are.
+  on: "bg-[color-mix(in_srgb,var(--accent)_22%,transparent)] text-accent",
   primary: "bg-transparent text-accent",
   danger: "bg-transparent text-red",
 };
@@ -223,6 +224,109 @@ function treeRows(entries: GitStatusEntry[], collapsed: Set<string>, query: stri
   walk(root, "", 0);
   return rows;
 }
+
+/** A long changes tree draws the rows in view and a chunk of this many more on each side (`treeWindow`). */
+const TREE_CHUNK = 8;
+
+/** The rows a tree of `count` rows draws when the view shows `shown` rows from row `top`: the chunks the view is in,
+ * with one more chunk before and after it. A move inside a chunk keeps the same rows. (The Files tree's rule.) */
+export function treeWindow(count: number, top: number, shown: number, chunk: number): { start: number; end: number } {
+  const first = Math.floor(Math.max(0, top) / chunk) - 1;
+  const last = Math.floor((Math.max(0, top) + shown) / chunk) + 1;
+  const start = Math.min(Math.max(0, first * chunk), Math.max(0, count - chunk));
+  return { start: Math.max(0, start), end: Math.min(count, Math.max(start + chunk, (last + 1) * chunk)) };
+}
+
+type TreeAct = { toggleDir: (key: string) => void; selectPath: (path: string) => void; revealFile: (path: string) => void };
+type LineCount = { added: number; removed: number };
+
+/** The changed paths, drawn only around the view (a script render of every row of a long change list ran past the
+ * native client's render budget): the chunks in view sit between two spacers that hold the rest's height. */
+function ChangesTree({ rows, active, selected, lineCounts, scroller, onScroll, act }: {
+  rows: TreeRow[];
+  active: string | undefined;
+  selected: Set<string>;
+  lineCounts: Map<string, LineCount>;
+  scroller: RefObject<HTMLDivElement | null>;
+  onScroll: RefObject<(() => void) | null>;
+  act: RefObject<TreeAct>;
+}) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  // Until measured, a short drawer's worth: each row drawn costs the native client's render budget about half a
+  // millisecond, so the first draw must not guess tall.
+  const [view, setView] = useState({ top: 0, shown: 24 });
+  const rowHeight = () => listRef.current?.querySelector<HTMLElement>("[data-change-row]")?.getBoundingClientRect().height || 24;
+  const { start, end } = treeWindow(rows.length, view.top, view.shown, TREE_CHUNK);
+  onScroll.current = () => {
+    const area = scroller.current?.getBoundingClientRect();
+    const list = listRef.current?.getBoundingClientRect();
+    if (!area || !list) return;
+    const height = rowHeight();
+    const now = { top: Math.max(0, (area.top - list.top) / height), shown: Math.ceil(area.height / height) };
+    const next = treeWindow(rows.length, now.top, now.shown, TREE_CHUNK);
+    if (next.start !== start || next.end !== end) setView(now);
+  };
+  // Measured once drawn, and again when the rows change (a filter, a folded folder).
+  useEffect(() => onScroll.current?.(), [rows]);
+  const height = rowHeight();
+  const chunks: number[] = [];
+  for (let first = start; first < end; first += TREE_CHUNK) chunks.push(first);
+  return (
+    <div ref={listRef} className="min-w-0 shrink-0">
+      <div aria-hidden style={{ height: start * height }} />
+      {chunks.map((first) => (
+        <div key={first} className="flex min-w-0 flex-col">
+          {rows.slice(first, Math.min(end, first + TREE_CHUNK)).map((row) => row.kind === "dir"
+            ? <DirRow key={`dir:${row.key}`} row={row} act={act} />
+            : <FileRow key={`file:${row.key}`} row={row} active={active === row.entry.path} checked={selected.has(row.entry.path)} counts={lineCounts.get(row.entry.path)} act={act} />)}
+        </div>
+      ))}
+      <div aria-hidden style={{ height: (rows.length - end) * height }} />
+    </div>
+  );
+}
+
+const DirRow = memo(function DirRow({ row, act }: { row: Extract<TreeRow, { kind: "dir" }>; act: RefObject<TreeAct> }) {
+  return (
+    <button
+      type="button"
+      className="flex min-w-0 items-center gap-[0.35rem] rounded-ui py-[3px] pr-3 text-left text-subtext-0 [background:none] hover:bg-surface-1"
+      style={{ paddingLeft: `${0.55 + row.depth * 0.8}rem` }}
+      role="treeitem"
+      aria-expanded={row.open}
+      data-change-row
+      onClick={() => act.current.toggleDir(row.key)}
+    >
+      <span className="w-[0.7rem] shrink-0 text-[0.6rem]" aria-hidden="true">{row.open ? "▾" : "▸"}</span>
+      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" data-overflow-title={row.name}>{row.name}</span>
+    </button>
+  );
+});
+
+const FileRow = memo(function FileRow({ row, active, checked, counts, act }: { row: Extract<TreeRow, { kind: "file" }>; active: boolean; checked: boolean; counts: LineCount | undefined; act: RefObject<TreeAct> }) {
+  const path = row.entry.path;
+  return (
+    <div className="flex min-w-0 items-center gap-[0.3rem]" role="treeitem" data-change-row>
+      <input className="shrink-0" type="checkbox" checked={checked} onChange={() => act.current.selectPath(path)} aria-label={`Select ${path}`} />
+      <button
+        type="button"
+        className={`${PATH_BUTTON} ${active ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`}
+        style={{ paddingLeft: `${0.1 + row.depth * 0.8}rem` }}
+        onClick={() => act.current.revealFile(path)}
+      >
+        <FileIcon name={row.name} />
+        <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" data-overflow-title={row.name}>{row.name}</span>
+        {counts && (
+          <span className="shrink-0 whitespace-nowrap text-[0.66rem] [font-family:var(--font-mono)]">
+            {counts.added > 0 && <span className="text-green">+{counts.added}</span>}
+            {counts.removed > 0 && <span className="ml-[0.3rem] text-red">−{counts.removed}</span>}
+          </span>
+        )}
+        <GitMarker decoration={{ entry: row.entry }} />
+      </button>
+    </div>
+  );
+});
 
 /** A path with its directory dimmed and its name plain; the directory gives way first when the row is narrow. */
 function PathLabel({ path, className }: { path: string; className?: string }) {
@@ -572,6 +676,11 @@ export function WorkspaceGitReview({
     setCollapsedFiles((current) => { const next = new Set(current); if (on) next.add(path); else next.delete(path); return next; });
   }
   const treeShown = useMemo(() => treeRows(changedFiles, collapsedDirs, fileFilter), [changedFiles, collapsedDirs, fileFilter]);
+  const treeRef = useRef<HTMLDivElement | null>(null);
+  const treeScrolled = useRef<(() => void) | null>(null);
+  // The latest handlers behind one ref the rows keep: a row draws again only when what it shows changes.
+  const treeAct = useRef({ toggleDir, selectPath, revealFile });
+  treeAct.current = { toggleDir, selectPath, revealFile };
   function toggleDir(key: string) {
     setCollapsedDirs((current) => { const next = new Set(current); if (!next.delete(key)) next.add(key); return next; });
   }
@@ -815,48 +924,16 @@ export function WorkspaceGitReview({
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]" role="tree" aria-label="Changed paths">
-          {treeShown.map((row) => row.kind === "dir" ? (
-            <button
-              type="button"
-              key={`dir:${row.key}`}
-              className="flex min-w-0 items-center gap-[0.35rem] rounded-ui py-[3px] pr-3 text-left text-subtext-0 [background:none] hover:bg-surface-1"
-              style={{ paddingLeft: `${0.55 + row.depth * 0.8}rem` }}
-              role="treeitem"
-              aria-expanded={row.open}
-              onClick={() => toggleDir(row.key)}
-            >
-              <span className="w-[0.7rem] shrink-0 text-[0.6rem]" aria-hidden="true">{row.open ? "▾" : "▸"}</span>
-              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{row.name}</span>
-            </button>
-          ) : (
-            <div className="flex min-w-0 items-center gap-[0.3rem]" key={`file:${row.key}`} role="treeitem">
-              <input
-                className="shrink-0"
-                type="checkbox"
-                checked={selectedPaths.has(row.entry.path)}
-                onChange={() => selectPath(row.entry.path)}
-                aria-label={`Select ${row.entry.path}`}
-              />
-              <button
-                type="button"
-                className={`${PATH_BUTTON} ${(activeFile ?? reveal?.path) === row.entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`}
-                style={{ paddingLeft: `${0.1 + row.depth * 0.8}rem` }}
-                onClick={() => revealFile(row.entry.path)}
-                title={row.entry.originalPath ? `${row.entry.originalPath} → ${row.entry.path}` : row.entry.path}
-              >
-                <FileIcon name={row.name} />
-                <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{row.name}</span>
-                {lineCounts.has(row.entry.path) && (
-                  <span className="shrink-0 whitespace-nowrap text-[0.66rem] [font-family:var(--font-mono)]">
-                    {(lineCounts.get(row.entry.path)?.added ?? 0) > 0 && <span className="text-green">+{lineCounts.get(row.entry.path)?.added}</span>}
-                    {(lineCounts.get(row.entry.path)?.removed ?? 0) > 0 && <span className="ml-[0.3rem] text-red">−{lineCounts.get(row.entry.path)?.removed}</span>}
-                  </span>
-                )}
-                <GitMarker decoration={{ entry: row.entry }} />
-              </button>
-            </div>
-          ))}
+        <div ref={treeRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto px-[3px] pb-[0.3rem]" role="tree" aria-label="Changed paths" onScroll={() => treeScrolled.current?.()}>
+          <ChangesTree
+            rows={treeShown}
+            active={activeFile ?? reveal?.path}
+            selected={selectedPaths}
+            lineCounts={lineCounts}
+            scroller={treeRef}
+            onScroll={treeScrolled}
+            act={treeAct}
+          />
           {statusState !== "loading" && changedFiles.length === 0 && <div className={STATUS_NOTE}>Working tree is clean.</div>}
           {changedFiles.length > 0 && treeShown.length === 0 && <div className={STATUS_NOTE}>No changed file matches.</div>}
         </div>

@@ -41,6 +41,13 @@ document.addEventListener("contextmenu", (event) => {
   event.preventDefault();
 });
 
+// A name an ellipsis cut short shows in full on hover; one that fits gets no tooltip (`data-overflow-title`, which
+// the native client honours the same way).
+document.addEventListener("mouseover", (event) => {
+  const label = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-overflow-title]") : null;
+  if (label) label.title = label.scrollWidth > label.clientWidth ? (label.dataset.overflowTitle ?? "") : "";
+});
+
 // The window's viewer id is settled first: the stores read their per-viewer storage as they load.
 await claimViewer();
 // App first, and its whole module graph with it (the store connects as it loads): a store

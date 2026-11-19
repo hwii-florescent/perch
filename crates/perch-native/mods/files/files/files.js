@@ -200,7 +200,6 @@ const TreeRow = memo(function TreeRow({ entry, open, selected, cursor, decoratio
         tabIndex: -1,
         "data-path": entry.path,
         "data-testid": `workspace-file-entry-${entry.path}`,
-        title: entry.path,
         onClick: () => (isDirectory ? act.current.onToggle(entry) : act.current.onOpenFile(entry)),
         onDoubleClick: () => { if (!isDirectory)
             act.current.onOpenFile(entry, true); },
@@ -229,6 +228,7 @@ const TreeRow = memo(function TreeRow({ entry, open, selected, cursor, decoratio
             }),
             _jsx("span", {
                 className: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
+                "data-overflow-title": entry.name,
                 children: entry.name
             }),
             entry.kind === "symlink" && _jsx("svg", {
@@ -434,7 +434,6 @@ function SearchResults({ result, query, selectedPath, cursor, decorations, onOpe
                 "aria-selected": selectedPath === entry.path,
                 tabIndex: -1,
                 "data-path": entry.path,
-                title: entry.path,
                 onClick: () => onOpenFile(entry),
                 onContextMenu: (event) => { event.preventDefault(); event.stopPropagation(); onMenu(entry, event.clientX, event.clientY); },
                 "data-testid": `workspace-file-entry-${entry.path}`,
@@ -445,6 +444,7 @@ function SearchResults({ result, query, selectedPath, cursor, decorations, onOpe
                             _jsx(FileIcon, { name: entry.name }),
                             _jsx("span", {
                                 className: "min-w-0 flex-1 truncate",
+                                "data-overflow-title": entry.name,
                                 children: entry.name
                             }),
                             _jsx(GitMarker, { decoration: decorations.get(entry.path) })
@@ -452,6 +452,7 @@ function SearchResults({ result, query, selectedPath, cursor, decorations, onOpe
                     }),
                     _jsx("span", {
                         className: "w-full truncate text-[0.7rem] text-subtext-0",
+                        "data-overflow-title": entry.path,
                         children: entry.path
                     })
                 ]
