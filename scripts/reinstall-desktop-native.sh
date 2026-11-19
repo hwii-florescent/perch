@@ -81,6 +81,10 @@ cat > "$stage/Contents/Info.plist" <<EOF
   <key>CFBundleVersion</key><string>$version</string>
   <key>CFBundleShortVersionString</key><string>$version</string>
   <key>CFBundleIconFile</key><string>icon.icns</string>
+  <key>CFBundleURLTypes</key><array><dict>
+    <key>CFBundleURLName</key><string>$ID</string>
+    <key>CFBundleURLSchemes</key><array><string>perch</string></array>
+  </dict></array>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSHighResolutionCapable</key><true/>

@@ -69,6 +69,7 @@ use std::time::{Duration, Instant};
 
 mod browsing;
 mod context_bridge;
+mod links;
 mod review;
 pub use browsing::is_browser_tab;
 pub use context_bridge::bridge_available;
@@ -224,6 +225,8 @@ pub struct Workspace {
     panes: HashMap<String, Pane>,
     /// A split that was asked for and waits for its new terminal to be opened.
     pending_split: Option<(Side, Instant)>,
+    /// A `perch://` link whose session the core has not listed yet, waiting for it (`links.rs`).
+    link_wait: Option<Task<()>>,
     /// Sessions whose tab the person closed here without ending them: not opened again with their
     /// lead until they are picked.
     put_away: HashSet<String>,
@@ -390,6 +393,7 @@ impl Workspace {
             parked: HashMap::new(),
             panes: HashMap::new(),
             pending_split: None,
+            link_wait: None,
             put_away: HashSet::new(),
             ended: HashSet::new(),
             shared_base: HashMap::new(),

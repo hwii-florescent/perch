@@ -27,7 +27,8 @@ shells, real agent CLIs
   `perch://` scheme: `perch://open?place=<files|changes|browser|chat|settings>[&session=<id>]`
   (`open_url.rs`, `openRequest.ts`) only navigates to a place on a session the
   window already knows, and carries no credential, path or command. The native
-  client's "Open in Perch" sends it. A link that launches the app arrives before
+  client's "Open in Perch" sends it, and the native app, which declares the scheme in its own
+  `Info.plist`, reads the same grammar itself (`handoff::parse_link`, `Workspace::open_link`). A link that launches the app arrives before
   the page listens, so the shell holds the latest one until the page claims it
   (`open_ready`), and the page waits for its session to be listed.
 - **Native client** (`crates/perch-native`, GPUI) is another view of the same core: it finds a
