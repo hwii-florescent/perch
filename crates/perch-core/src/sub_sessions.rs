@@ -266,6 +266,25 @@ pub fn place_after_lead(
     true
 }
 
+/// `list` with `children` (those it holds, in the given order) moved to right after `lead`: where
+/// the lead was once it closes, the children promoted in its place. Only when `lead` is listed;
+/// `false` when nothing changed.
+pub fn move_after_lead(list: &mut Vec<String>, lead: &str, children: &[String]) -> bool {
+    if !list.iter().any(|id| id == lead) {
+        return false;
+    }
+    let before = list.clone();
+    let moving: Vec<String> = children
+        .iter()
+        .filter(|id| list.contains(id))
+        .cloned()
+        .collect();
+    list.retain(|id| !moving.contains(id));
+    let at = list.iter().position(|id| id == lead).unwrap() + 1;
+    list.splice(at..at, moving);
+    *list != before
+}
+
 /// The name a spawned sub-session shows in the sidebar, its tab, `perch list` and its lead's notes:
 /// the `--name` it was given, else the first sentence of its task. One line, at most about
 /// [`NAME_MAX_CHARS`] characters, cut at a word where that keeps half of it.
@@ -468,6 +487,21 @@ mod tests {
         let mut last = ids(&["terminal", "lead"]);
         assert!(place_after_lead(&mut last, "lead", "kid1", kids));
         assert_eq!(last, ids(&["terminal", "lead", "kid1"]));
+    }
+
+    #[test]
+    fn promoted_children_take_their_leads_place() {
+        let ids = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // A person dragged kid2 away; promotion brings both back to the lead's place.
+        let mut list = ids(&["a", "lead", "kid1", "b", "kid2"]);
+        assert!(move_after_lead(
+            &mut list,
+            "lead",
+            &ids(&["kid1", "kid2", "absent"])
+        ));
+        assert_eq!(list, ids(&["a", "lead", "kid1", "kid2", "b"]));
+        assert!(!move_after_lead(&mut list, "lead", &ids(&["kid1", "kid2"])));
+        assert!(!move_after_lead(&mut list, "gone", &ids(&["kid1"])));
     }
 
     use super::*;

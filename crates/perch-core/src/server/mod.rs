@@ -724,7 +724,7 @@ pub async fn run(
     let purge = state.db.local_session_ids(None).and_then(|sessions| {
         sessions
             .iter()
-            .try_for_each(|id| session::delete_session(&state, id))?;
+            .try_for_each(|id| session::delete_session(&state, id, true))?;
         state
             .db
             .archived_project_ids()?
@@ -1657,6 +1657,14 @@ fn spawn_agent_turn_state_task(state: AppState, mut open_turns: attention::OpenT
             };
             use crate::agent_fleet::AgentState;
             attention::on_transition(&state, &key, &transition, starts_turn, &mut open_turns);
+            // A lead that exits on its own leaves its children running, as ordinary sessions. (A
+            // person's close settled them before the lead stopped; then nothing is left here.)
+            if transition.changed && transition.to == AgentState::Exited {
+                let (app, lead) = (state.clone(), key.session_id.clone());
+                tokio::task::spawn_blocking(move || {
+                    sub_sessions::promote_children_of(&app, &lead);
+                });
+            }
             // A finished turn is summarised for `perch list` and the family strip; the lead is
             // not woken. It hears of a child only through the child's own `perch report`.
             if transition.changed

@@ -1169,7 +1169,7 @@ pub(super) fn handle_project_remove(
         .and_then(|sessions| {
             sessions
                 .iter()
-                .try_for_each(|id| super::session::delete_session(&state.app, id))
+                .try_for_each(|id| super::session::delete_session(&state.app, id, true))
         });
     let _foundation_guard = state.app.foundation_lock.lock().unwrap();
     match removed.and_then(|()| state.app.db.delete_project(&project.id)) {

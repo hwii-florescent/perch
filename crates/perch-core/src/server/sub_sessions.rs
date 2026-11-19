@@ -365,21 +365,61 @@ fn place_beside_lead(app: &AppState, workspace_id: &str, lead: &str, child: &str
         .into_iter()
         .map(|row| row.child_session_id)
         .collect();
-    let is_sibling = |id: &str| siblings.contains(id);
+    rearrange(app, workspace_id, |list| {
+        sub_sessions::place_after_lead(list, lead, child, |id| siblings.contains(id))
+    });
+}
+
+/// Apply `edit` to the host's chat order and to `workspace_id`'s shared strip, broadcasting each
+/// list it changed like a person's write. A list that does not exist is not created.
+fn rearrange(app: &AppState, workspace_id: &str, edit: impl Fn(&mut Vec<String>) -> bool) {
     let _guard = app.foundation_lock.lock().unwrap();
     let mut order = app.db.workspace_order(crate::db::ORDER_SESSIONS);
-    if sub_sessions::place_after_lead(&mut order, lead, child, is_sibling) {
+    if edit(&mut order) {
         match app.db.set_workspace_order(crate::db::ORDER_SESSIONS, order) {
             Ok(true) => broadcast_foundation(app, workspace::order_message(app, None)),
             Ok(false) => {}
             Err(error) => tracing::warn!(%error, "could not place a sub-session in the chat order"),
         }
     }
-    match crate::shared_tabs::place_child(&app.db, workspace_id, lead, child, is_sibling) {
+    match crate::shared_tabs::edit_strip(&app.db, workspace_id, |strip| edit(strip)) {
         Ok(Some(tabs)) => broadcast_foundation(app, tabs.message(None, false)),
         Ok(None) => {}
         Err(error) => tracing::warn!(%error, "could not place a sub-session's tab"),
     }
+}
+
+/// A lead closes keeping its children, or exits on its own: every child not stopped becomes an
+/// ordinary session, still running, in its own Workspace and folder. Its record goes (nothing
+/// routes it to the lead again) and it takes the lead's place in the chat order and the lead
+/// Workspace's strip, before the lead's row goes. Every client hears its new summary. Returns
+/// the children promoted.
+pub(super) fn promote_children_of(app: &AppState, lead: &str) -> Vec<String> {
+    let workspace = app
+        .db
+        .get_session(lead)
+        .ok()
+        .flatten()
+        .and_then(|row| row.workspace_id);
+    let children = match app.db.detach_children(lead) {
+        Ok(children) => children,
+        Err(error) => {
+            tracing::warn!(%error, "could not free a lead's sub-sessions");
+            return Vec::new();
+        }
+    };
+    if children.is_empty() {
+        return children;
+    }
+    if let Some(workspace) = workspace {
+        rearrange(app, &workspace, |list| {
+            sub_sessions::move_after_lead(list, lead, &children)
+        });
+    }
+    for child in &children {
+        notify_session_updated(app, child);
+    }
+    children
 }
 
 /// `perch spawn --worktree`: make the child a checkout of the lead's repository, registered under
@@ -1339,7 +1379,7 @@ pub(super) mod tests {
         // A child still starting cannot be shown stopped: the lead stays, with its record.
         db.move_sub_session("child", &[SubState::Running], SubState::Starting)
             .unwrap();
-        let refused = super::super::session::delete_session(&app, "lead").unwrap_err();
+        let refused = super::super::session::delete_session(&app, "lead", true).unwrap_err();
         assert!(
             refused.to_string().contains("session retained"),
             "{refused}"
@@ -1354,7 +1394,7 @@ pub(super) mod tests {
         // A running child is stopped, and only then is the lead forgotten.
         db.move_sub_session("child", &[SubState::Starting], SubState::Running)
             .unwrap();
-        super::super::session::delete_session(&app, "lead").unwrap();
+        super::super::session::delete_session(&app, "lead", true).unwrap();
         assert_eq!(
             crate::daemon::session_state(&terminal),
             crate::daemon::RuntimeState::Exited
@@ -1668,6 +1708,49 @@ pub(super) mod tests {
         assert_eq!(status, StatusCode::BAD_GATEWAY);
         assert!(db.get_session("child-two").unwrap().is_none());
         assert!(db.sub_session("child-two").unwrap().is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A lead closed with "Keep them as sessions" (or one that exits on its own) frees its running
+    /// children: no record routes them to the lead, they nest under nothing, they keep running, and
+    /// they take the lead's place in the chat order and the strip, whatever a person did to them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_lead_closed_keeping_its_children_promotes_them_to_its_place() {
+        let root = std::env::temp_dir().join(format!("perch-sub-promote-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let (address, db) = boot(&root).await;
+        let app = crate::server::booted_state(address);
+        let (workspace, _) = lead_with_child(&db, &nest, SubState::Running);
+        let cwd = nest.to_string_lossy().into_owned();
+        db.create_session_in_workspace("terminal", &workspace, &cwd)
+            .unwrap();
+        let ids = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // A person dragged the child to the end.
+        let before = ids(&["lead", "terminal", "child"]);
+        db.set_workspace_order(crate::db::ORDER_SESSIONS, before.clone())
+            .unwrap();
+        crate::shared_tabs::set(&db, &workspace.id, None, &before, &[]).unwrap();
+
+        super::super::session::delete_session(&app, "lead", false).unwrap();
+
+        assert!(!db.session_exists("lead").unwrap());
+        assert!(db.session_exists("child").unwrap());
+        assert_eq!(db.parent_of("child").unwrap(), None);
+        assert!(db.sub_session("child").unwrap().is_none());
+        assert!(db.sub_sessions_of("lead").unwrap().is_empty());
+        let strip = crate::shared_tabs::all(&db)
+            .unwrap()
+            .into_iter()
+            .find(|tabs| tabs.workspace_id == workspace.id)
+            .unwrap()
+            .strip;
+        // Where the lead was: before the terminal (clients drop the deleted lead's own slot).
+        let placed = ids(&["lead", "child", "terminal"]);
+        assert_eq!(strip, placed);
+        assert_eq!(db.workspace_order(crate::db::ORDER_SESSIONS), placed);
+        // Nothing left to promote, and a stopped child would have stayed the lead's record.
+        assert!(promote_children_of(&app, "lead").is_empty());
         let _ = std::fs::remove_dir_all(root);
     }
 

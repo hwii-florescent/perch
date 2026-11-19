@@ -2074,10 +2074,13 @@ export interface HostsDeleteMessage {
 }
 
 /** Permanently delete a session: its messages, its DB row, any in-flight
- * turn, its agent and its shells. Closing a tab sends this. */
+ * turn, its agent and its shells. Closing a tab sends this. A lead's live
+ * sub-sessions are stopped too only with `stopSubSessions`; otherwise (and
+ * from an older client) they become ordinary sessions in its place. */
 export interface SessionDeleteMessage {
   type: "session.delete";
   sessionId: string;
+  stopSubSessions?: boolean;
 }
 
 /** Request the persisted dockview layout blob for a session (Phase 3:

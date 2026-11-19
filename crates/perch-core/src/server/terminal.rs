@@ -1238,21 +1238,17 @@ pub(super) fn handle_terminal_kill(state: &Arc<ConnState>, raw_text: &str, termi
             .get(&lifecycle_control_key(&key, ControlChannel::Input))
             .cloned();
         if let Some(lease) = lease {
-            if state
-                .app
-                .agent_runtime
-                .stop(&key, &lease, now_millis())
-                .is_ok()
-            {
-                // Stopping a lead stops what it started, each confirmed on its own.
-                let app = state.app.clone();
-                let lead = key.session_id.clone();
-                tokio::task::spawn_blocking(move || {
-                    if let Err(error) = super::sub_sessions::stop_children_of(&app, &lead) {
-                        tracing::warn!(%error, "children of a stopped lead may still be running");
-                    }
-                });
-            }
+            // Stopping a lead stops what it started, each confirmed on its own, before the lead:
+            // its exit would otherwise promote them to ordinary sessions first.
+            let app = state.app.clone();
+            tokio::task::spawn_blocking(move || {
+                if let Err(error) = super::sub_sessions::stop_children_of(&app, &key.session_id) {
+                    tracing::warn!(%error, "children of a stopped lead may still be running");
+                }
+                if let Err(error) = app.agent_runtime.stop(&key, &lease, now_millis()) {
+                    tracing::warn!(?error, "could not stop a lead's agent");
+                }
+            });
         }
         return;
     }

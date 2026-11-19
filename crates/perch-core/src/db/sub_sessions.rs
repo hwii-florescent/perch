@@ -273,6 +273,33 @@ impl HistoryDb {
         Ok(())
     }
 
+    /// Free `lead`'s children that were not stopped (a stopped child is closed and stays the lead's
+    /// record): their records go and they become ordinary sessions, so neither `perch list` nor a
+    /// report routes them to the lead again. Returns them, oldest first.
+    pub fn detach_children(&self, lead: &str) -> anyhow::Result<Vec<String>> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let children: Vec<String> = tx
+            .prepare(
+                "SELECT child_session_id FROM sub_sessions
+                 WHERE parent_session_id = ?1 AND state <> 'stopped' ORDER BY created_at",
+            )?
+            .query_map(params![lead], |row| row.get(0))?
+            .collect::<Result<_, _>>()?;
+        for child in &children {
+            tx.execute(
+                "DELETE FROM sub_sessions WHERE child_session_id = ?1",
+                params![child],
+            )?;
+            tx.execute(
+                "UPDATE sessions SET parent_session_id = NULL WHERE id = ?1",
+                params![child],
+            )?;
+        }
+        tx.commit()?;
+        Ok(children)
+    }
+
     /// The lead a session was started under, if it is a child.
     pub fn parent_of(&self, session_id: &str) -> anyhow::Result<Option<String>> {
         Ok(self
@@ -532,5 +559,19 @@ mod tests {
         assert!(db.sub_sessions_of("lead").unwrap().is_empty());
         assert_eq!(db.parent_of("child-2").unwrap(), None);
         assert!(db.session_exists("child-2").unwrap());
+    }
+
+    #[test]
+    fn detaching_frees_the_children_that_were_not_stopped() {
+        let (db, workspace) = db_with_lead();
+        reserve(&db, &workspace, 1);
+        reserve(&db, &workspace, 2);
+        db.move_sub_session("child-1", &[SubState::Starting], SubState::Stopped)
+            .unwrap();
+        assert_eq!(db.detach_children("lead").unwrap(), ["child-2"]);
+        assert!(db.sub_session("child-2").unwrap().is_none());
+        assert_eq!(db.parent_of("child-2").unwrap(), None);
+        assert_eq!(db.parent_of("child-1").unwrap().as_deref(), Some("lead"));
+        assert!(db.detach_children("lead").unwrap().is_empty());
     }
 }
