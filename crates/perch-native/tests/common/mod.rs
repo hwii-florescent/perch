@@ -241,13 +241,16 @@ impl Harness {
         self.commands.unbounded_send(order).unwrap();
     }
 
-    /// Hand what the follower learned to the window, as the app does.
+    /// Hand what the follower learned to the window, as the app does: `fs.*` to the file store,
+    /// the rest to the sidebar.
     pub fn pump(&mut self) {
         while let Ok(update) = self.updates.try_recv() {
             self.window
-                .update(&mut self.cx, |ws, _, cx| {
-                    ws.sidebar()
-                        .update(cx, |sidebar, cx| sidebar.apply(update, cx))
+                .update(&mut self.cx, |ws, _, cx| match update {
+                    Update::Files(message) => ws.on_files_message(&message, cx),
+                    other => ws
+                        .sidebar()
+                        .update(cx, |sidebar, cx| sidebar.apply(other, cx)),
                 })
                 .unwrap();
         }

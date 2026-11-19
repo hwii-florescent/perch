@@ -295,6 +295,7 @@ const DirRow = memo(function DirRow({ row, act }: { row: Extract<TreeRow, { kind
       role="treeitem"
       aria-expanded={row.open}
       data-change-row
+      data-testid={`git-dir-${row.key}`}
       onClick={() => act.current.toggleDir(row.key)}
     >
       <span className="w-[0.7rem] shrink-0 text-[0.6rem]" aria-hidden="true">{row.open ? "▾" : "▸"}</span>
@@ -312,6 +313,7 @@ const FileRow = memo(function FileRow({ row, active, checked, counts, act }: { r
         type="button"
         className={`${PATH_BUTTON} ${active ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`}
         style={{ paddingLeft: `${0.1 + row.depth * 0.8}rem` }}
+        data-testid={`git-change-${path}`}
         onClick={() => act.current.revealFile(path)}
       >
         <FileIcon name={row.name} />

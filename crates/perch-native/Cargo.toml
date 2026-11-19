@@ -178,6 +178,16 @@ path = "tests/sidebar_click_window.rs"
 harness = false
 
 [[test]]
+name = "drawer_click_window"
+path = "tests/drawer_click_window.rs"
+harness = false
+
+[[test]]
+name = "drawer_scroll_window"
+path = "tests/drawer_scroll_window.rs"
+harness = false
+
+[[test]]
 name = "mods_chrome_capture"
 path = "tests/mods_chrome_capture.rs"
 harness = false

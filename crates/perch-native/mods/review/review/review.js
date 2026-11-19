@@ -243,6 +243,7 @@ const DirRow = memo(function DirRow({ row, act }) {
         role: "treeitem",
         "aria-expanded": row.open,
         "data-change-row": true,
+        "data-testid": `git-dir-${row.key}`,
         onClick: () => act.current.toggleDir(row.key),
         children: [
             _jsx("span", {
@@ -276,6 +277,7 @@ const FileRow = memo(function FileRow({ row, active, checked, counts, act }) {
                 type: "button",
                 className: `${PATH_BUTTON} ${active ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`,
                 style: { paddingLeft: `${0.1 + row.depth * 0.8}rem` },
+                "data-testid": `git-change-${path}`,
                 onClick: () => act.current.revealFile(path),
                 children: [
                     _jsx(FileIcon, { name: row.name }),

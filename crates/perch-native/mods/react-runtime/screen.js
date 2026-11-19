@@ -129,6 +129,8 @@ function entered(copy, handle) {
 
 /** What the web sidebar listens for to read its settings again (`SIDEBAR_SETTINGS_EVENT` in its source). */
 const SETTINGS_EVENT = "perch:sidebar-settings";
+/** An in-flow screen's root, held or not (see `render`). */
+const ROOT_ID = "screen-root";
 
 /** The mod class for stock screen `id` drawn by `Component`. `options.container`: the style of the box the screen
  * fills (as the web's layout gives it); `options.props`: props from `perch.props()` (default `resultProps`);
@@ -238,8 +240,9 @@ export function screen(id, Component, options = {}) {
           // Vertical lengths are laid on the window's device pixels (`snapColumns` in the runtime).
           // A screen in a region of the window (a sidebar, a status bar) portals into the window's layer.
           const built = wrap(describeToGpui(this.handle.description, this.kit, this.handle, files, scale(), inRegion));
-          // Only a build that finished is one to keep: one the engine cut off (its time budget) drew nothing.
-          this.look = look;
+          // Only a build that finished is one to keep: one the engine cut off (its time budget) drew nothing. The build
+          // took a `scrollIntoView()` request (the scroll target is cleared): that is not a change to build again for.
+          this.look = [look[0], look[1], this.handle.document?.scrollTarget ?? null];
           this.mode = mode;
           return built;
         };
@@ -293,8 +296,12 @@ export function screen(id, Component, options = {}) {
           this.hold(false);
         }
         // Not holding it, an in-flow screen takes no keyboard: a press on it leaves the keyboard where it was.
-        if (options.keyboard === "in-flow" && !this.held) return draw(1, (drawn) => drawn);
-        return draw(2, (drawn) => drawn.track_focus(this.keys).on_key_down((event, cx) => {
+        // Its root has the same id either way: the keyboard's root needs one (`track_focus`), and a root that gained
+        // one between a press and its release would move every element under it to a new address, where the engine
+        // has no record of the press, so that click would be lost (the press that gives the screen the keyboard).
+        if (options.keyboard === "in-flow" && !this.held) return draw(1, (drawn) => drawn.id(ROOT_ID));
+        const root = (drawn) => (options.keyboard === "in-flow" ? drawn.id(ROOT_ID) : drawn);
+        return draw(2, (drawn) => root(drawn).track_focus(this.keys).on_key_down((event, cx) => {
           // A key from an engine inside the screen (its focus is not the screen's own) is the engine's alone.
           if (!this.keys.is_focused()) return;
           if (this.handle.key(domKey(event))) cx.stop_propagation();

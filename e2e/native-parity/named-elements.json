@@ -3007,6 +3007,11 @@
           "description": "The tree's scroll area."
         },
         {
+          "name": "files-refresh",
+          "selector": "[aria-label=\"Refresh file tree\"]",
+          "description": "The explorer's button that loads the tree again."
+        },
+        {
           "name": "files-entry",
           "selector": "[data-testid^=\"workspace-file-entry-\"]",
           "description": "One entry's row: 22px, 13px text, 12px in from the left, 8px more per level; filled when selected.",
@@ -3156,6 +3161,31 @@
           "name": "git-status",
           "selector": "[data-testid=\"git-status\"]",
           "description": "The rail of changed files beside the diff."
+        },
+        {
+          "name": "git-change",
+          "selector": "[data-testid^=\"git-change-\"]",
+          "description": "One changed file's row in the rail: a click shows its diff.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "git-change-"
+          }
+        },
+        {
+          "name": "git-dir",
+          "selector": "[data-testid^=\"git-dir-\"]",
+          "description": "One folder's row in the rail: a click folds or unfolds it.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "git-dir-"
+          }
+        },
+        {
+          "name": "git-changes",
+          "selector": "[role=\"tree\"][aria-label=\"Changed paths\"]",
+          "description": "The scrolling list of changed files in the rail."
         },
         {
           "name": "git-diff",
