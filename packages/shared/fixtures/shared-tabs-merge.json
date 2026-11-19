@@ -1,0 +1,56 @@
+{
+  "about": "Cases both shared-tab merges run: packages/web/src/sharedTabs.test.ts (mergeTabs) and crates/perch-native/src/tabs.rs (merge). `workspace` set: only that workspace's tabs are shared; absent: every tab is. `outgoing`: what the device then writes against `base`.",
+  "cases": [
+    {
+      "name": "both sides' changes survive",
+      "base": { "strip": ["a", "w\nx", "b"], "sets": [{ "ids": ["a", "w\nx"], "sizes": [0.5, 0.5] }] },
+      "local": { "strip": ["a", "w\nx", "b", "w\n\u0000review"], "sets": [{ "ids": ["a", "w\nx"], "sizes": [0.5, 0.5] }] },
+      "remote": { "strip": ["a", "b", "w\ny"], "sets": [] },
+      "merged": { "strip": ["a", "b", "w\n\u0000review", "w\ny"], "sets": [] }
+    },
+    {
+      "name": "this device's order, the other's addition after its neighbour",
+      "base": { "strip": ["a", "b", "w\nx"], "sets": [] },
+      "local": { "strip": ["w\nx", "a", "b"], "sets": [] },
+      "remote": { "strip": ["a", "w\ny", "b", "w\nx"], "sets": [] },
+      "merged": { "strip": ["w\nx", "a", "w\ny", "b"], "sets": [] }
+    },
+    {
+      "name": "a session this device hides is neither dropped nor written away",
+      "base": { "strip": ["a", "hidden", "w\nx"], "sets": [] },
+      "local": { "strip": ["a", "w\nx", "w\ny"], "sets": [] },
+      "remote": { "strip": ["a", "hidden", "w\nx"], "sets": [] },
+      "merged": { "strip": ["a", "hidden", "w\nx", "w\ny"], "sets": [] },
+      "outgoing": { "strip": ["a", "hidden", "w\nx", "w\ny"], "sets": [] }
+    },
+    {
+      "name": "before the first state the core wins and an unshared tab keeps its place",
+      "workspace": "w",
+      "base": { "strip": ["a", "w\nx"], "sets": [] },
+      "local": { "strip": ["a", "term:a\nz", "w\nx"], "sets": [] },
+      "remote": { "strip": ["a", "w\ny"], "sets": [] },
+      "merged": { "strip": ["a", "term:a\nz", "w\ny"], "sets": [] }
+    },
+    {
+      "name": "a split rewritten by the native client is not a change: the other device's unsplit wins",
+      "base": { "strip": ["a", "w\nx"], "sets": [{ "ids": ["a", "w\nx"], "sizes": [0.3, 0.7] }] },
+      "local": { "strip": ["a", "w\nx"], "sets": [{ "dir": "row", "sizes": [0.30000001192092896, 0.699999988079071], "ids": ["a", "w\nx"] }] },
+      "remote": { "strip": ["a", "w\nx"], "sets": [] },
+      "merged": { "strip": ["a", "w\nx"], "sets": [] }
+    },
+    {
+      "name": "a nested split is the same whatever its flat sizes and key order",
+      "base": { "strip": ["a", "b", "c"], "sets": [{ "ids": ["a", "b", "c"], "sizes": [0.2, 0.3, 0.5], "dir": "row", "tree": { "dir": "row", "kids": ["a", { "dir": "col", "kids": ["b", "c"], "sizes": [0.5, 0.5] }], "sizes": [0.4, 0.6] } }] },
+      "local": { "strip": ["a", "b", "c"], "sets": [{ "tree": { "sizes": [0.4000000059604645, 0.6000000238418579], "kids": ["a", { "sizes": [0.5, 0.5], "kids": ["b", "c"], "dir": "col" }], "dir": "row" }, "sizes": [0.3333333432674408, 0.3333333432674408, 0.3333333432674408], "ids": ["a", "b", "c"] }] },
+      "remote": { "strip": ["a", "b", "c"], "sets": [{ "ids": ["a", "b"], "sizes": [0.5, 0.5], "dir": "col" }] },
+      "merged": { "strip": ["a", "b", "c"], "sets": [{ "ids": ["a", "b"], "sizes": [0.5, 0.5], "dir": "col" }] }
+    },
+    {
+      "name": "a split resized here is a change: this device's sizes win",
+      "base": { "strip": ["a", "w\nx"], "sets": [{ "ids": ["a", "w\nx"], "sizes": [0.5, 0.5] }] },
+      "local": { "strip": ["a", "w\nx"], "sets": [{ "ids": ["a", "w\nx"], "sizes": [0.25, 0.75], "dir": "row" }] },
+      "remote": { "strip": ["a", "w\nx", "w\ny"], "sets": [{ "ids": ["a", "w\nx"], "sizes": [0.5, 0.5] }] },
+      "merged": { "strip": ["a", "w\nx", "w\ny"], "sets": [{ "ids": ["a", "w\nx"], "sizes": [0.25, 0.75], "dir": "row" }] }
+    }
+  ]
+}

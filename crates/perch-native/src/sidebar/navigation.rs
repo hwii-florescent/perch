@@ -56,6 +56,9 @@ pub struct Store {
     pub order: HashMap<String, (Vec<String>, Vec<String>)>,
     /// Each local workspace's shared tabs as the core last sent them (`workspace.tabs`).
     pub shared_tabs: HashMap<String, perch_core::shared_tabs::SharedTabs>,
+    /// Goes up on each connect and each `workspace.tabs` answer: a write sent before then may
+    /// never have reached the core, so it may be sent again.
+    pub tabs_heard: u64,
     pub needs_events: Vec<AttentionEvent>,
     /// The session the window told the core it shows.
     pub viewing: Option<String>,

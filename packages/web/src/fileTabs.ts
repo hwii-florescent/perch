@@ -49,7 +49,8 @@ interface FileTabsState {
   open: (workspaceId: string, path: string, kind?: FileTab["kind"], scope?: string) => void;
   /** A new tab that shows a mod's view (herdr's `tab.new {mod, props}`); returns its key. */
   openMod: (workspaceId: string, mod: string, props?: Record<string, unknown>) => string;
-  close: (key: string) => void;
+  /** Close a tab; `record: false` keeps it out of this device's reopen history (another device closed it). */
+  close: (key: string, record?: boolean) => void;
   /** Show `path` as the workspace's preview tab: in `replaceKey`'s slot (that preview tab goes,
    * unrecorded), else at the end. An already open file is just shown, preview or not. */
   openPreview: (workspaceId: string, path: string, replaceKey?: string, scope?: string) => void;
@@ -102,9 +103,9 @@ export const useFileTabs = create<FileTabsState>((set, get) => ({
       ? { tabs: state.tabs.map((tab) => (tab.preview && fileTabKey(tab) === key ? { ...tab, preview: false } : tab)) }
       : state
   )),
-  close: (key) => {
+  close: (key, record = true) => {
     const closing = get().tabs.find((tab) => fileTabKey(tab) === key);
-    if (closing && closing.kind !== "mod") recordClosedFile(closing);
+    if (record && closing && closing.kind !== "mod") recordClosedFile(closing);
     set((state) => ({
       tabs: state.tabs.filter((tab) => fileTabKey(tab) !== key),
       active: state.active === key ? null : state.active,

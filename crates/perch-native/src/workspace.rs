@@ -234,6 +234,8 @@ pub struct Workspace {
     shared_base: HashMap<String, perch_core::shared_tabs::SharedTabs>,
     /// Per workspace, the last shared tabs written, so a repeat waits for the core's answer.
     shared_sent: HashMap<String, String>,
+    /// `Store::tabs_heard` when `shared_sent` was last emptied.
+    shared_heard: u64,
     /// Counts the shared-tab writes, for their request ids.
     shared_writes: u64,
     /// The zoom every terminal in the window is at.
@@ -390,6 +392,7 @@ impl Workspace {
             ended: HashSet::new(),
             shared_base: HashMap::new(),
             shared_sent: HashMap::new(),
+            shared_heard: 0,
             shared_writes: 0,
             zoom: Zoom::default(),
             tick: 0,
@@ -4850,6 +4853,12 @@ impl Workspace {
     /// strip's own shared tabs stand for it, so the core's win. Sessions closed here without
     /// ending stay out.
     fn take_shared_tabs(&mut self, store: &navigation::Store) {
+        // A frame sent as the socket dropped is lost: after a reconnect or any answer, what
+        // still differs from the core is written again.
+        if self.shared_heard != store.tabs_heard {
+            self.shared_heard = store.tabs_heard;
+            self.shared_sent.clear();
+        }
         for (key, remote) in &store.shared_tabs {
             let seen = self.shared_base.get(key);
             if seen.is_some_and(|b| b.revision == remote.revision) || !shares_tabs(store, key) {
@@ -4891,9 +4900,12 @@ impl Workspace {
                 Some(base) => crate::tabs::outgoing(&tabs.shared(), &as_shared(base), keep),
                 None => crate::tabs::project(&tabs.shared(), keep),
             };
-            if base.is_some_and(|b| b.strip == mine.strip && b.sets == mine.sets)
-                || (base.is_none()
-                    && (mine.strip.is_empty() || store.shared_tabs.contains_key(key)))
+            if base.is_some_and(|b| {
+                b.strip == mine.strip
+                    && crate::tabs::canonical_sets(&b.sets)
+                        == crate::tabs::canonical_sets(&mine.sets)
+            }) || (base.is_none()
+                && (mine.strip.is_empty() || store.shared_tabs.contains_key(key)))
             {
                 continue;
             }

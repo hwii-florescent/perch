@@ -48,6 +48,25 @@ export function tabOf(workspaceId: string, id: string): FileTab | undefined {
 
 const json = (value: unknown) => JSON.stringify(value);
 
+type Node = string | { dir?: string; kids?: Node[]; sizes?: number[] };
+
+/** One split node as text: a tab id, or `dir(kid@size,...)` with sizes in thousandths. */
+function canonicalNode(node: Node): string {
+  if (typeof node === "string") return JSON.stringify(node);
+  const kids = node.kids ?? [];
+  const size = (at: number) => Math.round((node.sizes?.length === kids.length ? node.sizes[at]! : 1 / kids.length) * 1000);
+  return `${node.dir === "col" ? "col" : "row"}(${kids.map((kid, at) => `${canonicalNode(kid)}@${size(at)}`).join(",")})`;
+}
+
+/**
+ * Split sets as text that is the same for the same layout whichever client wrote it: the tree (a flat set read as
+ * one row or column), sizes in thousandths, no key order. The native client rewrites a set (f32 sizes, an explicit
+ * `dir`), so sets are compared only this way. The native `tabs::canonical_sets` is the same function.
+ */
+export function canonicalSets(sets: SplitSet[]): string {
+  return sets.map((set) => canonicalNode(set.tree ?? { dir: set.dir, kids: set.ids, sizes: set.sizes })).join("|");
+}
+
 const isSession = (id: string) => !id.includes("\n");
 
 /** `next` with `id` inserted after the tab it follows in `from` (else first). */
@@ -90,7 +109,7 @@ export function mergeTabs(base: TabState, local: TabState, remote: TabState, sha
   const strip = primary.filter(keep);
   for (const id of secondary) if (!inBase.has(id) && !strip.includes(id) && keep(id)) insertAfter(strip, secondary, id);
   const ownSets = project(local, shared).sets;
-  const changed = json(ownSets) !== json(base.sets);
+  const changed = canonicalSets(ownSets) !== canonicalSets(base.sets);
   const candidates = changed ? local.sets : [...remote.sets, ...local.sets.filter((set) => !ownSets.includes(set))];
   const placed = new Set<string>();
   const sets = candidates.filter((set) => {
@@ -133,7 +152,7 @@ export function applyTabs(workspaceId: string, next: TabState): void {
   const wanted = new Set(next.strip);
   for (const tab of files.tabs) {
     const key = fileTabKey(tab);
-    if (tab.workspaceId === workspaceId && !tab.scope && shareable(workspaceId, key) && !wanted.has(key)) useFileTabs.getState().close(key);
+    if (tab.workspaceId === workspaceId && !tab.scope && shareable(workspaceId, key) && !wanted.has(key)) useFileTabs.getState().close(key, false);
   }
   // A tab out of sight now (a terminal's file while another terminal is shown) keeps its stored place.
   const hidden = storedTabOrder(local.key).filter((id) => !wanted.has(id) && !shareable(workspaceId, id));
@@ -178,7 +197,7 @@ function mirror(workspaceId: string): void {
   if (!base && latest.has(workspaceId)) return reconcile(workspaceId);
   const shared = (id: string) => shareable(workspaceId, id);
   const mine = base ? outgoing(local, base, shared) : project(local, shared);
-  if (base && json(mine) === json({ strip: base.strip, sets: base.sets })) return;
+  if (base && json(mine.strip) === json(base.strip) && canonicalSets(mine.sets) === canonicalSets(base.sets)) return;
   const baseRevision = base?.revision ?? 0;
   const body = json({ baseRevision, ...mine });
   if (sent.get(workspaceId) === body) return;
@@ -206,13 +225,15 @@ socket.onMessage((message: ServerMessage) => {
   latest.set(message.workspaceId, { revision: message.revision, strip: message.strip, sets: message.sets as SplitSet[] });
   sent.delete(message.workspaceId);
   reconcile(message.workspaceId);
+  // Changes made while away (or written as the socket dropped) are still to be written.
+  scheduleMirror(message.workspaceId);
 });
 
 socket.onConnectionChange((connected) => {
   if (connected) return;
-  // The core may change while this device is away: its next state wins over what this device had.
+  // A write may be lost with the socket. The bases stay, as the native client's do: after a reconnect the
+  // core's state is merged with what this device changed while away, not put over it.
   latest.clear();
-  bases.clear();
   sent.clear();
 });
 

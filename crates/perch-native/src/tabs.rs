@@ -326,6 +326,48 @@ pub fn shareable(workspace: &str, id: &str) -> bool {
     perch_core::shared_tabs::shareable(workspace, id)
 }
 
+/// One split node as text: a tab id, or `dir(kid@size,...)` with sizes in thousandths.
+fn canonical_node(node: &Value) -> String {
+    if let Some(id) = node.as_str() {
+        return serde_json::to_string(id).unwrap_or_default();
+    }
+    let kids = node["kids"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let sizes = node["sizes"].as_array().filter(|s| s.len() == kids.len());
+    let size = |at: usize| {
+        let share = sizes.map_or(1.0 / kids.len() as f64, |s| s[at].as_f64().unwrap_or(0.0));
+        (share * 1000.0).round() as i64
+    };
+    let dir = if node["dir"] == "col" { "col" } else { "row" };
+    let kids: Vec<String> = kids
+        .iter()
+        .enumerate()
+        .map(|(at, kid)| format!("{}@{}", canonical_node(kid), size(at)))
+        .collect();
+    format!("{dir}({})", kids.join(","))
+}
+
+/// Split sets as text that is the same for the same layout whichever client wrote it: the tree (a
+/// flat set read as one row or column), sizes in thousandths, no key order. [`Node::to_set`]
+/// rewrites a set (f32 sizes, an explicit `dir`), so sets are compared only this way. The web's
+/// `canonicalSets` is the same function.
+pub fn canonical_sets(sets: &[Value]) -> String {
+    sets.iter()
+        .map(|set| {
+            if set["tree"].is_null() {
+                canonical_node(
+                    &json!({ "dir": set["dir"], "kids": set["ids"], "sizes": set["sizes"] }),
+                )
+            } else {
+                canonical_node(&set["tree"])
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 /// `next` with `id` after the tab it follows in `from` (else first).
 fn insert_after(next: &mut Vec<String>, from: &[String], id: &str) {
     let at = from.iter().position(|f| f == id).unwrap_or(0);
@@ -415,7 +457,7 @@ pub fn merge(
         }
     }
     let own = project(local, &keep).sets;
-    let candidates: Vec<Value> = if own != base.sets {
+    let candidates: Vec<Value> = if canonical_sets(&own) != canonical_sets(&base.sets) {
         local.sets.clone()
     } else {
         remote
@@ -1767,5 +1809,39 @@ mod tests {
         t.adopt(&shared(&["a"], vec![]));
         assert_eq!(t.active(), Some("a"));
         assert!(!t.in_split("a"));
+    }
+
+    /// The cases the web's merge runs too (`packages/web/src/sharedTabs.test.ts`).
+    #[test]
+    fn the_merge_agrees_with_the_web_s_on_the_shared_cases() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../packages/shared/fixtures/shared-tabs-merge.json"
+        ))
+        .unwrap();
+        let state = |v: &Value| Shared {
+            strip: serde_json::from_value(v["strip"].clone()).unwrap(),
+            sets: serde_json::from_value(v["sets"].clone()).unwrap(),
+        };
+        for case in fixture["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let workspace = case["workspace"].as_str();
+            let keep = |id: &str| workspace.is_none_or(|w| shareable(w, id));
+            let (base, local) = (state(&case["base"]), state(&case["local"]));
+            let merged = merge(&base, &local, &state(&case["remote"]), keep);
+            let want = state(&case["merged"]);
+            assert_eq!(merged.strip, want.strip, "{name}");
+            assert_eq!(
+                canonical_sets(&merged.sets),
+                canonical_sets(&want.sets),
+                "{name}"
+            );
+            if !case["outgoing"].is_null() {
+                assert_eq!(
+                    outgoing(&local, &base, keep),
+                    state(&case["outgoing"]),
+                    "{name}"
+                );
+            }
+        }
     }
 }
