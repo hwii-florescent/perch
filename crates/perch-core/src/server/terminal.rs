@@ -356,11 +356,6 @@ fn release_agent_terminal(
         .lock()
         .unwrap()
         .remove(&lifecycle_control_key(&key, ControlChannel::Input));
-    state
-        .agent_resize_leases
-        .lock()
-        .unwrap()
-        .remove(&lifecycle_control_key(&key, ControlChannel::Resize));
 }
 
 /// Feed one CLI keystroke payload into this session's first-prompt
@@ -1196,13 +1191,17 @@ pub(super) fn handle_terminal_resize(
     // The same bounds an open checks, so viewers are never told a size the daemon clamps.
     let (cols, rows) = (cols.clamp(1, 1000), rows.clamp(1, 1000));
     if let Some(key) = state.app.agent_runtime.key_for_terminal(&terminal_id) {
+        // The lease the core holds, not only the one this connection acquired: a phone giving
+        // the size back hands this connection a lease it never asked for.
         let lease = state
-            .agent_resize_leases
-            .lock()
-            .unwrap()
-            .get(&lifecycle_control_key(&key, ControlChannel::Resize))
-            .cloned();
-        if let Some(lease) = lease.filter(|lease| Some(lease.generation) == generation) {
+            .app
+            .agent_runtime
+            .snapshot(&key)
+            .ok()
+            .and_then(|snapshot| snapshot.resize_owner);
+        if let Some(lease) = lease.filter(|lease| {
+            lease.client.id == state.conn_id && Some(lease.generation) == generation
+        }) {
             let _ = state
                 .app
                 .agent_runtime

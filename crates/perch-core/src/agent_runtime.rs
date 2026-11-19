@@ -21,9 +21,10 @@ use std::time::Duration;
 
 use crate::agent_fleet::{
     now_millis, AgentKey, AgentLifecycleRegistry, AgentMode, AgentRegistration, AgentSnapshot,
-    AgentState, AgentTransition, ClientIdentity, ControlChannel, ControlLease, HibernationError,
-    HibernationPolicy, LaunchError, OwnershipError, ProviderCapability, ProviderRegistry,
-    ProviderSignal, ResumeAction, WakePlan, MAX_FIXED_ARGUMENTS, MAX_TOKEN_LENGTH,
+    AgentState, AgentTransition, ClientIdentity, ClientKind, ControlChannel, ControlLease,
+    HibernationError, HibernationPolicy, LaunchError, OwnershipError, ProviderCapability,
+    ProviderRegistry, ProviderSignal, ResumeAction, WakePlan, MAX_FIXED_ARGUMENTS,
+    MAX_TOKEN_LENGTH,
 };
 use crate::terminal::{
     AgentTerminalRegistry, AttachOutcome, TerminalAuthorityError, TerminalDataListener,
@@ -276,6 +277,10 @@ pub struct AgentRuntimeAdapter {
     exit_listener: std::sync::OnceLock<PersonTurnListener>,
     instructions: std::sync::OnceLock<InstructionsResolver>,
     identities: std::sync::OnceLock<Arc<dyn crate::agent_identity::IdentityStore>>,
+    /// Per terminal, the desktop view a phone took the size from and the PTY size it had then:
+    /// when the phone gives the size up, that view has it again at that size
+    /// ([`Self::give_size_back`]). A desktop taking the size clears it.
+    size_before_phone: Mutex<HashMap<AgentKey, (ClientIdentity, Option<(u16, u16)>)>>,
 }
 
 /// A launch's Perch identity (`agent_identity.rs`) and the `perch` binary it runs.
@@ -307,6 +312,7 @@ impl AgentRuntimeAdapter {
             exit_listener: std::sync::OnceLock::new(),
             instructions: std::sync::OnceLock::new(),
             identities: std::sync::OnceLock::new(),
+            size_before_phone: Mutex::new(HashMap::new()),
         }
     }
 
@@ -1521,7 +1527,10 @@ impl AgentRuntimeAdapter {
         self.terminals.detach(&terminal_key(key), &client.id);
         self.terminals
             .clear_control_owner_for_client(&terminal_key(key), &client.id);
-        Ok(self.lifecycle.detach_observer(key, &client.id)?)
+        self.lifecycle.detach_observer(key, &client.id)?;
+        // A phone that drops without releasing gives the size back as a release would.
+        self.give_size_back(key);
+        Ok(self.lifecycle.get(key)?)
     }
 
     pub fn acquire_control(
@@ -1564,9 +1573,21 @@ impl AgentRuntimeAdapter {
         client: ClientIdentity,
         at_ms: u64,
     ) -> Result<ControlLease, RuntimeAdapterError> {
+        let before = (channel == ControlChannel::Resize)
+            .then(|| self.lifecycle.get(key).ok().and_then(|s| s.resize_owner))
+            .flatten();
         let lease = self
             .lifecycle
             .acquire_control(key, channel, client, at_ms)?;
+        if channel == ControlChannel::Resize {
+            let mut before_phone = self.size_before_phone.lock().unwrap();
+            if lease.client.kind != ClientKind::Mobile {
+                before_phone.remove(key);
+            } else if let Some(desktop) = before.filter(|o| o.client.kind != ClientKind::Mobile) {
+                let size = self.terminals.size(&terminal_key(key));
+                before_phone.insert(key.clone(), (desktop.client, size));
+            }
+        }
         let result = match channel {
             ControlChannel::Input => self
                 .terminals
@@ -1616,7 +1637,44 @@ impl AgentRuntimeAdapter {
                 return Err(error.into());
             }
         }
+        if channel == ControlChannel::Resize {
+            self.give_size_back(key);
+            return Ok(self.lifecycle.get(key)?);
+        }
         Ok(snapshot)
+    }
+
+    /// A phone stopped showing this terminal (released its size or dropped): the desktop view
+    /// it took the size from, if that view still watches and nobody took the size since, has it
+    /// again, at the size it had, so the laptop does not stay at the phone's width. Called
+    /// under the authority lock.
+    fn give_size_back(&self, key: &AgentKey) {
+        let Ok(snapshot) = self.lifecycle.get(key) else {
+            return;
+        };
+        if snapshot.resize_owner.is_some() {
+            return;
+        }
+        let Some((desktop, size)) = self.size_before_phone.lock().unwrap().remove(key) else {
+            return;
+        };
+        if !snapshot.observers.contains(&desktop.id) {
+            return;
+        }
+        let Ok(lease) =
+            self.acquire_control_locked(key, ControlChannel::Resize, desktop, now_millis())
+        else {
+            return;
+        };
+        if let Some((cols, rows)) = size {
+            let _ = self.terminals.resize_owned(
+                &terminal_key(key),
+                &lease.client,
+                lease.generation,
+                cols,
+                rows,
+            );
+        }
     }
 
     pub fn input(
@@ -3413,6 +3471,92 @@ mod tests {
         adapter.resize(&key, &taken, 80, 76, 5).unwrap();
         assert!(adapter.resize(&key, &resize, 132, 40, 6).is_err());
         assert_eq!(adapter.terminals.size(&terminal_key(&key)), Some((80, 76)));
+    }
+
+    #[test]
+    fn a_phone_showing_a_tab_takes_its_size_and_gives_it_back_to_the_desktop() {
+        let adapter = adapter();
+        let (tab_a, tab_b) = (key(), key());
+        let _cleanup = RuntimeCleanup {
+            adapter: &adapter,
+            keys: vec![tab_a.clone(), tab_b.clone()],
+        };
+        let laptop = client("laptop");
+        let phone = ClientIdentity::new("phone", "device-phone", ClientKind::Mobile).unwrap();
+        let attach = |key: &AgentKey, who: &ClientIdentity, cols, rows| {
+            adapter
+                .attach_cli(
+                    AgentRegistration {
+                        key: key.clone(),
+                        provider_id: "fixture".to_string(),
+                        provider_session_id: Some(format!("provider-{}", key.session_id)),
+                        resumable: true,
+                        now_ms: 1,
+                    },
+                    "/tmp",
+                    who.clone(),
+                    cols,
+                    rows,
+                    Arc::new(|_, _| {}),
+                    Arc::new(|_, _| {}),
+                )
+                .unwrap();
+        };
+        let size = |key: &AgentKey| adapter.terminals.size(&terminal_key(key));
+        let owner = |key: &AgentKey| adapter.snapshot(key).unwrap().resize_owner.unwrap();
+        for tab in [&tab_a, &tab_b] {
+            attach(tab, &laptop, 132, 40);
+            let lease = adapter
+                .acquire_control(tab, ControlChannel::Resize, laptop.clone(), 2)
+                .unwrap();
+            adapter.resize(tab, &lease, 132, 40, 2).unwrap();
+        }
+        let laptop_b = owner(&tab_b);
+
+        // The phone shows tab A: it takes A's size from the laptop, with no typing.
+        attach(&tab_a, &phone, 40, 20);
+        let taken = adapter
+            .acquire_control(&tab_a, ControlChannel::Resize, phone.clone(), 3)
+            .unwrap();
+        adapter.resize(&tab_a, &taken, 40, 20, 3).unwrap();
+        assert_eq!(size(&tab_a), Some((40, 20)));
+        assert_eq!(owner(&tab_a).client, phone);
+
+        // The phone leaves tab A: the laptop has the size again, at its own size.
+        adapter
+            .release_control(&tab_a, ControlChannel::Resize, &phone, taken.generation)
+            .unwrap();
+        let back = owner(&tab_a);
+        assert_eq!(back.client, laptop);
+        assert_eq!(size(&tab_a), Some((132, 40)));
+        adapter.resize(&tab_a, &back, 120, 40, 4).unwrap();
+
+        // It comes back, then drops without releasing: the detach gives it back the same way.
+        let taken = adapter
+            .acquire_control(&tab_a, ControlChannel::Resize, phone.clone(), 5)
+            .unwrap();
+        adapter.resize(&tab_a, &taken, 40, 20, 5).unwrap();
+        adapter.detach(&tab_a, &phone).unwrap();
+        assert_eq!(owner(&tab_a).client, laptop);
+        assert_eq!(size(&tab_a), Some((120, 40)));
+
+        // A person typing on the laptop takes the size while the phone shows A: the phone
+        // leaving then gives nothing back, and moves nothing.
+        attach(&tab_a, &phone, 40, 20);
+        let taken = adapter
+            .acquire_control(&tab_a, ControlChannel::Resize, phone.clone(), 6)
+            .unwrap();
+        let typed = adapter
+            .acquire_control(&tab_a, ControlChannel::Resize, laptop.clone(), 7)
+            .unwrap();
+        assert!(adapter
+            .release_control(&tab_a, ControlChannel::Resize, &phone, taken.generation)
+            .is_err());
+        assert_eq!(owner(&tab_a).generation, typed.generation);
+
+        // Tab B never moved: same lease, same size.
+        assert_eq!(owner(&tab_b), laptop_b);
+        assert_eq!(size(&tab_b), Some((132, 40)));
     }
 
     #[test]

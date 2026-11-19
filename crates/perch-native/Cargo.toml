@@ -238,6 +238,11 @@ path = "tests/workspace_phone_hold.rs"
 harness = false
 
 [[test]]
+name = "workspace_phone_shows"
+path = "tests/workspace_phone_shows.rs"
+harness = false
+
+[[test]]
 name = "phone_pairing_window"
 path = "tests/phone_pairing_window.rs"
 harness = false

@@ -1,5 +1,6 @@
 import type { ClientMessage, ServerMessage } from "@perch/shared";
 import { getWsUrl } from "./base";
+import { isTouchPhone } from "./responsive";
 import { readSessionId, writeSessionId } from "./viewer";
 
 export type ServerMessageHandler = (msg: ServerMessage) => void;
@@ -54,7 +55,8 @@ class PerchSocket {
   }
 
   private open(): void {
-    const ws = new WebSocket(getWsUrl());
+    // A phone says so as it connects: the core then lends it the size of the terminal it shows.
+    const ws = new WebSocket(isTouchPhone() ? `${getWsUrl()}?viewer=phone` : getWsUrl());
     this.ws = ws;
 
     ws.addEventListener("open", () => {

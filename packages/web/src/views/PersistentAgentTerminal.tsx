@@ -10,7 +10,7 @@ import { attachClipboardImagePaste } from "../clipboardImagePaste";
 import { attachAgentFileDrop, type FileDropNotice } from "../agentFileDrop";
 import { BorrowTerminals, KeptTerminal, forgetTerminal, showTerminal } from "../terminalKeeper";
 import { MobileKeyBar } from "../components/MobileKeyBar";
-import { useIsMobileWidth } from "../responsive";
+import { isTouchPhone, useIsMobileWidth } from "../responsive";
 import { StockRoute } from "../components/mod-root";
 import type { AgentControlProps } from "@perch/sdk";
 // The chip, the error line and the exited/sleeping banner are the stock screen `stock:agent-control` (or the person's
@@ -42,14 +42,11 @@ class AgentView extends KeptTerminal<ViewState> {
   readonly created: PerchTerminal;
   /** The terminal id while this view may type into it. */
   inputId: string | null = null;
-  /** A phone fits the PTY to itself once per terminal, on first opening; after that "Fit here" is the user's call. */
-  autoFitted: boolean;
   private binding: ReturnType<typeof openAgentTerminal>;
   private stop: () => void;
 
   constructor(sessionId: string, agent: string, container: HTMLElement) {
     super(OPENING, container);
-    this.autoFitted = fittedHere(sessionId, agent);
     let attachedId: string | null = null;
     let replayDone = false;
     let ownsInput = false;
@@ -122,7 +119,6 @@ class AgentView extends KeptTerminal<ViewState> {
         if (this.disposed) return;
         ownsInput = owned;
         ownsResize = resizing;
-        if (resizing && !this.autoFitted) { this.autoFitted = true; markFittedHere(sessionId, agent); }
         this.set({ status: snapshot, controlling: owned, resizing });
         updateInput();
         if (ownsResize) created.fit();
@@ -152,6 +148,9 @@ class AgentView extends KeptTerminal<ViewState> {
     });
     this.stop = () => { opened.release(); input.dispose(); stopExit(); created.dispose(); };
   }
+
+  /** A phone shows this terminal: it holds the PTY's size until the returned function (`agentTerminals.ts`). */
+  showOnPhone() { return this.binding.showOnPhone(); }
 
   /** Type `data` as if on the keyboard from any writable attached view. */
   sendKey(data: string) {
@@ -188,15 +187,6 @@ class AgentView extends KeptTerminal<ViewState> {
 
 const keyOf = (sessionId: string, agent: string) => `agent\0${sessionId}\0${agent}`;
 
-// Whether this tab has already sized (or auto-fitted) a terminal survives a reload, so a reopened phone
-// view never takes the size back from the laptop that took it over: only "Fit here" or a vacant lease does.
-const fittedKey = (sessionId: string, agent: string) => `perch.fitted\0${sessionId}\0${agent}`;
-function fittedHere(sessionId: string, agent: string): boolean {
-  try { return sessionStorage.getItem(fittedKey(sessionId, agent)) === "1"; } catch { return false; }
-}
-function markFittedHere(sessionId: string, agent: string) {
-  try { sessionStorage.setItem(fittedKey(sessionId, agent), "1"); } catch { /* a reload then fits once more */ }
-}
 
 export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }: {
   sessionId: string; agent: string; cliError?: string | null; onClose?: () => void;
@@ -213,27 +203,21 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
   );
   const search = useTerminalSearch(view?.created.term ?? null);
   const isMobile = useIsMobileWidth();
-  // A phone cannot show a desktop-sized grid, so it sizes the PTY on opening.
-  const fitOnOpen = isMobile && shared && !!terminalId && !!status && !controlling && !!view && !view.autoFitted;
-  useEffect(() => {
-    if (!fitOnOpen || !view) return;
-    view.autoFitted = true;
-    markFittedHere(sessionId, agent);
-    void view.takeControl();
-  }, [fitOnOpen, view, sessionId, agent]);
 
   useEffect(() => {
     if (!connected || !container.current) return;
     const surface = container.current;
     const shown = showTerminal(keyOf(sessionId, agent), sessionId, surface, () => new AgentView(sessionId, agent, surface), { borrow });
     setView(shown.view);
+    // A phone takes the size of the terminal it shows, and gives it back when it stops showing it.
+    const leavePhone = isTouchPhone() ? shown.view.showOnPhone() : undefined;
     const stopPaste = attachClipboardImagePaste(surface, () => shown.view.inputId);
     setFileDrop(null);
     const stopDrop = attachAgentFileDrop(
       surface, sessionId, () => shown.view.inputId,
       (text) => { shown.view.created.term.paste(text); shown.view.created.term.focus(); }, setFileDrop,
     );
-    return () => { stopDrop(); stopPaste(); shown.hide(); };
+    return () => { leavePhone?.(); stopDrop(); stopPaste(); shown.hide(); };
   }, [connected, sessionId, agent, restart, borrow]);
 
   function startOver() {

@@ -293,7 +293,11 @@ pub(super) fn connection_client_identity(state: &Arc<ConnState>) -> Result<Clien
     ClientIdentity::new(
         state.conn_id.clone(),
         state.device_id.as_deref().unwrap_or("local"),
-        ClientKind::Desktop,
+        if state.phone {
+            ClientKind::Mobile
+        } else {
+            ClientKind::Desktop
+        },
     )
     .map_err(|error| format!("connection identity is invalid: {error}"))
 }
@@ -476,20 +480,13 @@ pub(super) fn handle_agent_control_acquire(
     };
     match result {
         Ok(lease) => {
-            if let Some(lease) = &lease {
-                let key_name = lifecycle_control_key(&key, channel);
-                match channel {
-                    ControlChannel::Input => state
-                        .agent_input_leases
-                        .lock()
-                        .unwrap()
-                        .insert(key_name, lease.clone()),
-                    ControlChannel::Resize => state
-                        .agent_resize_leases
-                        .lock()
-                        .unwrap()
-                        .insert(key_name, lease.clone()),
-                };
+            // The resize lease is read from the runtime on each resize (`handle_terminal_resize`).
+            if let Some(lease) = lease.as_ref().filter(|_| channel == ControlChannel::Input) {
+                state
+                    .agent_input_leases
+                    .lock()
+                    .unwrap()
+                    .insert(lifecycle_control_key(&key, channel), lease.clone());
             }
             let _ = state.out_tx.send(ServerMessage::AgentControl {
                 request_id,
@@ -567,15 +564,27 @@ pub(super) fn handle_agent_control_release(
         .agent_runtime
         .release_control(&key, channel, &client, generation)
     {
-        Ok(_) => {
-            let key_name = lifecycle_control_key(&key, channel);
+        Ok(snapshot) => {
             match channel {
                 ControlChannel::Input => {
-                    state.agent_input_leases.lock().unwrap().remove(&key_name);
+                    state
+                        .agent_input_leases
+                        .lock()
+                        .unwrap()
+                        .remove(&lifecycle_control_key(&key, channel));
                 }
-                ControlChannel::Resize => {
-                    state.agent_resize_leases.lock().unwrap().remove(&key_name);
+                // A phone giving the size back may have handed it to a desktop view: tell it now,
+                // not at the next lifecycle pass, so it fits at once.
+                ControlChannel::Resize if snapshot.resize_owner.is_some() => {
+                    super::broadcast_foundation(
+                        &state.app,
+                        ServerMessage::AgentLifecycleChanged {
+                            host_id: "local".to_string(),
+                            status: lifecycle_status_to_wire(snapshot),
+                        },
+                    );
                 }
+                ControlChannel::Resize => {}
             }
             let _ = state.out_tx.send(ServerMessage::AgentControl {
                 request_id,

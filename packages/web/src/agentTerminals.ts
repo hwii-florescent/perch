@@ -25,6 +25,17 @@ const views = new Map<string, View>();
 /** Each open view's way to take the PTY size back, by view id (see `takeBackAllSizes`). */
 const takeBacks = new Map<string, { terminalId: () => string | undefined; take: () => Promise<void> }>();
 
+/** This connection's client id, as the core names it in the leases it grants (learnt from the
+ * first one): a lease the core hands back under it (a phone giving a terminal's size back) is this
+ * page's to use. */
+let ownClientId: string | undefined;
+/** Terminal views a phone shows (`showOnPhone`). Each holds its terminal's size while shown and the
+ * page is in the foreground, and gives it back when hidden, locked or in the background. */
+const phoneShown = new Set<{ take: () => Promise<void>; give: () => Promise<void> }>();
+if (typeof document !== "undefined") document.addEventListener("visibilitychange", () => {
+  for (const shown of phoneShown) void (document.hidden ? shown.give() : shown.take()).catch(() => {});
+});
+
 /** The device id the core gives a connection with no paired device: this computer's own window. */
 export const LOCAL_DEVICE = "local";
 
@@ -80,6 +91,8 @@ export function handleAgentTerminalMessage(message: ServerMessage): boolean {
       view.status = message.status;
       if (view.leases.input?.generation !== message.status.inputOwner?.generation) delete view.leases.input;
       if (view.leases.resize?.generation !== message.status.resizeOwner?.generation) delete view.leases.resize;
+      // A phone gave the size back to this connection, which held it before: it sizes the PTY again.
+      if (!view.leases.resize && ownClientId && message.status.resizeOwner?.clientId === ownClientId) view.leases.resize = message.status.resizeOwner;
       notify(view);
     }
     return true;
@@ -109,6 +122,7 @@ socket.onConnectionChange((connected) => {
   }
   pending.clear();
   views.clear();
+  ownClientId = undefined;
 });
 
 export function agentInputGeneration(terminalId: string): number | undefined {
@@ -200,7 +214,7 @@ export function openAgentTerminal(
       // A released view cannot reclaim a lease after its response arrives.
       if (released) { releaseRemote(); return; }
       if (reply.status && reply.status.revision >= view.status.revision) view.status = reply.status;
-      if (reply.lease) view.leases[channel] = reply.lease;
+      if (reply.lease) { view.leases[channel] = reply.lease; ownClientId = reply.lease.clientId; }
       else delete view.leases[channel];
       notify(view);
     });
@@ -226,6 +240,34 @@ export function openAgentTerminal(
     }
   };
   takeBacks.set(viewId, { terminalId: () => terminalId, take: () => takeResize() });
+  /** Give up this view's size, so the desktop view the core hands it back to sizes the PTY again. */
+  const giveResize = async () => {
+    const view = terminalId ? views.get(terminalId) : undefined;
+    const lease = view?.leases.resize;
+    if (released || !view || !lease) return;
+    await request({
+      type: "agent.control.release",
+      requestId: newId(), sessionId, workspaceId: view.status.key.workspaceId, agentId: providerId, channel: "resize", generation: lease.generation,
+    }, (reply) => {
+      if (reply.type !== "agent.control") throw new Error("Unexpected agent control response");
+      if (view.leases.resize?.generation === lease.generation) delete view.leases.resize;
+      if (reply.status && reply.status.revision >= view.status.revision) view.status = reply.status;
+      notify(view);
+    });
+  };
+  /** A phone shows this view: it takes the size now (no typing needed) and on each return to the
+   * foreground, and gives it back when it stops showing it (the returned function) or goes to the
+   * background. Desktop windows never call this: between them the size follows typing. */
+  const showOnPhone = () => {
+    let shown = true;
+    const phone = {
+      take: async () => { await takeResize(); if (!shown || document.hidden) await giveResize(); },
+      give: giveResize,
+    };
+    phoneShown.add(phone);
+    if (!document.hidden) void ready.then(phone.take).catch(() => {});
+    return () => { shown = false; phoneShown.delete(phone); void giveResize().catch(() => {}); };
+  };
   // A person typed here: the size comes to this view, from another window or a phone, once
   // while the request is on its way. Being looked at or focused never moves it.
   let sizing = false;
@@ -236,7 +278,7 @@ export function openAgentTerminal(
     try { await takeResize(); } finally { sizing = false; }
   };
   return {
-    ready, release, takeResize, typed,
+    ready, release, takeResize, typed, showOnPhone,
     takeControl: async (ifUnowned = false) => { await acquire("input", ifUnowned); await takeResize(ifUnowned); },
   };
 }
