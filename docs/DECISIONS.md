@@ -7,6 +7,12 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-18 — Files and Git belong to the tab (owner)
+
+- A tab's Files and Git follow that tab's own folder (its cwd), never the project. Git shows only when
+  the folder is inside a Git repository. Quickchat is not a project (it behaves like a plain terminal
+  started at `~`), but its tabs still get their own Files and Git.
+
 ## 2026-11-18 — One desktop app; the phone mirrors the desktop's tabs (owner)
 
 - `/Applications/perch.app` is the native client. It starts its bundled headless core when none runs,
@@ -150,6 +156,13 @@ force-removing a worktree, deleting a branch, changing memory and `project.new` 
 not limited to built-in mods, because a person's copies of the stock mods need the same calls. The
 engine's own guards stay: pictures only from the mod's folders, state changes refused while disconnected,
 and `workspace.run` kept out of `perch.ask`.
+
+## 2026-11-13 — The bar for any native client (owner)
+
+- Stock UI mods stay hot-swappable and customisable by agents, and the client looks and behaves like the
+  Tauri app it replaces (layout, design, UX). Memory savings alone do not justify losing either.
+  CodeMirror may stay as a stock mod if it is light on memory. Judge native-client options on these two
+  bars first. Contracts: [NATIVE](NATIVE.md).
 
 ## 2026-11-12 — A native desktop client in GPUI, with Ghostty's engine on both sides (owner)
 

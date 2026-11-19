@@ -75,6 +75,11 @@ bundled core when `core.json` names none that is running, on port 47788; the cor
 and serves the phone and terminals. Replaced bundles are kept in `~/.perch/replaced-apps/`.
 `scripts/reinstall-desktop.sh` still builds the Tauri app.
 
+Rebuild: `ZIG=/opt/homebrew/opt/zig@0.16/bin/zig sh scripts/reinstall-desktop-native.sh`, from a checkout
+that has the gitignored `crates/perch-desktop/tauri.macos.conf.json` (the signing identity; copy it into a
+worktree). It builds web, native, `perch-core` and the `perch` CLI, keeps the app's signature, opens the app
+with `open -g` (no focus), and restarts the core so it serves the new web build.
+
 ## Not yet the same as the Tauri app
 
 - No agent Chat view (agents show as terminals), no `perch://` link handling, no permissions page.

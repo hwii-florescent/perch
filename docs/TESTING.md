@@ -32,7 +32,7 @@ Run checks relevant to the changed behavior, with one focused regression for
 nontrivial logic. A docs-only edit needs link/consistency and diff checks, not
 paid turns. A build or empty diagnostic cache does not prove runtime correctness.
 
-## Headless e2e
+## E2e
 
 ```sh
 npm run build
@@ -42,7 +42,11 @@ npx playwright test -c worktree-lifecycle.config.ts
 PERCH_E2E_WEBKIT=1 npx playwright test --project=webkit <spec>
 ```
 
-- Headless only: no `--headed` or focused windows.
+- Headless by default. Headed runs and visible windows are allowed when a check needs a real
+  window, but ask the owner before anything takes focus (`--headed` that activates, `set frontmost`,
+  posted keys). Never touch the installed app (a second window named `perch` is the owner's own),
+  stop only the processes you started, and screenshot only your own window
+  (`screencapture -l <window id>`), not the whole screen.
 - Main config boots isolated cores on :7799/:7800; worktree lifecycle uses
   :7796. Other focused configs specify their own ports. Check the config before
   reusing a server: never point tests at the installed user's app.

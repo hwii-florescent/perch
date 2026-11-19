@@ -50,7 +50,19 @@ cd e2e && npx playwright test <spec>   # may run real paid agent turns
 
 Run relevant checks, not every suite for every edit. Nontrivial logic needs a
 focused runnable regression. See [TESTING](docs/TESTING.md) before live probes:
-headless only; isolate `PERCH_DB`, `PERCH_HOSTS`, `PERCHD_DIR` and
+headless or windowed; isolate `PERCH_DB`, `PERCH_HOSTS`, `PERCHD_DIR` and
 `PERCH_SETTINGS`; never use the installed app's daemon. Clean up your processes.
+Ask the owner before anything takes focus on their computer (activating a
+window, posting keys, a foreground app).
 Real agent turns use only `claude-haiku-4-5` or `gpt-5.6-luna`; verify the
 banner before prompting. Do not install absent OpenCode to satisfy tests.
+
+## Working as an agent
+
+- Sub-sessions start with `perch spawn`, not a harness's own sub-agent tool. Pick the model by the
+  work: Haiku for scouting and read-only search, Sonnet for contained fixes, small UI changes and
+  mechanical work, Opus for audits, planning, open designs and bugs whose cause spans modules.
+  The owner caps running sub-sessions at 8 (Settings > Sub-sessions).
+- After the lead has reviewed changes (commits read, checks green), rebuild and relaunch the installed
+  `/Applications/perch.app` without asking ([NATIVE](docs/NATIVE.md#the-installed-app)), and say so in
+  the report. Do not reinstall the Tauri app unless asked. Never push unless asked.
