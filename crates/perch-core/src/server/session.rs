@@ -387,25 +387,88 @@ pub(super) fn status_message(status: crate::status::StatusInfo) -> ServerMessage
     }
 }
 
-/// "No project" sessions (cwd `~` or none, including the blank one minted on
-/// connect) belong to one scratch workspace listed as "Chats", so perch never
-/// turns $HOME into a project. New sessions execute in HOME instead of that
-/// bookkeeping folder. Callers hold `foundation_lock`.
-pub(super) fn chats_pair(
+/// A Quickchat: a session started without a project runs in the home folder, as a plain
+/// terminal would, and is filed under the project at that folder (listed as Quickchat).
+/// Callers hold `foundation_lock`.
+pub(super) fn quickchat_pair(
     app: &AppState,
 ) -> anyhow::Result<(crate::db::ProjectRow, crate::db::WorkspaceRow)> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let scratch = std::path::Path::new(&home).join(".perch").join("scratch");
-    std::fs::create_dir_all(&scratch)?;
     app.db
-        .create_project("local", &scratch.display().to_string(), Some("Chats"), None)
+        .create_project("local", &home_dir(), Some("Quickchat"), None)
 }
 
-fn is_chats_workspace(workspace: &crate::db::WorkspaceRow) -> bool {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let scratch = std::path::Path::new(&home).join(".perch").join("scratch");
-    workspace.host_id == "local"
-        && workspace.path == crate::db::canonical_path_for_host("local", &scratch.to_string_lossy())
+fn home_dir() -> String {
+    std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
+}
+
+/// Whether `project` is this computer's Quickchat (the project at its home folder).
+pub(super) fn is_quickchat_project(project: &crate::db::ProjectRow) -> bool {
+    project.host_id == "local"
+        && project.path == crate::db::canonical_path_for_host("local", &home_dir())
+}
+
+/// Before Quickchat ran in the home folder, sessions with no project were filed under a "Chats"
+/// project at `~/.perch/scratch`. That project goes, with its sessions: each only once it is shown
+/// ended (`ended`; unknown is not exit), and only after a copy of the database is kept beside it.
+/// The folder stays on disk. Returns how many of its sessions are still waiting to end.
+pub(super) fn remove_legacy_chats(app: &AppState) -> anyhow::Result<usize> {
+    static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let legacy: Vec<_> = app
+        .db
+        .list_projects("local", true)?
+        .into_iter()
+        .filter(|p| p.path.ends_with("/.perch/scratch"))
+        .collect();
+    let mut waiting = 0;
+    for project in legacy {
+        let sessions = app.db.project_session_ids(&project.id)?;
+        let (gone, live): (Vec<_>, Vec<_>) = sessions.into_iter().partition(|id| ended(app, id));
+        if !gone.is_empty() || live.is_empty() {
+            app.db.back_up_once(".pre-quickchat.bak")?;
+        }
+        for id in &gone {
+            delete_session(app, id)?;
+        }
+        waiting += live.len();
+        if live.is_empty() {
+            let _foundation_guard = app.foundation_lock.lock().unwrap();
+            app.db.delete_project(&project.id)?;
+            if let Err(error) = crate::memory::remove_project(&app.memory_root, &project.id) {
+                tracing::warn!(project = %project.id, "could not remove the Project's memory: {error}");
+            }
+            super::workspace::publish_project_deleted(app, project.id);
+        }
+    }
+    Ok(waiting)
+}
+
+/// Whether everything `session_id` ran is shown stopped: its agents, its terminal and its shells
+/// (perchd confirms each), and it leads no sub-session that has not stopped.
+fn ended(app: &AppState, session_id: &str) -> bool {
+    use crate::daemon::{session_state, RuntimeState::Exited};
+    let agents = app.agent_runtime.lifecycle().list();
+    let agents_ended = agents
+        .iter()
+        .filter(|snapshot| snapshot.key.session_id == session_id)
+        .all(|snapshot| {
+            snapshot.state == crate::agent_fleet::AgentState::Exited
+                && session_state(&crate::agent_runtime::terminal_key(&snapshot.key)) == Exited
+        });
+    let shells_ended = app
+        .workspace_terminals
+        .list(session_id)
+        .is_ok_and(|shells| {
+            shells
+                .iter()
+                .all(|shell| session_state(&format!("shell-{}", shell.id)) == Exited)
+        });
+    let children_ended = app.db.sub_sessions_of(session_id).is_ok_and(|children| {
+        children
+            .iter()
+            .all(|child| child.state == crate::sub_sessions::SubState::Stopped)
+    });
+    agents_ended && shells_ended && children_ended && session_state(session_id) == Exited
 }
 
 /// Files/Git follow the terminal, not just the workspace: the id
@@ -527,14 +590,8 @@ pub(super) fn create_workspace_session(
     session_id: &str,
     workspace: &crate::db::WorkspaceRow,
 ) -> anyhow::Result<String> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let cwd = if is_chats_workspace(workspace) {
-        home
-    } else {
-        workspace.path.clone()
-    };
-    db.create_session_in_workspace(session_id, workspace, &cwd)?;
-    Ok(cwd)
+    db.create_session_in_workspace(session_id, workspace, &workspace.path)?;
+    Ok(workspace.path.clone())
 }
 
 pub(super) fn handle_session_create(
@@ -566,14 +623,16 @@ pub(super) fn handle_session_create(
         return;
     }
     // Local session creation: a session starts in a project listed in perch
-    // or in Chats, never in a folder perch hasn't been given ("+ Add" is how
+    // or in Quickchat, never in a folder perch hasn't been given ("+ Add" is how
     // a folder becomes a project). Once started, the session stays in that
     // project whatever the terminal later cd's into.
     let requested = if let Some(cwd) = cwd.filter(|cwd| cwd != "~") {
         let listed = state.app.db.listed_workspace_at("local", &cwd);
         if !matches!(listed, Ok(Some(_))) || !std::path::Path::new(&cwd).is_dir() {
             let _ = state.out_tx.send(ServerMessage::Error {
-                message: format!("{cwd} is not a project in perch; add it first or start in Chats"),
+                message: format!(
+                    "{cwd} is not a project in perch; add it first or start a Quickchat"
+                ),
                 request_id: None,
                 code: None,
                 retryable: false,
@@ -591,9 +650,9 @@ pub(super) fn handle_session_create(
             Some(workspace) => create_workspace_session(&state.app.db, &session_id, &workspace),
             None => {
                 let _foundation_guard = state.app.foundation_lock.lock().unwrap();
-                chats_pair(&state.app).and_then(|(project, workspace)| {
+                quickchat_pair(&state.app).and_then(|(project, workspace)| {
                     let cwd = create_workspace_session(&state.app.db, &session_id, &workspace)?;
-                    // Push the pair so Chats shows in the sidebar right away.
+                    // Push the pair so Quickchat shows in the sidebar right away.
                     super::workspace::publish_project_pair(&state.app, project, workspace);
                     Ok(cwd)
                 })
@@ -1010,54 +1069,50 @@ pub(super) fn handle_session_rename(
 }
 
 #[cfg(test)]
-mod scratchpad_tests {
+mod quickchat_tests {
     use super::*;
 
     #[test]
-    fn scratchpad_starts_in_home_without_moving_existing_sessions_or_registering_home() {
-        let path = std::env::temp_dir().join(format!("perch-scratchpad-{}.sqlite", Uuid::new_v4()));
+    fn quickchat_runs_in_home_and_old_chats_folder_sessions_stay_where_they_are() {
+        let path = std::env::temp_dir().join(format!("perch-quickchat-{}.sqlite", Uuid::new_v4()));
         let db = crate::db::HistoryDb::open(&path).unwrap();
-        let home = std::env::var("HOME").unwrap();
-        let scratch = std::path::Path::new(&home).join(".perch/scratch");
-        let scratch = scratch.to_string_lossy();
-        let (project, workspace) = db
-            .create_project("local", &scratch, Some("Chats"), None)
+        let home = crate::db::canonical_path_for_host("local", &home_dir());
+        // A database from before Quickchat ran in the home folder: the Chats folder's project,
+        // with a session that ran in it. Nothing here may touch the folder itself.
+        let legacy = std::path::Path::new(&home).join(".perch/scratch");
+        let legacy = legacy.to_string_lossy();
+        let (legacy_project, _) = db
+            .create_project("local", &legacy, Some("Chats"), None)
             .unwrap();
-        db.create_session("old", &scratch).unwrap();
+        db.create_session("old", &legacy).unwrap();
         db.set_claude_session_id("old", "existing-conversation")
             .unwrap();
 
+        let (project, workspace) = db
+            .create_project("local", &home, Some("Quickchat"), None)
+            .unwrap();
+        assert!(is_quickchat_project(&project));
+        assert!(!is_quickchat_project(&legacy_project));
+        assert_eq!(project_to_wire_quickchat(&project), Some(true));
         assert_eq!(
             create_workspace_session(&db, "new", &workspace).unwrap(),
             home
         );
         let row = db.get_session("new").unwrap().unwrap();
         assert_eq!(row.cwd, home);
-        assert_eq!(row.project_id.as_deref(), Some(project.id.as_str()));
         assert_eq!(row.workspace_id.as_deref(), Some(workspace.id.as_str()));
-        // Lazy persistence from terminal/chat/layout paths must not mint a HOME project.
-        db.create_session("new", &home).unwrap();
-        // Nor may a repeated create move an old conversation to HOME.
-        db.create_session_in_workspace("old", &workspace, &home)
-            .unwrap_err();
-        drop(db);
+        // A plain terminal opened at home lands in Quickchat too.
+        db.create_session("term", &home).unwrap();
+        let term = db.get_session("term").unwrap().unwrap();
+        assert_eq!(term.project_id.as_deref(), Some(project.id.as_str()));
 
-        // Startup's legacy import must preserve explicit associations without
-        // creating a project from the execution cwd.
-        let db = crate::db::HistoryDb::open(&path).unwrap();
-        let row = db.get_session("new").unwrap().unwrap();
-        assert_eq!(row.cwd, home);
-        assert_eq!(row.workspace_id.as_deref(), Some(workspace.id.as_str()));
-        assert_eq!(db.list_projects("local", true).unwrap().len(), 1);
-        assert!(db.listed_workspace_at("local", &home).unwrap().is_none());
         let old = db.get_session("old").unwrap().unwrap();
-        assert_eq!(old.cwd, scratch);
+        assert_eq!(old.cwd, legacy);
+        assert_eq!(old.project_id.as_deref(), Some(legacy_project.id.as_str()));
         assert_eq!(
             old.claude_session_id.as_deref(),
             Some("existing-conversation")
         );
-        let ids = db.local_session_ids(Some(&project.id)).unwrap();
-        assert!(ids.contains(&"new".to_string()) && ids.contains(&"old".to_string()));
 
         let (_, ordinary) = db
             .create_project("local", "/tmp/perch-ordinary", None, None)
@@ -1066,13 +1121,90 @@ mod scratchpad_tests {
             create_workspace_session(&db, "ordinary", &ordinary).unwrap(),
             ordinary.path
         );
-        let (_, remote) = db.create_project("remote", &scratch, None, None).unwrap();
-        assert_eq!(
-            create_workspace_session(&db, "remote", &remote).unwrap(),
-            remote.path
+        let (remote, _) = db.create_project("remote", &home, None, None).unwrap();
+        assert!(
+            !is_quickchat_project(&remote),
+            "another computer's home is not this one's Quickchat"
         );
         drop(db);
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// The old Chats project goes with its ended sessions, after a backup; a live session keeps it
+    /// until perchd shows it ended. The folder stays.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_old_chats_project_goes_once_its_sessions_end_and_its_folder_stays() {
+        let root = std::env::temp_dir().join(format!("perch-legacy-chats-{}", Uuid::new_v4()));
+        let folder = root.join("home/.perch/scratch");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("note.txt"), "kept").unwrap();
+        let (address, db) = super::super::sub_sessions::tests::boot(&root).await;
+        let app = super::super::booted_state(address);
+        let (project, workspace) = db
+            .create_project("local", &folder.to_string_lossy(), Some("Chats"), None)
+            .unwrap();
+        db.create_session_in_workspace("ended", &workspace, &home_dir())
+            .unwrap();
+        let live = format!("legacy-live-{}", Uuid::new_v4());
+        db.create_session_in_workspace(&live, &workspace, &folder.to_string_lossy())
+            .unwrap();
+        let daemon = crate::daemon::client().unwrap();
+        daemon
+            .create(
+                &live,
+                vec!["/bin/sh".into(), "-c".into(), "sleep 60".into()],
+                None,
+                vec![],
+                80,
+                24,
+            )
+            .unwrap();
+        assert_eq!(
+            crate::daemon::session_state(&live),
+            crate::daemon::RuntimeState::Alive
+        );
+
+        assert_eq!(
+            remove_legacy_chats(&app).unwrap(),
+            1,
+            "the live session waits"
+        );
+        assert!(db.get_session("ended").unwrap().is_none());
+        assert!(db.get_session(&live).unwrap().is_some());
+        assert_eq!(
+            crate::daemon::session_state(&live),
+            crate::daemon::RuntimeState::Alive,
+            "nothing was stopped"
+        );
+        assert!(db
+            .list_projects("local", true)
+            .unwrap()
+            .iter()
+            .any(|p| p.id == project.id));
+        assert!(
+            root.join("history.sqlite.pre-quickchat.bak").exists(),
+            "a copy was kept first"
+        );
+
+        assert!(crate::daemon::terminate(&live));
+        assert_eq!(remove_legacy_chats(&app).unwrap(), 0);
+        assert!(db.get_session(&live).unwrap().is_none());
+        assert!(!db
+            .list_projects("local", true)
+            .unwrap()
+            .iter()
+            .any(|p| p.id == project.id));
+        assert_eq!(
+            std::fs::read_to_string(folder.join("note.txt")).unwrap(),
+            "kept"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn project_to_wire_quickchat(project: &crate::db::ProjectRow) -> Option<bool> {
+        let wire = serde_json::to_value(super::super::workspace::project_to_wire(project.clone()))
+            .unwrap();
+        wire.get("quickchat").and_then(|value| value.as_bool())
     }
 
     #[test]
@@ -1080,10 +1212,9 @@ mod scratchpad_tests {
         use base64::Engine;
         let path = std::env::temp_dir().join(format!("perch-scope-{}.sqlite", Uuid::new_v4()));
         let db = crate::db::HistoryDb::open(&path).unwrap();
-        let home = std::env::var("HOME").unwrap();
-        let scratch = std::path::Path::new(&home).join(".perch/scratch");
+        let home = crate::db::canonical_path_for_host("local", &home_dir());
         let (_, chats) = db
-            .create_project("local", &scratch.to_string_lossy(), Some("Chats"), None)
+            .create_project("local", &home, Some("Quickchat"), None)
             .unwrap();
         create_workspace_session(&db, "chat", &chats).unwrap();
         let dir = std::env::temp_dir();

@@ -133,6 +133,21 @@ impl HistoryDb {
         Ok(())
     }
 
+    /// Keep a consistent copy of the database beside it, named with `suffix`, before a data
+    /// change that cannot be undone. Never over an earlier copy; an in-memory database has none.
+    pub fn back_up_once(&self, suffix: &str) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let path: String = conn.query_row("PRAGMA database_list", [], |row| row.get(2))?;
+        if path.is_empty() {
+            return Ok(());
+        }
+        let backup = format!("{path}{suffix}");
+        if !Path::new(&backup).exists() {
+            conn.execute("VACUUM INTO ?1", params![backup])?;
+        }
+        Ok(())
+    }
+
     pub fn limits(&self) -> crate::sub_sessions::RunLimits {
         *self.limits.lock().unwrap()
     }

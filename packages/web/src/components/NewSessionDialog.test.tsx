@@ -28,7 +28,7 @@ beforeEach(async () => {
     workspaceProjects: [
       { id: "p1", hostId: "local", name: "alpha", path: "/a" },
       { id: "p2", hostId: "local", name: "beta", path: "/b" },
-      { id: "chats", hostId: "local", name: "Chats", path: "/home/me/.perch/scratch" },
+      { id: "chats", hostId: "local", name: "Quickchat", path: "/home/me", quickchat: true },
     ],
   } as never);
   host = document.createElement("div");
@@ -57,8 +57,8 @@ it("Backspace on an empty filter goes back to the projects; Escape closes", asyn
   expect(document.querySelector('[data-testid="new-session-dialog"]')).toBeNull();
 });
 
-it("hides the scratch Chats project behind No project (home), and offers Add project", async () => {
-  expect(document.body.textContent).not.toContain("scratch");
+it("lists Quickchat only as No project (home), and offers Add project", async () => {
+  expect(document.body.textContent).not.toContain("/home/me");
   await key("4"); // alpha, beta, Add project…, No project
   expect(document.body.textContent).toContain("Terminal");
   await key("Backspace");

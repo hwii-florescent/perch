@@ -1930,12 +1930,11 @@ impl Workspace {
             .iter()
             .filter(|p| p.host_id == workspace.host_id)
             .collect();
-        let own = projects
-            .iter()
-            .find(|p| p.id == workspace.project_id && p.path == workspace.path)
+        let project = projects.iter().find(|p| p.id == workspace.project_id);
+        let own = project
+            .filter(|p| p.path == workspace.path)
             .map(|p| p.name.clone());
-        // Quickchat sessions run in the home folder, so that is what it shows.
-        let quickchat = workspace.path.ends_with("/.perch/scratch");
+        let quickchat = project.is_some_and(|p| p.quickchat);
         let name = if quickchat {
             "Quickchat".to_string()
         } else {
@@ -1952,7 +1951,11 @@ impl Workspace {
         let mut targets = vec![json!({
             "key": workspace.path, "label": format!("{name} (current folder)"), "name": name, "path": path,
         })];
-        for p in projects.iter().filter(|p| p.path != workspace.path) {
+        // A Quickchat is no project: it is offered as "No project" below, never as a folder.
+        for p in projects
+            .iter()
+            .filter(|p| p.path != workspace.path && !p.quickchat)
+        {
             let label = Some(p.name.clone())
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| basename(&p.path));
@@ -3327,7 +3330,7 @@ impl Workspace {
                     })
                 });
             }
-            // As the web's `newScratchpad`: the Quickchat project's start page, which picks the agent.
+            // As the web's `newQuickchat`: the Quickchat project's start page, which picks the agent.
             "quickchat.new" | "nests.scratchpad" => {
                 let target = self.sidebar.update(cx, |sidebar, cx| {
                     sidebar.run_action("nests.scratchpad", cx);

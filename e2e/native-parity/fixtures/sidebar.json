@@ -25,7 +25,7 @@
       { "id": "p-api", "hostId": "local", "name": "api-server", "path": "/Users/dev/code/api-server", "repoPath": "/Users/dev/code/api-server", "favorite": false, "createdAt": 1767225600000, "updatedAt": 1767308400000 },
       { "id": "p-notes", "hostId": "local", "name": "notes", "path": "/Users/dev/notes", "favorite": false, "createdAt": 1767225600000, "updatedAt": 1767304800000 },
       { "id": "p-site", "hostId": "local", "name": "scratch-site", "path": "/Users/dev/code/scratch-site", "repoPath": "/Users/dev/code/scratch-site", "favorite": false, "createdAt": 1767225600000, "updatedAt": 1767301200000 },
-      { "id": "p-chats", "hostId": "local", "name": "Quickchat", "path": "/Users/dev/.perch/scratch", "favorite": false, "createdAt": 1767225600000, "updatedAt": 1767225600000 },
+      { "id": "p-chats", "hostId": "local", "name": "Quickchat", "path": "/Users/dev", "quickchat": true, "favorite": false, "createdAt": 1767225600000, "updatedAt": 1767225600000 },
       { "id": "p-infra", "hostId": "buildbox", "name": "infra", "path": "/srv/infra", "repoPath": "/srv/infra", "favorite": false, "createdAt": 1767225600000, "updatedAt": 1767312000000 },
       { "id": "p-jobs", "hostId": "buildbox", "name": "nightly-jobs", "path": "/srv/nightly-jobs", "favorite": false, "createdAt": 1767225600000, "updatedAt": 1767308400000 }
     ],
@@ -37,7 +37,7 @@
       { "id": "w-api-rate", "projectId": "p-api", "hostId": "local", "path": "/Users/dev/code/api-server-wt/rate-limit", "name": "rate-limit", "branch": "feat/rate-limit", "dirty": true, "parentWorkspaceId": "w-api-main", "state": "active", "createdAt": 1767229200000, "updatedAt": 1767308400000 },
       { "id": "w-notes", "projectId": "p-notes", "hostId": "local", "path": "/Users/dev/notes", "name": "notes", "dirty": false, "state": "active", "createdAt": 1767225600000, "updatedAt": 1767304800000 },
       { "id": "w-site", "projectId": "p-site", "hostId": "local", "path": "/Users/dev/code/scratch-site", "name": "scratch-site", "branch": "main", "dirty": false, "state": "active", "createdAt": 1767225600000, "updatedAt": 1767301200000 },
-      { "id": "w-chats", "projectId": "p-chats", "hostId": "local", "path": "/Users/dev/.perch/scratch", "name": "Quickchat", "dirty": false, "state": "active", "createdAt": 1767225600000, "updatedAt": 1767225600000 },
+      { "id": "w-chats", "projectId": "p-chats", "hostId": "local", "path": "/Users/dev", "name": "Quickchat", "dirty": false, "state": "active", "createdAt": 1767225600000, "updatedAt": 1767225600000 },
       { "id": "w-infra-main", "projectId": "p-infra", "hostId": "buildbox", "path": "/srv/infra", "name": "infra", "branch": "main", "dirty": false, "state": "active", "createdAt": 1767225600000, "updatedAt": 1767312000000 },
       { "id": "w-jobs-main", "projectId": "p-jobs", "hostId": "buildbox", "path": "/srv/nightly-jobs", "name": "nightly-jobs", "dirty": false, "state": "active", "createdAt": 1767225600000, "updatedAt": 1767308400000 }
     ],
@@ -48,8 +48,8 @@
       { "id": "s-api-1", "title": "Add rate limiting", "cwd": "/Users/dev/code/api-server-wt/rate-limit", "createdAt": 1767254400000, "status": "running", "hostId": "local", "cliProviderId": "claude", "currentBranch": "feat/rate-limit", "projectId": "p-api", "workspaceId": "w-api-rate" },
       { "id": "s-api-2", "title": "Load test the gateway", "cwd": "/Users/dev/code/api-server", "createdAt": 1767250800000, "status": "running", "hostId": "local", "cliProviderId": "codex", "currentBranch": "main", "projectId": "p-api", "workspaceId": "w-api-main" },
       { "id": "s-notes-1", "title": "Trip planning", "cwd": "/Users/dev/notes", "createdAt": 1767247200000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "projectId": "p-notes", "workspaceId": "w-notes" },
-      { "id": "s-chat-1", "title": "Explain git rebase", "cwd": "/Users/dev/.perch/scratch", "createdAt": 1767243600000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "projectId": "p-chats", "workspaceId": "w-chats" },
-      { "id": "s-chat-2", "title": "Regex for ISO dates", "cwd": "/Users/dev/.perch/scratch", "createdAt": 1767240000000, "status": "idle", "hostId": "local", "unseen": true, "cliProviderId": "codex", "projectId": "p-chats", "workspaceId": "w-chats" },
+      { "id": "s-chat-1", "title": "Explain git rebase", "cwd": "/Users/dev", "createdAt": 1767243600000, "status": "idle", "hostId": "local", "cliProviderId": "claude", "projectId": "p-chats", "workspaceId": "w-chats" },
+      { "id": "s-chat-2", "title": "Regex for ISO dates", "cwd": "/Users/dev", "createdAt": 1767240000000, "status": "idle", "hostId": "local", "unseen": true, "cliProviderId": "codex", "projectId": "p-chats", "workspaceId": "w-chats" },
       { "id": "s-infra-1", "title": "Rotate the CI runners", "cwd": "/srv/infra", "createdAt": 1767268800000, "status": "running", "hostId": "buildbox", "cliProviderId": "claude", "currentBranch": "main", "projectId": "p-infra", "workspaceId": "w-infra-main" },
       { "id": "s-infra-2", "title": "Audit open ports", "cwd": "/srv/infra", "createdAt": 1767265200000, "status": "idle", "hostId": "buildbox", "cliProviderId": "codex", "currentBranch": "main", "projectId": "p-infra", "workspaceId": "w-infra-main" },
       { "id": "s-jobs-1", "title": "Why did the export fail", "cwd": "/srv/nightly-jobs", "createdAt": 1767261600000, "status": "idle", "hostId": "buildbox", "unseen": true, "cliProviderId": "claude", "projectId": "p-jobs", "workspaceId": "w-jobs-main" }

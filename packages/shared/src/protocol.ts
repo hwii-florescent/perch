@@ -2605,6 +2605,9 @@ export interface ProjectSummary {
   settings?: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
+  /** Its core's Quickchat: the project at that computer's home folder, where sessions started
+   * without a project run. Absent from older cores. */
+  quickchat?: boolean;
 }
 
 /** Durable workspace identity. The initial slice creates one workspace per

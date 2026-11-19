@@ -5,7 +5,7 @@ import { openFilePreview } from "../workspaceTabs";
 import { segment } from "./ui/segment";
 import { GHOST_BUTTON } from "./ui/icon-button";
 import { StockView } from "./mod-root";
-import { terminalScopeId, workspaceRecord } from "../terminalScope";
+import { isQuickchatProject, terminalScopeId, workspaceRecord } from "../terminalScope";
 
 const BTN = "h-7 self-center rounded-ui px-[0.8rem] text-[0.75rem] [font-weight:inherit] [line-height:inherit]";
 /** The drawer header's action (same as the Browser section's buttons): the ghost button, filled only on hover. */
@@ -21,14 +21,16 @@ const TABS: { id: WorkspaceToolsTab; label: string }[] = [
 
 /** The workspace the drawer shows and whether it offers Git (the phone's pane bar asks the same).
  * `scopeId`, for the desktop drawer (`scoped`), is what Files and Git read instead when the
- * active terminal's shell has left the workspace folder: its own directory. The phone keeps the workspace. */
+ * active terminal's shell has left the workspace folder: its own directory. The phone keeps the workspace, except
+ * for a Quickchat, which is no project: its Files and Git always follow its tab's folder (starting at ~). */
 export function useToolsContext(requestedWorkspaceId?: string | null, scoped = false) {
   const activeId = usePerchStore((state) =>
     state.activeWorkspaceId ?? state.sessions.find((candidate) => candidate.id === state.sessionId)?.workspaceId ?? null);
   const workspaceId = requestedWorkspaceId ?? activeId;
   const scopeId = usePerchStore((state) => {
     const session = state.sessions.find((candidate) => candidate.id === state.sessionId);
-    return scoped && !requestedWorkspaceId && session?.workspaceId === workspaceId ? terminalScopeId(state, session) : null;
+    const quickchat = state.workspaceProjects.some((project) => project.id === session?.projectId && isQuickchatProject(project));
+    return (scoped || quickchat) && !requestedWorkspaceId && session?.workspaceId === workspaceId ? terminalScopeId(state, session) : null;
   });
   const row = usePerchStore((state) => (scopeId ?? workspaceId) ? workspaceRecord(state, scopeId ?? workspaceId!) : undefined);
   const project = usePerchStore((state) => state.workspaceProjects.find((candidate) => candidate.id === row?.projectId));

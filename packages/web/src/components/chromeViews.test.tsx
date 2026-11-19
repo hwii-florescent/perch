@@ -36,7 +36,7 @@ const get = (id: string) => (id.startsWith("workspace-session-") ? scope().query
 
 it.each(["status", "project", "list", "scratchpad"])("%s sessions have one full-row selection and a sibling menu button", (mode) => {
   if (mode !== "status") storage.set("perch.sidebar.organize", mode === "list" ? "list" : "project");
-  if (mode === "scratchpad") usePerchStore.setState({ workspaceProjects: [{ ...project, path: "/tmp/.perch/scratch" }] });
+  if (mode === "scratchpad") usePerchStore.setState({ workspaceProjects: [{ ...project, path: "/tmp", quickchat: true }] });
   act(() => root.render(<WorkspaceOverview />));
   const selected = get("workspace-session-first");
   const other = get("workspace-session-second");

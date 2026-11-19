@@ -69,3 +69,11 @@ it("offers a held tab's close, and closing it closes the tab", () => {
   expect(useFileTabs.getState().tabs).toEqual([]);
   expect(tabs().map((tab) => tab.textContent)).toEqual(["a", "b"]);
 });
+
+it("leaves browser tabs out, and a browser tab never stays the phone's active tab", () => {
+  const page = { workspaceId: "w1", path: "https://example.com/", kind: "browser" as const };
+  act(() => useFileTabs.setState({ tabs: [file, page], active: fileTabKey(page) }));
+  expect(tabs().map((tab) => tab.textContent)).toEqual(["a", "x.rs", "b"]);
+  expect(useFileTabs.getState().active).toBeNull(); // the phone shows its session instead
+  expect(useFileTabs.getState().tabs).toEqual([file, page]); // the desktop keeps it in the shared tabs
+});

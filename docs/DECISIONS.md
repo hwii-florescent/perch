@@ -7,6 +7,26 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-18 — Quickchat is a plain terminal at home; the phone leaves browser tabs out (owner)
+
+- **Quickchat is not a project.** It behaves like a plain terminal started at the home folder (`~`):
+  never listed as a project, never active or pinned, never a start folder, and starting or showing one
+  never changes the active project. Every session row needs a project and workspace (sessions,
+  navigation and terminal-scope grants key on them), so the core files Quickchat sessions under one
+  inert row at `~`, marked `quickchat` on the wire (optional; older peers omit or ignore it). Clients use
+  it only to group the Quickchat list, never as a project.
+- Its tabs keep their own Files and Git, following the tab's folder from `~`; Git shows only inside a
+  repository (see "Files and Git belong to the tab").
+- **The old Chats project goes.** A core migration removes the project at `…/.perch/scratch` and its
+  sessions, after keeping a copy of the database beside it (`<db>.pre-quickchat.bak`). A session still
+  live, or whose state is unknown, is kept until perchd shows it ended. The `~/.perch/scratch` folder
+  and its files stay on disk; perch no longer creates it. Supersedes the 2026-10-25 "`~/.perch/scratch`
+  remains the workspace's bookkeeping" note.
+- Fixes the desktop losing its project after a chat: the pin was the scratch folder while chats ran in
+  home, so `effectiveActiveProject` fell back to the newest project. A Quickchat now keeps it.
+- **The phone's tab row omits browser tabs for now**, and a browser tab never becomes the phone's
+  active tab. The desktop keeps them in the shared tabs unchanged.
+
 ## 2026-11-18 — Files and Git belong to the tab (owner)
 
 - A tab's Files and Git follow that tab's own folder (its cwd), never the project. Git shows only when

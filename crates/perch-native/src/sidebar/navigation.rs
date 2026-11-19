@@ -1098,14 +1098,15 @@ impl<'a> Builder<'a> {
         let placeholder = (chats.is_none() && reachable(store, host_id)).then(|| ProjectSummary {
             id: quickchat_placeholder(host_id),
             host_id: host_id.to_string(),
-            name: "Chats".into(),
-            path: "~/.perch/scratch".into(),
+            name: "Quickchat".into(),
+            path: "~".into(),
             repo_path: None,
             default_branch: None,
             favorite: false,
             settings: None,
             created_at: 0,
             updated_at: 0,
+            quickchat: true,
         });
         let quickchat = chats.or(placeholder.as_ref()).map(|p| self.project_info(p));
         let mut shown: Vec<(usize, bool, usize, &ProjectInfo)> = visible
@@ -1488,7 +1489,7 @@ mod tests {
     fn a_terminal_is_scoped_only_once_its_shell_leaves_its_workspace_folder() {
         let store = Store {
             workspaces: vec![
-                workspace("w-chats", "/home/u/.perch/scratch"),
+                workspace("w-chats", "/home/u"),
                 workspace("w-proj", "/work/proj"),
             ],
             ..Store::default()

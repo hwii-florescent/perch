@@ -1,12 +1,12 @@
 /** The $HOME every e2e core and everything it launches runs under.
  *
- * A fixture core's "Chats" sessions start in $HOME, and real agents started there (and the shells
+ * A fixture core's Quickchat sessions start in $HOME, and real agents started there (and the shells
  * around them) walk it. On macOS that reaches Desktop, Documents, Downloads, Pictures and Music, and
  * the OS asks the user for access, naming the test core's binary (a new identity on every rebuild).
  * So cores get a private home under the OS temp dir instead. It contains symlinks only to what agents
  * and shells need to start and sign in (config, binaries, shell startup files, `Library/Keychains`) and
  * never to a privacy-protected folder or to `~/.perch`, which also keeps the suite's own state (devices,
- * worktrees, uploads, the Chats scratch folder) out of the user's real Perch data.
+ * worktrees, uploads) out of the user's real Perch data.
  *
  * One home per run: the process that creates it publishes `PERCH_E2E_HOME` for the workers it starts and
  * deletes it when that process exits (a removal unlinks the symlinks; it never follows them).

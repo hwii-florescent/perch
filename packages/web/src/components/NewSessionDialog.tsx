@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { NEW_SESSION_EVENT, requestAddProject } from "../appEvents";
 import { openBlankBrowser, useFileTabs } from "../fileTabs";
 import { effectiveActiveProject, effectiveWorkspace, usePerchStore } from "../store";
-import { isChatsProject, workspacesForProject } from "../workspaceNav";
+import { isQuickchatProject, workspacesForProject } from "../workspaceNav";
 import Launcher from "../stock-ui/launcher/main";
 import { StockRoute } from "./mod-root";
 
@@ -28,8 +28,8 @@ function LauncherRoute({ onClose }: { onClose: () => void }) {
   const workspaces = usePerchStore((s) => s.workspaces);
   const activeProject = usePerchStore(effectiveActiveProject);
   const activeWorkspace = usePerchStore(effectiveWorkspace);
-  // Chats (the scratch workspace) is the launcher's "No project" row: quickchats run in the home folder.
-  const projects = allProjects.filter((p) => p.hostId === hostId && !isChatsProject(p)).map((p) => {
+  // Quickchat is the launcher's "No project" row: quickchats run in the home folder.
+  const projects = allProjects.filter((p) => p.hostId === hostId && !isQuickchatProject(p)).map((p) => {
     // The workspace a tab lands in: the one on screen if it belongs to the project, else the project's first.
     const ws = activeWorkspace?.projectId === p.id ? activeWorkspace : workspacesForProject(workspaces, p.id)[0];
     return { id: p.id, name: p.name, path: p.path, workspace: ws ? { id: ws.id, path: ws.path } : null };

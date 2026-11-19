@@ -172,7 +172,7 @@ test("installed OMP and Pi run in separate persistent panes", async ({ page, con
     await expect(shell.getByText("Shell running", { exact: true })).toBeVisible();
     await shell.locator(".xterm-helper-textarea").pressSequentially("printf 'perch_shell_path_%s\\n' \"$PWD\"");
     await shell.locator(".xterm-helper-textarea").press("Enter");
-    // Scratchpad shells start in HOME, not its hidden bookkeeping folder.
+    // Quickchat shells start in HOME.
     await expect(shell.locator(".xterm-rows")).toContainText(`perch_shell_path_${fixtureHome()}`);
     await shell.getByRole("button", { name: "Close shell", exact: true }).click();
     expect(errors).toEqual([]);

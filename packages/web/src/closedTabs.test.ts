@@ -48,22 +48,22 @@ describe("closed tabs (Cmd+Shift+T)", () => {
   });
 });
 
-describe("Scratchpad reopen", () => {
-  it.each([true, false])("uses the listed path only for Scratchpad (%s)", (scratchpad) => {
+describe("reopen", () => {
+  it.each([true, false])("starts again where the closed tab ran, Quickchat or not (%s)", (quickchat) => {
     const createSessionOnHost = vi.fn();
-    const projectPath = scratchpad ? "/home/test/.perch/scratch" : "/project";
-    const cwd = scratchpad ? "/home/test" : "/project/subdir";
+    const projectPath = quickchat ? "/home/test" : "/project";
+    const cwd = quickchat ? "/home/test" : "/project/subdir";
     const previous = usePerchStore.getState();
     usePerchStore.setState({
       activeWorkspaceId: "w",
-      workspaceProjects: [{ id: "p", path: projectPath, hostId: "local" } as never],
+      workspaceProjects: [{ id: "p", path: projectPath, hostId: "local", quickchat } as never],
       workspaces: [{ id: "w", projectId: "p", path: projectPath, hostId: "local", state: "active" } as never],
       createSessionOnHost,
     });
     try {
       recordClosedTab(session({ cwd, workspaceId: "w", projectId: "p" }));
       reopenClosedTab();
-      expect(createSessionOnHost).toHaveBeenCalledWith("local", scratchpad ? projectPath : cwd, "claude");
+      expect(createSessionOnHost).toHaveBeenCalledWith("local", cwd, "claude");
     } finally {
       usePerchStore.setState(previous);
     }

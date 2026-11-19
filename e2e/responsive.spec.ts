@@ -229,7 +229,7 @@ test.describe("Responsive narrow-width collapse (Phase 5)", () => {
   test("R8. phone Files is the drawer's explorer; Git only for a git workspace", async ({ page }) => {
     await page.setViewportSize(DESKTOP_VIEWPORT);
     await freshPage(page);
-    await startChat(page); // Chats: the scratch folder, not a git checkout
+    await startChat(page); // Quickchat: the fixture home, not a git checkout
     await page.setViewportSize(MOBILE_VIEWPORT);
 
     await page.getByTestId("mobile-tools").click();

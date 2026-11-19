@@ -161,6 +161,9 @@ pub struct Nav {
     pub selected: Option<(String, String)>,
     /// A checkout picked with no session in it to show.
     pub workspace: Option<String>,
+    /// The last project shown, with its computer. A Quickchat is no project, so showing one
+    /// leaves this as it was: a new session still starts in that project.
+    pub project: Option<(String, String)>,
     pub sidebar_visible: bool,
     /// Folded projects, as `host/project`.
     pub collapsed: HashSet<String>,
@@ -172,6 +175,7 @@ impl Default for Nav {
         Self {
             selected: None,
             workspace: None,
+            project: None,
             sidebar_visible: true,
             collapsed: HashSet::new(),
             new_session: None,
@@ -418,21 +422,29 @@ impl Nav {
         }
     }
 
+    /// Show `session_id` of `host_id`, remembering its project unless it is a Quickchat.
+    pub fn select(&mut self, model: &Model, host_id: &str, session_id: &str) {
+        self.selected = Some((host_id.to_string(), session_id.to_string()));
+        let project = model
+            .hosts
+            .iter()
+            .find(|h| h.id == host_id)
+            .and_then(|host| host.projects.iter().find(|p| holds(p, session_id)));
+        if let Some(project) = project.filter(|p| !p.quickchat && !p.id.is_empty()) {
+            self.project = Some((host_id.to_string(), project.id.clone()));
+        }
+    }
+
     /// Where a new session starts unless the person says otherwise: the computer and project of
-    /// what they are looking at, else the first place that can start one. With `quickchat`, that
-    /// computer's Quickchat.
+    /// what they are looking at (for a Quickchat, the project shown before it), else the first
+    /// place that can start one. With `quickchat`, that computer's Quickchat.
     pub fn new_session_target(&self, model: &Model, quickchat: bool) -> NewSession {
         let open = self
             .selected
             .as_ref()
             .and_then(|(host_id, session_id)| {
                 let host = model.hosts.iter().find(|h| h.id == *host_id)?;
-                let project = host.projects.iter().find(|p| {
-                    p.sessions
-                        .iter()
-                        .chain(p.workspaces.iter().flat_map(|w| &w.sessions))
-                        .any(|s| s.id == *session_id)
-                })?;
+                let project = host.projects.iter().find(|p| holds(p, session_id))?;
                 Some((host, project))
             })
             .filter(|(host, _)| host.reachable);
@@ -451,7 +463,14 @@ impl Nav {
         let project = if quickchat {
             places.clone().find(|p| p.quickchat)
         } else {
+            let remembered = self
+                .project
+                .as_ref()
+                .filter(|(host_id, _)| *host_id == host.id)
+                .and_then(|(_, id)| host.projects.iter().find(|p| p.id == *id));
             open.map(|(_, p)| p)
+                .filter(|p| !p.quickchat)
+                .or(remembered)
                 .filter(|p| startable(host, p))
                 .or_else(|| places.clone().find(|p| !p.quickchat))
                 .or_else(|| places.clone().next())
@@ -461,6 +480,15 @@ impl Nav {
             project_id: project.map(|p| p.id.clone()),
         }
     }
+}
+
+/// Whether `session_id` is one of `project`'s sessions.
+fn holds(project: &crate::sidebar::ProjectView, session_id: &str) -> bool {
+    project
+        .sessions
+        .iter()
+        .chain(project.workspaces.iter().flat_map(|w| &w.sessions))
+        .any(|s| s.id == session_id)
 }
 
 /// The checkouts on this computer, the only ones the core pins.
@@ -527,7 +555,7 @@ pub fn launch_command(model: &Model, target: &NewSession, provider: &str) -> Opt
     }
     Some(Command::Launch {
         host_id: host.id.clone(),
-        // Quickchat starts in the core's own scratch folder, which the core chooses.
+        // Quickchat starts in the home folder, which the core chooses.
         cwd: (!project.quickchat).then(|| project.path.clone()),
         provider: provider.to_string(),
     })
@@ -772,7 +800,7 @@ mod tests {
 
     #[test]
     fn new_session_starts_where_the_person_is_looking() {
-        let mut quick = project("q", &[]);
+        let mut quick = project("q", &["c1"]);
         quick.quickchat = true;
         quick.path = String::new();
         let mut elsewhere = host(vec![project("r", &["far"])]);
@@ -822,6 +850,15 @@ mod tests {
         let chat = target(&mut nav, "nests.scratchpad", &model);
         assert_eq!(chat.project_id.as_deref(), Some("q"));
         assert!(nav.sidebar_visible);
+        // A Quickchat is no project: shown after project b's chat, a new session still starts in b.
+        nav.select(&model, LOCAL, "s2");
+        nav.select(&model, LOCAL, "c1");
+        assert_eq!(
+            target(&mut nav, "sessions.new", &model)
+                .project_id
+                .as_deref(),
+            Some("b")
+        );
 
         // The panel's choice becomes the launch; Quickchat has no cwd, a project has its folder.
         let launch = |target: &NewSession, provider: &str| launch_command(&model, target, provider);

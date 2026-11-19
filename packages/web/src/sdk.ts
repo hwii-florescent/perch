@@ -222,6 +222,7 @@ export function useWorkspaceTabs(): Sdk.WorkspaceTabs {
   const activeWorkspaceId = usePerchStore((s) => s.activeWorkspaceId);
   const workspaces = usePerchStore((s) => s.workspaces);
   const workspaceOrderByHost = usePerchStore((s) => s.workspaceOrderByHost);
+  const workspaceProjects = usePerchStore((s) => s.workspaceProjects);
   const tabShape = usePerchStore((s) => (s.settings?.tabShape === "round" ? "round" : "square"));
   const providers = usePerchStore((s) => s.cliAgentBySession);
   const fileTabs = useFileTabs((s) => s.tabs);
@@ -238,7 +239,7 @@ export function useWorkspaceTabs(): Sdk.WorkspaceTabs {
   }).map(fileTabKey).join("\n"));
   // A saved drag order changes the order.
   useTabOrderVersion();
-  const nav = { sessions, sessionId, activeHostId, activeProject, activeWorkspaceId, workspaces, workspaceOrderByHost };
+  const nav = { sessions, sessionId, activeHostId, activeProject, activeWorkspaceId, workspaces, workspaceOrderByHost, workspaceProjects };
   const ws = effectiveWorkspace(nav);
   const project = effectiveActiveProject(nav);
   const entries = workspaceTabs(nav, fileTabs);
