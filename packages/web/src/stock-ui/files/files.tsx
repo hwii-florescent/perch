@@ -226,7 +226,6 @@ const TreeRow = memo(function TreeRow({ entry, open, selected, cursor, decoratio
       tabIndex={-1}
       data-path={entry.path}
       data-testid={`workspace-file-entry-${entry.path}`}
-      title={entry.path}
       onClick={() => (isDirectory ? act.current.onToggle(entry) : act.current.onOpenFile(entry))}
       onDoubleClick={() => { if (!isDirectory) act.current.onOpenFile(entry, true); }}
       // VS Code pins on a middle click too.
@@ -240,7 +239,7 @@ const TreeRow = memo(function TreeRow({ entry, open, selected, cursor, decoratio
         <span aria-hidden className="mx-[3px] shrink-0" style={{ width: Math.round(10 * zoom), height: Math.round(10 * zoom) }} />
       )}
       <FileIcon name={entry.name} directory={isDirectory} open={open} />
-      <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{entry.name}</span>
+      <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" data-overflow-title={entry.name}>{entry.name}</span>
       {entry.kind === "symlink" && <svg className="size-3 shrink-0 text-subtext-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" role="img" aria-label="symlink"><path d="M6 10 10 6M6 5l2-2a3 3 0 0 1 4 4l-2 2M10 11l-2 2a3 3 0 0 1-4-4l2-2" /></svg>}
       {entry.readonly && <span className="shrink-0 text-[0.54rem] text-yellow">RO</span>}
       <GitMarker decoration={decoration} directory={isDirectory} />
@@ -343,9 +342,9 @@ function SearchResults({ result, query, selectedPath, cursor, decorations, onOpe
   return (
     <>
       <div className={TREE_STATE}>{count ? `${count} file${count === 1 ? "" : "s"}` : "No matching files"}</div>
-      {result.entries.map((entry) => <button type="button" key={entry.path} className={cn(GHOST_BUTTON, "flex min-h-10 w-full flex-col justify-center gap-0.5 px-3 py-1.5 text-left", ROW_FONT, (selectedPath === entry.path || cursor === entry.path) && "bg-surface-1 text-fg", cursor === entry.path && CURSOR_RING)} role="treeitem" aria-selected={selectedPath === entry.path} tabIndex={-1} data-path={entry.path} title={entry.path} onClick={() => onOpenFile(entry)} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(entry, event.clientX, event.clientY); }} data-testid={`workspace-file-entry-${entry.path}`}>
-        <span className="flex w-full min-w-0 items-center gap-1.5 text-fg"><FileIcon name={entry.name} /><span className="min-w-0 flex-1 truncate">{entry.name}</span><GitMarker decoration={decorations.get(entry.path)} /></span>
-        <span className="w-full truncate text-[0.7rem] text-subtext-0">{entry.path}</span>
+      {result.entries.map((entry) => <button type="button" key={entry.path} className={cn(GHOST_BUTTON, "flex min-h-10 w-full flex-col justify-center gap-0.5 px-3 py-1.5 text-left", ROW_FONT, (selectedPath === entry.path || cursor === entry.path) && "bg-surface-1 text-fg", cursor === entry.path && CURSOR_RING)} role="treeitem" aria-selected={selectedPath === entry.path} tabIndex={-1} data-path={entry.path} onClick={() => onOpenFile(entry)} onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); onMenu(entry, event.clientX, event.clientY); }} data-testid={`workspace-file-entry-${entry.path}`}>
+        <span className="flex w-full min-w-0 items-center gap-1.5 text-fg"><FileIcon name={entry.name} /><span className="min-w-0 flex-1 truncate" data-overflow-title={entry.name}>{entry.name}</span><GitMarker decoration={decorations.get(entry.path)} /></span>
+        <span className="w-full truncate text-[0.7rem] text-subtext-0" data-overflow-title={entry.path}>{entry.path}</span>
       </button>)}
       {result.truncated && <div className={TREE_STATE}>Search limited for this workspace. Narrow the filename or path to see more.</div>}
     </>

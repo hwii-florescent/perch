@@ -23,7 +23,7 @@
 //! app runs and `perch mod clone stock:tabs` copies. It may import only `react`, `react-dom`,
 //! `@perch/sdk` and files beside it (docs/MOD-SDK.md). The strip's markers (`data-testid="tab-bar"`,
 //! `data-tab-entry`, `.tab-bar__tab--active`) are what the tab drag and focus code look for.
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentProps, type MouseEvent } from "react";
 import {
   AgentIcon, beginTabDrag, cn, NewFilePrompt, NewSessionMenu, PageIcon, runCommand, segmentClass, Slot, startSession, TabDragLayer, TabMenu,
   tabStateClass, tip, openBrowserTab, openFileTab, useNewTabRequest, useWorkspaceTabs, type TabInfo, type TabState,
@@ -134,22 +134,6 @@ export default function TabBar() {
   function sessionTab(tab: TabInfo, separated: boolean, entry = tab.id, stack?: { lead: string; others: number; open: boolean; first?: boolean; last?: boolean }) {
     const { state } = tab;
     return (
-      renamingId === tab.id ? (
-        <input
-          key={tab.id}
-          ref={renameInputRef}
-          type="text"
-          className="w-40 shrink-0 rounded-ui bg-surface-0 px-2 py-1 text-[0.8rem] leading-[1.2] text-fg [font-family:inherit] focus:[outline:1px_solid_var(--accent)]"
-          data-testid="rename-input"
-          value={renameValue}
-          onChange={(e) => setRenameValue(e.target.value)}
-          onBlur={commitRename}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commitRename();
-            if (e.key === "Escape") setRenamingId(null);
-          }}
-        />
-      ) : (
         <span
           key={tab.id}
           className={cn(
@@ -174,8 +158,8 @@ export default function TabBar() {
             menu: (x: unknown, y: unknown) => openMenu(tab.id, Number(x), Number(y)),
           }}
         >
-        <button
-          type="button"
+        <TabBody
+          renaming={renamingId === tab.id}
           className={cn(
             "tab-bar__tab",
             segmentClass(),
@@ -202,8 +186,28 @@ export default function TabBar() {
           <span className="shrink-0 opacity-80" aria-hidden="true">
             <AgentIcon provider={tab.provider} size={14} />
           </span>
-          <span className="truncate">{tab.label}</span>
-        </button>
+          {renamingId === tab.id ? (
+            <input
+              ref={renameInputRef}
+              type="text"
+              className="min-w-0 flex-1 bg-transparent p-0 text-inherit [font:inherit] outline-none"
+              data-testid="rename-input"
+              aria-label="Session name"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onBlur={commitRename}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") commitRename();
+                if (e.key === "Escape") setRenamingId(null);
+              }}
+            />
+          ) : (
+            <span className="truncate">{tab.label}</span>
+          )}
+        </TabBody>
         </Slot>
         {stack && (!stack.open || stack.first) && (
           <button
@@ -231,7 +235,6 @@ export default function TabBar() {
           <TabCloseIcon />
         </button>
         </span>
-      )
     );
   }
 
@@ -299,6 +302,14 @@ export default function TabBar() {
 }
 
 /** A file's, review's, browser page's or mod's tab: its name, a ● while a file has unsaved changes, and ×. */
+/** A session tab's body: a button, or while it is renamed the same box holding the name field
+ * (a field inside a button would lose its keys and clicks to the button). */
+function TabBody({ renaming, children, onPointerDown, onClick, onDoubleClick, ...rest }: ComponentProps<"button"> & { renaming: boolean }) {
+  if (!renaming) return <button type="button" {...rest} onPointerDown={onPointerDown} onClick={onClick} onDoubleClick={onDoubleClick}>{children}</button>;
+  const { type: _type, ...box } = rest;
+  return <div {...(box as ComponentProps<"div">)}>{children}</div>;
+}
+
 function ResourceTab({ tab, tabShape, dragging, separated }: {
   tab: TabInfo;
   tabShape: "square" | "round";

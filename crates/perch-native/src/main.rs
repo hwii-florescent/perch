@@ -44,7 +44,15 @@ fn main() {
                 Duration::from_secs(2),
             ));
     });
-    gpui_platform::application().run(move |cx: &mut App| {
+    // `perch://` links are handed to the app, possibly before its window exists: they queue here
+    // until the window takes them (`Workspace::open_link` holds one until the core answers).
+    let (link_tx, mut link_rx) = futures::channel::mpsc::unbounded();
+    let app = gpui_platform::application();
+    app.on_open_urls(move |urls| {
+        urls.into_iter()
+            .for_each(|url| drop(link_tx.unbounded_send(url)))
+    });
+    app.run(move |cx: &mut App| {
         let (opened_tx, mut opened_rx) = futures::channel::mpsc::unbounded();
         notify::init(opened_tx);
         let (width, height) = test.as_ref().and_then(|t| t.size).unwrap_or((1100., 720.));
@@ -115,6 +123,16 @@ fn main() {
                     if id != perch_native::sidebar::USAGE_NOTIFICATION {
                         let _ = workspace.show_session(&id, cx);
                     }
+                });
+            }
+        })
+        .detach();
+        cx.spawn(async move |cx| {
+            while let Some(url) = link_rx.next().await {
+                let _ = window.update(cx, |workspace, window, cx| {
+                    cx.activate(true);
+                    window.activate_window();
+                    workspace.open_link(&url, window, cx);
                 });
             }
         })

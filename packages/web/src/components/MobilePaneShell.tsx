@@ -43,7 +43,9 @@ export function MobilePaneShell({
   onCloseFiles,
   onCloseGitReview,
 }: MobilePaneShellProps) {
-  const { workspaceId, isGit } = useToolsContext(workspaceFilesWorkspaceId ?? workspaceGitReviewWorkspaceId);
+  const { workspaceId: shownWorkspaceId, scopeId, isGit } = useToolsContext(workspaceFilesWorkspaceId ?? workspaceGitReviewWorkspaceId);
+  // A Quickchat's tab folder when its shell has left ~ (`useToolsContext`), else the workspace.
+  const workspaceId = scopeId ?? shownWorkspaceId;
   const panes = isGit ? PANES : PANES.filter(({ kind }) => kind !== "gitReview");
   const shown = activePane === "gitReview" && !isGit ? "files" : activePane;
 

@@ -30,7 +30,7 @@ fn state() -> State {
 fn state_with(edit: impl Fn(&mut Value)) -> State {
     let project = |id: &str, path: &str| {
         json!({"id": id, "hostId": "local", "name": id, "path": path,
-            "favorite": false, "createdAt": 0, "updatedAt": 0})
+            "favorite": false, "createdAt": 0, "updatedAt": 0, "quickchat": path == "/home"})
     };
     let checkout = |id: &str, project: &str, path: &str| {
         json!({"id": id, "projectId": project, "hostId": "local", "path": path,
@@ -40,7 +40,7 @@ fn state_with(edit: impl Fn(&mut Value)) -> State {
     let projects = vec![
         project("p", "/work"),
         project("q", "/other"),
-        project("c", "/home/.perch/scratch"),
+        project("c", "/home"),
     ];
     let mut state = State::default();
     state.connect();
@@ -54,12 +54,12 @@ fn state_with(edit: impl Fn(&mut Value)) -> State {
         "type": "workspace.snapshot", "requestId": "r", "hostId": "local", "snapshotEpoch": "e",
         "snapshotRevision": 1, "projects": projects, "workspaces": [
             checkout("w1", "p", "/work"), checkout("w2", "q", "/other"),
-            checkout("w3", "c", "/home/.perch/scratch")]})));
+            checkout("w3", "c", "/home")]})));
     let sessions: Vec<Value> = [
         ("alpha", "p", "w1", "/work"),
         ("bravo", "p", "w1", "/work"),
         ("delta", "q", "w2", "/other"),
-        ("chat", "c", "w3", "/home/.perch/scratch"),
+        ("chat", "c", "w3", "/home"),
     ]
     .iter()
     .enumerate()

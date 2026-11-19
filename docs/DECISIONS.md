@@ -51,6 +51,32 @@ Replaces the separate worktree row for sub-sessions started with `perch spawn --
 - The status bar's folder and branch are the active tab's (a file or review tab: its workspace's or
   folder's), and follow every tab switch.
 
+## 2026-11-18 — Quickchat is a plain terminal at home; the phone leaves browser tabs out (owner)
+
+- **Quickchat is not a project.** It behaves like a plain terminal started at the home folder (`~`):
+  never listed as a project, never active or pinned, never a start folder, and starting or showing one
+  never changes the active project. Every session row needs a project and workspace (sessions,
+  navigation and terminal-scope grants key on them), so the core files Quickchat sessions under one
+  inert row at `~`, marked `quickchat` on the wire (optional; older peers omit or ignore it). Clients use
+  it only to group the Quickchat list, never as a project.
+- Its tabs keep their own Files and Git, following the tab's folder from `~`; Git shows only inside a
+  repository (see "Files and Git belong to the tab").
+- **The old Chats project goes.** A core migration removes the project at `…/.perch/scratch` and its
+  sessions, after keeping a copy of the database beside it (`<db>.pre-quickchat.bak`). A session still
+  live, or whose state is unknown, is kept until perchd shows it ended. The `~/.perch/scratch` folder
+  and its files stay on disk; perch no longer creates it. Supersedes the 2026-10-25 "`~/.perch/scratch`
+  remains the workspace's bookkeeping" note.
+- Fixes the desktop losing its project after a chat: the pin was the scratch folder while chats ran in
+  home, so `effectiveActiveProject` fell back to the newest project. A Quickchat now keeps it.
+- **The phone's tab row omits browser tabs for now**, and a browser tab never becomes the phone's
+  active tab. The desktop keeps them in the shared tabs unchanged.
+
+## 2026-11-18 — Files and Git belong to the tab (owner)
+
+- A tab's Files and Git follow that tab's own folder (its cwd), never the project. Git shows only when
+  the folder is inside a Git repository. Quickchat is not a project (it behaves like a plain terminal
+  started at `~`), but its tabs still get their own Files and Git.
+
 ## 2026-11-18 — One desktop app; the phone mirrors the desktop's tabs (owner)
 
 - `/Applications/perch.app` is the native client. It starts its bundled headless core when none runs,
@@ -194,6 +220,13 @@ force-removing a worktree, deleting a branch, changing memory and `project.new` 
 not limited to built-in mods, because a person's copies of the stock mods need the same calls. The
 engine's own guards stay: pictures only from the mod's folders, state changes refused while disconnected,
 and `workspace.run` kept out of `perch.ask`.
+
+## 2026-11-13 — The bar for any native client (owner)
+
+- Stock UI mods stay hot-swappable and customisable by agents, and the client looks and behaves like the
+  Tauri app it replaces (layout, design, UX). Memory savings alone do not justify losing either.
+  CodeMirror may stay as a stock mod if it is light on memory. Judge native-client options on these two
+  bars first. Contracts: [NATIVE](NATIVE.md).
 
 ## 2026-11-12 — A native desktop client in GPUI, with Ghostty's engine on both sides (owner)
 
@@ -1715,3 +1748,8 @@ an exhaustive description of every component or a fresh acceptance result.
 - **Memory opt-out is per Project only**, not per session: one switch in the Memory dialog. Off refuses the
   Project's agents; people keep reading and editing the files.
 
+- **Sessions name themselves as their provider does.** A session's title is, in order: a Perch rename (never
+  overwritten), the provider's own title (Claude Code `ai-title`/`/rename`, Codex `thread_name`, OMP header
+  title; Pi and OpenCode write none), then the cleaned first prompt (leading `/command`, file paths and
+  pasted-image placeholders dropped; the command name if nothing else is left). Perch reads the provider's
+  local files at turn boundaries and follows its later renames; it makes no model call of its own.

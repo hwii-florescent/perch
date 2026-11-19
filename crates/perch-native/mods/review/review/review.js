@@ -7,7 +7,7 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 //! commented, the prepared packet and its send operation id, a send in flight) is kept by the host under the
 //! workspace's key (`useResourceState`), so every copy of this screen for one workspace shares it. Only
 //! transient UI (an open confirmation, a busy flag of a request this copy is awaiting) is the copy's own.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { cn, DiffView, FileIcon, GitMarker, newId, Select, useResourceState, } from "@perch/sdk";
 /** The narrow layout applies at or under this width of the review itself. */
 const NARROW_WIDTH = 700;
@@ -38,7 +38,8 @@ const ICONS = {
 const ICON_BTN = "inline-flex shrink-0 items-center justify-center rounded-ui p-[0.35rem] disabled:cursor-not-allowed! disabled:opacity-[0.45] [&:hover:not(:disabled)]:bg-surface-1";
 const ICON_TONE = {
     default: "bg-transparent text-subtext-0 [&:hover:not(:disabled)]:text-fg",
-    on: "bg-transparent text-accent",
+    // A toggle that is on reads as on at a glance: filled and tinted, as an editor's option toggles are.
+    on: "bg-[color-mix(in_srgb,var(--accent)_22%,transparent)] text-accent",
     primary: "bg-transparent text-accent",
     danger: "bg-transparent text-red",
 };
@@ -106,9 +107,17 @@ function filePathForSide(file, side) {
         return file.oldPath ?? file.newPath ?? "(unknown file)";
     return file.newPath ?? file.oldPath ?? "(unknown file)";
 }
-/** What a file's diff says, as a short hash: a file marked viewed stays viewed only while this is unchanged (GitHub
- * clears Viewed when the file changes). */
-export function fileSignature(file) {
+/** What a file's diff says: a file marked viewed stays viewed only while this is unchanged (GitHub clears Viewed when
+ * the file changes). The core's per-side source revisions (`path:old`, `path:new`) already fingerprint each side's
+ * content, so a file with all of its sides revised costs O(1). Otherwise (an added or binary side, a source past the
+ * core's size limit, an older core) it hashes the diff's text, O(lines): callers ask only for files marked viewed.
+ * ponytail: a huge viewed file with no revisions still costs O(lines) per snapshot; a Rust-side fingerprint per
+ * file in the diff snapshot would remove that. */
+export function fileSignature(file, revisions) {
+    const sides = [file.oldPath === undefined ? "" : `${file.oldPath}:old`, file.newPath === undefined ? "" : `${file.newPath}:new`].filter(Boolean);
+    const known = sides.map((side) => revisions?.[side]);
+    if (sides.length > 0 && known.every(Boolean))
+        return `${file.status}:${known.join(":")}`;
     let hash = 0x811c9dc5;
     const add = (text) => {
         for (let i = 0; i < text.length; i += 1)
@@ -160,6 +169,146 @@ function treeRows(entries, collapsed, query) {
     walk(root, "", 0);
     return rows;
 }
+/** A long changes tree draws the rows in view and a chunk of this many more on each side (`treeWindow`). */
+const TREE_CHUNK = 8;
+/** The rows a tree of `count` rows draws when the view shows `shown` rows from row `top`: the chunks the view is in,
+ * with one more chunk before and after it. A move inside a chunk keeps the same rows. (The Files tree's rule.) */
+export function treeWindow(count, top, shown, chunk) {
+    const first = Math.floor(Math.max(0, top) / chunk) - 1;
+    const last = Math.floor((Math.max(0, top) + shown) / chunk) + 1;
+    const start = Math.min(Math.max(0, first * chunk), Math.max(0, count - chunk));
+    return { start: Math.max(0, start), end: Math.min(count, Math.max(start + chunk, (last + 1) * chunk)) };
+}
+/** The changed paths, drawn only around the view (a script render of every row of a long change list ran past the
+ * native client's render budget): the chunks in view sit between two spacers that hold the rest's height. */
+function ChangesTree({ rows, active, selected, lineCounts, scroller, onScroll, act }) {
+    const listRef = useRef(null);
+    // Until measured, a short drawer's worth: each row drawn costs the native client's render budget about half a
+    // millisecond, so the first draw must not guess tall.
+    const [view, setView] = useState({ top: 0, shown: 24 });
+    const rowHeight = () => listRef.current?.querySelector("[data-change-row]")?.getBoundingClientRect().height || 24;
+    const { start, end } = treeWindow(rows.length, view.top, view.shown, TREE_CHUNK);
+    onScroll.current = () => {
+        const area = scroller.current?.getBoundingClientRect();
+        const list = listRef.current?.getBoundingClientRect();
+        if (!area || !list)
+            return;
+        const height = rowHeight();
+        const now = { top: Math.max(0, (area.top - list.top) / height), shown: Math.ceil(area.height / height) };
+        const next = treeWindow(rows.length, now.top, now.shown, TREE_CHUNK);
+        if (next.start !== start || next.end !== end)
+            setView(now);
+    };
+    // Measured once drawn, and again when the rows change (a filter, a folded folder).
+    useEffect(() => onScroll.current?.(), [rows]);
+    const height = rowHeight();
+    const chunks = [];
+    for (let first = start; first < end; first += TREE_CHUNK)
+        chunks.push(first);
+    return (_jsxs("div", {
+        ref: listRef,
+        className: "min-w-0 shrink-0",
+        children: [
+            _jsx("div", {
+                "aria-hidden": true,
+                style: { height: start * height }
+            }),
+            chunks.map((first) => (_jsx("div", {
+                className: "flex min-w-0 flex-col",
+                children: rows.slice(first, Math.min(end, first + TREE_CHUNK)).map((row) => row.kind === "dir"
+                    ? _jsx(DirRow, {
+                        row: row,
+                        act: act
+                    }, `dir:${row.key}`)
+                    : _jsx(FileRow, {
+                        row: row,
+                        active: active === row.entry.path,
+                        checked: selected.has(row.entry.path),
+                        counts: lineCounts.get(row.entry.path),
+                        act: act
+                    }, `file:${row.key}`))
+            }, first))),
+            _jsx("div", {
+                "aria-hidden": true,
+                style: { height: (rows.length - end) * height }
+            })
+        ]
+    }));
+}
+const DirRow = memo(function DirRow({ row, act }) {
+    return (_jsxs("button", {
+        type: "button",
+        className: "flex min-w-0 items-center gap-[0.35rem] rounded-ui py-[3px] pr-3 text-left text-subtext-0 [background:none] hover:bg-surface-1",
+        style: { paddingLeft: `${0.55 + row.depth * 0.8}rem` },
+        role: "treeitem",
+        "aria-expanded": row.open,
+        "data-change-row": true,
+        onClick: () => act.current.toggleDir(row.key),
+        children: [
+            _jsx("span", {
+                className: "w-[0.7rem] shrink-0 text-[0.6rem]",
+                "aria-hidden": "true",
+                children: row.open ? "▾" : "▸"
+            }),
+            _jsx("span", {
+                className: "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap",
+                "data-overflow-title": row.name,
+                children: row.name
+            })
+        ]
+    }));
+});
+const FileRow = memo(function FileRow({ row, active, checked, counts, act }) {
+    const path = row.entry.path;
+    return (_jsxs("div", {
+        className: "flex min-w-0 items-center gap-[0.3rem]",
+        role: "treeitem",
+        "data-change-row": true,
+        children: [
+            _jsx("input", {
+                className: "shrink-0",
+                type: "checkbox",
+                checked: checked,
+                onChange: () => act.current.selectPath(path),
+                "aria-label": `Select ${path}`
+            }),
+            _jsxs("button", {
+                type: "button",
+                className: `${PATH_BUTTON} ${active ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`,
+                style: { paddingLeft: `${0.1 + row.depth * 0.8}rem` },
+                onClick: () => act.current.revealFile(path),
+                children: [
+                    _jsx(FileIcon, { name: row.name }),
+                    _jsx("span", {
+                        className: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
+                        "data-overflow-title": row.name,
+                        children: row.name
+                    }),
+                    counts && (_jsxs("span", {
+                        className: "shrink-0 whitespace-nowrap text-[0.66rem] [font-family:var(--font-mono)]",
+                        children: [
+                            counts.added > 0 && _jsxs("span", {
+                                className: "text-green",
+                                children: [
+                                    "+",
+                                    counts.added
+                                ]
+                            }),
+                            counts.removed > 0 && _jsxs("span", {
+                                className: "ml-[0.3rem] text-red",
+                                children: [
+                                    "\u2212",
+                                    counts.removed
+                                ]
+                            })
+                        ]
+                    })),
+                    _jsx(GitMarker, { decoration: { entry: row.entry } })
+                ]
+            })
+        ]
+    }));
+});
 /** A path with its directory dimmed and its name plain; the directory gives way first when the row is narrow. */
 function PathLabel({ path, className }) {
     const [dir, name] = splitPath(path);
@@ -496,17 +645,18 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
         }
         return new Map(countCache.current.counts);
     }, [diff]);
-    const signatures = useMemo(() => new Map(diffFiles.map((file) => [filePath(file), fileSignature(file)])), [diffFiles]);
-    const viewedPaths = useMemo(() => [...signatures].filter(([path, signature]) => viewedFiles[path] === signature).map(([path]) => path), [signatures, viewedFiles]);
+    // Only files marked viewed are signed: a big diff nobody marked costs nothing here.
+    const viewedPaths = useMemo(() => diffFiles.map(filePath).filter((path, index) => path in viewedFiles && viewedFiles[path] === fileSignature(diffFiles[index], diff?.sourceRevisions)), [diffFiles, diff?.sourceRevisions, viewedFiles]);
     function toggleCollapsed(path) {
         setCollapsedFiles((current) => { const next = new Set(current); if (!next.delete(path))
             next.add(path); return next; });
     }
     /** Marking a file viewed folds it; unmarking unfolds it. */
     function toggleViewed(path) {
-        const signature = signatures.get(path);
-        if (!signature)
+        const file = diffFiles.find((candidate) => filePath(candidate) === path);
+        if (!file)
             return;
+        const signature = fileSignature(file, diff?.sourceRevisions);
         const on = viewedFiles[path] !== signature;
         setViewedFiles((current) => { const next = { ...current }; if (on)
             next[path] = signature;
@@ -518,6 +668,11 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
             next.delete(path); return next; });
     }
     const treeShown = useMemo(() => treeRows(changedFiles, collapsedDirs, fileFilter), [changedFiles, collapsedDirs, fileFilter]);
+    const treeRef = useRef(null);
+    const treeScrolled = useRef(null);
+    // The latest handlers behind one ref the rows keep: a row draws again only when what it shows changes.
+    const treeAct = useRef({ toggleDir, selectPath, revealFile });
+    treeAct.current = { toggleDir, selectPath, revealFile };
     function toggleDir(key) {
         setCollapsedDirs((current) => { const next = new Set(current); if (!next.delete(key))
             next.add(key); return next; });
@@ -825,75 +980,21 @@ export function WorkspaceGitReview({ workspaceId, workspaceName, startSnapshot, 
                         })
                     })),
                     _jsxs("div", {
-                        className: "flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto px-[3px] pb-[0.3rem]",
+                        ref: treeRef,
+                        className: "flex min-h-0 flex-1 flex-col overflow-y-auto px-[3px] pb-[0.3rem]",
                         role: "tree",
                         "aria-label": "Changed paths",
+                        onScroll: () => treeScrolled.current?.(),
                         children: [
-                            treeShown.map((row) => row.kind === "dir" ? (_jsxs("button", {
-                                type: "button",
-                                className: "flex min-w-0 items-center gap-[0.35rem] rounded-ui py-[3px] pr-3 text-left text-subtext-0 [background:none] hover:bg-surface-1",
-                                style: { paddingLeft: `${0.55 + row.depth * 0.8}rem` },
-                                role: "treeitem",
-                                "aria-expanded": row.open,
-                                onClick: () => toggleDir(row.key),
-                                children: [
-                                    _jsx("span", {
-                                        className: "w-[0.7rem] shrink-0 text-[0.6rem]",
-                                        "aria-hidden": "true",
-                                        children: row.open ? "▾" : "▸"
-                                    }),
-                                    _jsx("span", {
-                                        className: "min-w-0 overflow-hidden text-ellipsis whitespace-nowrap",
-                                        children: row.name
-                                    })
-                                ]
-                            }, `dir:${row.key}`)) : (_jsxs("div", {
-                                className: "flex min-w-0 items-center gap-[0.3rem]",
-                                role: "treeitem",
-                                children: [
-                                    _jsx("input", {
-                                        className: "shrink-0",
-                                        type: "checkbox",
-                                        checked: selectedPaths.has(row.entry.path),
-                                        onChange: () => selectPath(row.entry.path),
-                                        "aria-label": `Select ${row.entry.path}`
-                                    }),
-                                    _jsxs("button", {
-                                        type: "button",
-                                        className: `${PATH_BUTTON} ${(activeFile ?? reveal?.path) === row.entry.path ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`,
-                                        style: { paddingLeft: `${0.1 + row.depth * 0.8}rem` },
-                                        onClick: () => revealFile(row.entry.path),
-                                        title: row.entry.originalPath ? `${row.entry.originalPath} → ${row.entry.path}` : row.entry.path,
-                                        children: [
-                                            _jsx(FileIcon, { name: row.name }),
-                                            _jsx("span", {
-                                                className: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
-                                                children: row.name
-                                            }),
-                                            lineCounts.has(row.entry.path) && (_jsxs("span", {
-                                                className: "shrink-0 whitespace-nowrap text-[0.66rem] [font-family:var(--font-mono)]",
-                                                children: [
-                                                    (lineCounts.get(row.entry.path)?.added ?? 0) > 0 && _jsxs("span", {
-                                                        className: "text-green",
-                                                        children: [
-                                                            "+",
-                                                            lineCounts.get(row.entry.path)?.added
-                                                        ]
-                                                    }),
-                                                    (lineCounts.get(row.entry.path)?.removed ?? 0) > 0 && _jsxs("span", {
-                                                        className: "ml-[0.3rem] text-red",
-                                                        children: [
-                                                            "\u2212",
-                                                            lineCounts.get(row.entry.path)?.removed
-                                                        ]
-                                                    })
-                                                ]
-                                            })),
-                                            _jsx(GitMarker, { decoration: { entry: row.entry } })
-                                        ]
-                                    })
-                                ]
-                            }, `file:${row.key}`))),
+                            _jsx(ChangesTree, {
+                                rows: treeShown,
+                                active: activeFile ?? reveal?.path,
+                                selected: selectedPaths,
+                                lineCounts: lineCounts,
+                                scroller: treeRef,
+                                onScroll: treeScrolled,
+                                act: treeAct
+                            }),
                             statusState !== "loading" && changedFiles.length === 0 && _jsx("div", {
                                 className: STATUS_NOTE,
                                 children: "Working tree is clean."

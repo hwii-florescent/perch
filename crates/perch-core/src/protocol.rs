@@ -788,6 +788,10 @@ pub struct ProjectSummary {
     pub settings: Option<Value>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Its core's Quickchat: the project at that computer's home folder, where sessions
+    /// started without a project run. Absent from older cores.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub quickchat: bool,
 }
 
 /// Lifecycle state accepted on the wire. Keeping this as an enum prevents a

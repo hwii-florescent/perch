@@ -600,3 +600,30 @@ describe("deleteSession (tab close)", () => {
     expect(sent.at(-1)).toMatchObject({ sessionId: "B" });
   });
 });
+
+describe("Quickchat", () => {
+  it("is no project: starting or opening one keeps the active project, and it is never listed as one", async () => {
+    const { newQuickchat } = await import("./workspaceNav");
+    const project = (id: string, path: string, quickchat = false) => ({ id, hostId: "local", name: id, path, favorite: false, createdAt: 1, updatedAt: 1, quickchat });
+    const workspace = (id: string, projectId: string, path: string) => ({ id, projectId, hostId: "local", path, name: id, dirty: false, state: "active" as const, createdAt: 1, updatedAt: 1 });
+    usePerchStore.setState({
+      connected: true, activeHostId: "local", sessionId: "work", activeWorkspaceId: "wp", activeProjectId: "p",
+      activeProject: { hostId: "local", cwd: "/work/p" },
+      workspaceProjects: [project("p", "/work/p"), project("q", "/home/me", true)],
+      workspaces: [workspace("wp", "p", "/work/p"), workspace("wq", "q", "/home/me")],
+      // The chat is the newest session, so a project made of it would win the fallback.
+      sessions: [session({ id: "work", cwd: "/work/p", workspaceId: "wp", projectId: "p", createdAt: 1 }), session({ id: "chat", cwd: "/home/me", workspaceId: "wq", projectId: "q", createdAt: 9 })],
+    });
+    const kept = () => {
+      const state = usePerchStore.getState();
+      expect(effectiveActiveProject(state)).toEqual({ hostId: "local", cwd: "/work/p" });
+      expect(state.activeProjectId).toBe("p");
+    };
+    newQuickchat();
+    kept();
+    expect(usePerchStore.getState().activeWorkspaceId).toBe("wq"); // its chats are on screen
+    usePerchStore.getState().switchSession("chat");
+    kept();
+    expect(projectsForHost(usePerchStore.getState(), "local").map((group) => group.cwd)).toEqual(["/work/p"]);
+  });
+});

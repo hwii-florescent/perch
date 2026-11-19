@@ -2,9 +2,8 @@
  * The desktop's New session launcher keeps working while a phone page is attached to the same core.
  *
  * The launcher subscribes to `effectiveActiveProject`; when that selector falls back to the host's newest project it
- * must return the same object each call, or React re-renders forever ("Maximum update depth exceeded"). After a chat
- * the desktop sits on that fallback (the Chats pin is the scratch folder, the chats' cwd is home); the store updates a
- * phone's attach and switch send are what made React re-check it mid-launch. Uses the main config's core on :7799;
+ * must return the same object each call, or React re-renders forever ("Maximum update depth exceeded"). The store
+ * updates a phone's attach and switch send are what made React re-check it mid-launch. Uses the main config's core on :7799;
  * no agent runs.
  */
 import { test, expect, type Page } from "@playwright/test";

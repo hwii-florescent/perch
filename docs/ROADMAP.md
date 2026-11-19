@@ -599,6 +599,8 @@ estimated 231 MB for the Tauri app, whose idle figure of 146 MB was the only one
   computer is not opened automatically), attention states, terminal settings, remote computers, command
   palette, `keys.json`, and a terminal on Ghostty's engine with the person's profile, selection, search,
   links, IME, OSC 52, kitty keyboard and graphics, input ownership and shared typing.
+- **Built:** `perch://open` links are received by the native app itself (see [NATIVE](NATIVE.md)); a real
+  `open perch://…` through LaunchServices on the installed bundle is not yet recorded.
 - **Still Tauri-only** (reached with "Open in Perch"): files and the editor, changes and review, browser
   panes, the chat view, Projects home, memory and instructions, usage, mods and stock screens, every
   setting that is not a terminal setting, notifications, updates.

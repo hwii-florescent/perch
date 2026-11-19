@@ -26,7 +26,7 @@ import { actOnInbound, useInbound, type InboundAction } from "./inbound";
 import { actOnChild, useCrew } from "./crew";
 import { actOnSuggestion, useSuggestions, type SuggestionAction } from "./suggestions";
 import { uploadAttachment } from "./attachments";
-import { workspaceRecord } from "./terminalScope";
+import { isQuickchatProject } from "./terminalScope";
 import type * as Sdk from "@perch/sdk";
 
 /** The CLI's answer to an action, or why it did not take it. */
@@ -65,8 +65,8 @@ export function useNativeChat({ sessionId, providerId, terminalProviderId = prov
   const folderPath = session?.cwd;
   const folderName = usePerchStore((state) => {
     if (!session?.cwd) return "";
-    const workspacePath = session.workspaceId ? workspaceRecord(state, session.workspaceId)?.path : undefined;
-    return workspacePath?.endsWith("/.perch/scratch") ? "Quickchat" : session.cwd.replace(/\/+$/, "").split("/").pop() || session.cwd;
+    const quickchat = state.workspaceProjects.some((project) => project.id === session.projectId && isQuickchatProject(project));
+    return quickchat ? "Quickchat" : session.cwd.replace(/\/+$/, "").split("/").pop() || session.cwd;
   });
   const capabilities = usePerchStore((state) => (hostId === "local" ? state.serverInfo?.capabilities : state.workspaceCapabilitiesByHost[hostId]));
   const canLinkFiles = capabilities?.includes("fs.links") === true;

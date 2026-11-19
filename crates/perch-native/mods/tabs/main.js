@@ -8,4 +8,5 @@ import TabBar from "./tabs/main.js";
 /** The box the strip fills; the window's round card behind it paints the colour, so the corners stay round. */
 const CARD = { display: "flex", flexDirection: "column", width: "100%", height: "100%", overflow: "hidden", background: "transparent", position: "relative" };
 
-export default screen("tabs", TabBar, { container: CARD, props: (raw) => raw });
+// `in-flow`: the strip holds the keyboard only while its rename field has it, as the sidebar does.
+export default screen("tabs", TabBar, { container: CARD, props: (raw) => raw, keyboard: "in-flow" });

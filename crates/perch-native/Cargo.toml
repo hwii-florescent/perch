@@ -208,6 +208,11 @@ path = "tests/workspace_session.rs"
 harness = false
 
 [[test]]
+name = "perch_links_window"
+path = "tests/perch_links_window.rs"
+harness = false
+
+[[test]]
 name = "workspace_shared_tabs"
 path = "tests/workspace_shared_tabs.rs"
 harness = false
@@ -225,6 +230,11 @@ harness = false
 [[test]]
 name = "context_bridge_window"
 path = "tests/context_bridge_window.rs"
+harness = false
+
+[[test]]
+name = "tab_rename_window"
+path = "tests/tab_rename_window.rs"
 harness = false
 
 [[test]]
@@ -315,4 +325,9 @@ harness = false
 [[test]]
 name = "subsession_layout_window"
 path = "tests/subsession_layout_window.rs"
+harness = false
+
+[[test]]
+name = "tab_strip_overlap_window"
+path = "tests/tab_strip_overlap_window.rs"
 harness = false

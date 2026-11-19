@@ -75,9 +75,21 @@ bundled core when `core.json` names none that is running, on port 47788; the cor
 and serves the phone and terminals. Replaced bundles are kept in `~/.perch/replaced-apps/`.
 `scripts/reinstall-desktop.sh` still builds the Tauri app.
 
+Rebuild: `ZIG=/opt/homebrew/opt/zig@0.16/bin/zig sh scripts/reinstall-desktop-native.sh`, from a checkout
+that has the gitignored `crates/perch-desktop/tauri.macos.conf.json` (the signing identity; copy it into a
+worktree). It builds web, native, `perch-core` and the `perch` CLI, keeps the app's signature, opens the app
+with `open -g` (no focus), and restarts the core so it serves the new web build.
+
 ## Not yet the same as the Tauri app
 
-- No agent Chat view (agents show as terminals), no `perch://` link handling, no permissions page.
+- No agent Chat view (agents show as terminals), no permissions page.
+- `perch://open?place=<files|changes|browser|chat|settings>[&session=<id>]` is handled here: `Info.plist` declares the
+  scheme, the app queues links from the system, and `Workspace::open_link` (`workspace/links.rs`) shows the place
+  (session tab; files = the drawer's Files; changes = the review tab; browser = a blank browser tab; settings). The
+  grammar is the Tauri receiver's (`handoff::parse_link`). It only navigates. A link whose session the core has not
+  listed yet (the window is starting) waits up to 30 s, the latest replacing an older one; a link that is malformed,
+  not ours, or names no session is ignored with a log line. Without a session, files/changes/browser use the shown
+  workspace (the browser, else the computer's first).
 - The install script does not deploy the relay (the phone's web app); the mobile plan covers it.
 - Remaining differences and visual gate failures: `plans/261113-0037-native-terminal-fixes-and-mod-engine/next-steps.md`
   and `node e2e/native-parity/compare.mjs`.

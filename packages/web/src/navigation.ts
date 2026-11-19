@@ -19,14 +19,14 @@ import { sessionDotState, type AgentDotState } from "./statusDot";
 import { groupByStatus, holdFinished, listedInSidebar, sectionOf, STATUS_LABELS, STATUS_SECTIONS, topSection } from "./statusView";
 import { canReorderHost, effectiveActiveProject, projectsForHost, usePerchStore, type WorkspaceProject, type WorkspaceRecord } from "./store";
 import { useTabOrderVersion } from "./tabOrder";
-import { isChatsProject, orderedNests, sessionsForWorkspace, workspacesForProject } from "./workspaceNav";
+import { isQuickchatProject, orderedNests, sessionsForWorkspace, workspacesForProject } from "./workspaceNav";
 import { chatsInStripOrder, workspaceTabs } from "./workspaceTabs";
 
 function basename(path: string): string {
   const parts = path.replace(/\/+$/, "").split("/");
   return parts[parts.length - 1] || path;
 }
-const projectName = (project: WorkspaceProject) => (isChatsProject(project) ? "Quickchat" : project.name || basename(project.path));
+const projectName = (project: WorkspaceProject) => (isQuickchatProject(project) ? "Quickchat" : project.name || basename(project.path));
 
 export function useHosts(): Sdk.Hosts {
   const connected = usePerchStore((s) => s.connected);
@@ -110,7 +110,7 @@ export function useNavigation(options?: { showTerminals?: boolean; sortByAttenti
   usePerchStore((s) => s.serverInfo); // instructions and memory follow the core's capabilities
 
   // Project terminals stay tabs unless asked; Quickchat always lists every session.
-  const quickchatIds = new Set(projects.filter(isChatsProject).map((project) => project.id));
+  const quickchatIds = new Set(projects.filter(isQuickchatProject).map((project) => project.id));
   const sessions = allSessions.filter((session) => showTerminals || quickchatIds.has(session.projectId ?? "") || listedInSidebar(session, remembered[session.id]));
   const listed = new Set(sessions.map((session) => session.id));
   const { sessionId, held, needs, needIds } = useStatusFacts(sessions);
@@ -186,7 +186,7 @@ export function useNavigation(options?: { showTerminals?: boolean; sortByAttenti
     const local = project.hostId === "local";
     return {
       id: project.id, hostId: project.hostId, name: projectName(project), path: project.path, repoPath: project.repoPath || undefined,
-      favorite: !!project.favorite, quickchat: isChatsProject(project),
+      favorite: !!project.favorite, quickchat: isQuickchatProject(project),
       workspaces: ordered.map((w) => workspaceInfo(w, children, 0)),
       hidden: all.filter((w) => w.hidden).map((w) => workspaceInfo(w, new Map(), 0)),
       jobs: local
@@ -206,8 +206,8 @@ export function useNavigation(options?: { showTerminals?: boolean; sortByAttenti
     projects.filter((project) => project.hostId === hostId).sort((a, b) => (a.favorite !== b.favorite ? (a.favorite ? -1 : 1) : b.updatedAt - a.updatedAt)),
     order?.projects,
   );
-  const chats = hostProjects.find(isChatsProject);
-  const visible = hostProjects.filter((project) => !isChatsProject(project)).map((project) => ({ project, info: projectInfo(project) }));
+  const chats = hostProjects.find(isQuickchatProject);
+  const visible = hostProjects.filter((project) => !isQuickchatProject(project)).map((project) => ({ project, info: projectInfo(project) }));
   const quickchat = chats ? projectInfo(chats) : null;
   const shownProjects = visible
     .map((entry, at) => ({ ...entry, at, urgent: Math.min(STATUS_SECTIONS.length, ...workspacesForProject(workspaces, entry.project.id).map((w) => urgency(sessionsForWorkspace(sessions, w)))) }))
@@ -269,7 +269,7 @@ export function useSessionFolders(): { hostId: string; folders: Sdk.SessionFolde
   const remembered = usePerchStore((s) => s.cliAgentBySession);
   const review = usePerchStore((s) => (hostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[hostId])?.includes("git.status") === true);
   const needIds = new Set(needsYou(useAttention((s) => s.events)).map((event) => event.sessionId));
-  const nav = { sessions, sessionId, activeHostId: hostId, activeProject };
+  const nav = { sessions, sessionId, activeHostId: hostId, activeProject, workspaceProjects: registered };
   const active = effectiveActiveProject(nav);
   const info = (session: SessionSummary): Sdk.SessionInfo => {
     const section = sectionOf(session, needIds, null);

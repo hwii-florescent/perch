@@ -8,7 +8,7 @@ import { takeClosedTab } from "./closedTabs";
 import { useFileTabs } from "./fileTabs";
 import { lastWorkspaceSession } from "./surfaceSync";
 import { usePerchStore, type WorkspaceRecord } from "./store";
-import { isChatsProject } from "./terminalScope";
+import { isQuickchatProject } from "./terminalScope";
 import type { WorkspaceProject } from "./store";
 
 /** A project's live workspaces: pinned first, then active, then most recent. */
@@ -22,7 +22,7 @@ export function workspacesForProject(workspaces: WorkspaceRecord[], projectId: s
     });
 }
 
-export { isChatsProject };
+export { isQuickchatProject };
 
 export function sessionsForWorkspace(sessions: SessionSummary[], workspace: WorkspaceRecord): SessionSummary[] {
   return sessions
@@ -61,14 +61,14 @@ function favoritesThenRecent(a: WorkspaceProject, b: WorkspaceProject): number {
 }
 
 /** The active host's workspaces in the sidebar's order: favourite projects first,
- * then by recent activity, then Quickchat (the Chats workspace) last, so it is one more
+ * then by recent activity, then Quickchat last, so it is one more
  * stop for the workspace keys without renumbering the projects. Hidden worktrees left out.
  * ponytail: a worktree nested under another renders under it in the sidebar
  * but sorts flat here; port the sidebar's parent grouping if that matters. */
 export function orderedNests(): WorkspaceRecord[] {
   const state = usePerchStore.getState();
   const hostProjects = state.workspaceProjects.filter((project) => project.hostId === state.activeHostId);
-  return [...hostProjects.filter((project) => !isChatsProject(project)).sort(favoritesThenRecent), ...hostProjects.filter(isChatsProject)]
+  return [...hostProjects.filter((project) => !isQuickchatProject(project)).sort(favoritesThenRecent), ...hostProjects.filter(isQuickchatProject)]
     .flatMap((project) => workspacesForProject(state.workspaces, project.id).filter((workspace) => !workspace.hidden));
 }
 
@@ -90,10 +90,10 @@ export function jumpToNest(n: number): void {
   if (nest) navigateToWorkspace(nest.id);
 }
 
-/** A new chat in Chats (the Scratchpad): its start picker, or the empty-workspace agent. */
-export function newScratchpad(): void {
+/** A new chat in Quickchat: its start picker, or the empty-workspace agent. */
+export function newQuickchat(): void {
   const state = usePerchStore.getState();
-  const chats = state.workspaceProjects.find((project) => project.hostId === state.activeHostId && isChatsProject(project));
+  const chats = state.workspaceProjects.find((project) => project.hostId === state.activeHostId && isQuickchatProject(project));
   if (!chats) return;
   const workspace = workspacesForProject(state.workspaces, chats.id)[0];
   if (workspace) state.focusWorkspace(workspace.id);
@@ -111,12 +111,5 @@ export function reopenClosedTab(): void {
   if (!tab) return;
   if (tab.workspaceId && tab.workspaceId !== state.activeWorkspaceId) state.focusWorkspace(tab.workspaceId);
   if (tab.kind === "file") useFileTabs.getState().open(tab.workspaceId, tab.path, tab.review ? "review" : tab.browser ? "browser" : undefined, tab.scope);
-  else {
-    // Scratchpad executes in HOME, but new sessions are requested by its
-    // listed workspace path, not by the execution directory.
-    const workspace = state.workspaces.find((workspace) => workspace.id === tab.workspaceId);
-    const project = state.workspaceProjects.find((project) => project.id === workspace?.projectId);
-    const cwd = workspace && project && isChatsProject(project) ? workspace.path : tab.cwd;
-    state.createSessionOnHost(tab.hostId, cwd, tab.providerId);
-  }
+  else state.createSessionOnHost(tab.hostId, tab.cwd, tab.providerId);
 }

@@ -130,21 +130,7 @@ export default function TabBar() {
     /** A session's tab. `entry` is the id it stands for in the strip (a folded stack's lead, which a drag moves). */
     function sessionTab(tab, separated, entry = tab.id, stack) {
         const { state } = tab;
-        return (renamingId === tab.id ? (_jsx("input", {
-            ref: renameInputRef,
-            type: "text",
-            className: "w-40 shrink-0 rounded-ui bg-surface-0 px-2 py-1 text-[0.8rem] leading-[1.2] text-fg [font-family:inherit] focus:[outline:1px_solid_var(--accent)]",
-            "data-testid": "rename-input",
-            value: renameValue,
-            onChange: (e) => setRenameValue(e.target.value),
-            onBlur: commitRename,
-            onKeyDown: (e) => {
-                if (e.key === "Enter")
-                    commitRename();
-                if (e.key === "Escape")
-                    setRenamingId(null);
-            }
-        }, tab.id)) : (_jsxs("span", {
+        return (_jsxs("span", {
             className: cn(TAB_SLOT, stack && !stack.open && "tab-bar__stack-edge rounded-ui [box-shadow:3px_-3px_0_-1px_var(--overlay-0)]", 
             // An open stack: one quiet band under its members, bridging the strip's gap between them.
             stack?.open && "tab-bar__stack-member bg-surface-0", stack?.open && (stack.first ? "rounded-l-ui" : "-ml-[3px] pl-[3px]"), stack?.open && stack.last && "rounded-r-ui"),
@@ -165,8 +151,8 @@ export default function TabBar() {
                         rename: () => { setRenamingId(tab.id); setRenameValue(tab.title || ""); },
                         menu: (x, y) => openMenu(tab.id, Number(x), Number(y)),
                     },
-                    children: _jsxs("button", {
-                        type: "button",
+                    children: _jsxs(TabBody, {
+                        renaming: renamingId === tab.id,
                         className: cn("tab-bar__tab", segmentClass(), TAB, TAB_SHAPE(tabShape), tabStateClass[state], state === "focused" && "tab-bar__tab--active", tab.id === draggingId && "opacity-40"),
                         "data-pane-state": state,
                         "data-testid": `tab-${tab.id}`,
@@ -190,10 +176,28 @@ export default function TabBar() {
                                     size: 14
                                 })
                             }),
-                            _jsx("span", {
+                            renamingId === tab.id ? (_jsx("input", {
+                                ref: renameInputRef,
+                                type: "text",
+                                className: "min-w-0 flex-1 bg-transparent p-0 text-inherit [font:inherit] outline-none",
+                                "data-testid": "rename-input",
+                                "aria-label": "Session name",
+                                value: renameValue,
+                                onChange: (e) => setRenameValue(e.target.value),
+                                onBlur: commitRename,
+                                onPointerDown: (e) => e.stopPropagation(),
+                                onClick: (e) => e.stopPropagation(),
+                                onKeyDown: (e) => {
+                                    e.stopPropagation();
+                                    if (e.key === "Enter")
+                                        commitRename();
+                                    if (e.key === "Escape")
+                                        setRenamingId(null);
+                                }
+                            })) : (_jsx("span", {
                                 className: "truncate",
                                 children: tab.label
-                            })
+                            }))
                         ]
                     })
                 }),
@@ -217,7 +221,7 @@ export default function TabBar() {
                     children: _jsx(TabCloseIcon, {})
                 })
             ]
-        }, tab.id)));
+        }, tab.id));
     }
     return (_jsxs("div", {
         ref: stripRef,
@@ -293,6 +297,24 @@ export default function TabBar() {
     }));
 }
 /** A file's, review's, browser page's or mod's tab: its name, a ● while a file has unsaved changes, and ×. */
+/** A session tab's body: a button, or while it is renamed the same box holding the name field
+ * (a field inside a button would lose its keys and clicks to the button). */
+function TabBody({ renaming, children, onPointerDown, onClick, onDoubleClick, ...rest }) {
+    if (!renaming)
+        return _jsx("button", {
+            type: "button",
+            ...rest,
+            onPointerDown: onPointerDown,
+            onClick: onClick,
+            onDoubleClick: onDoubleClick,
+            children: children
+        });
+    const { type: _type, ...box } = rest;
+    return _jsx("div", {
+        ...box,
+        children: children
+    });
+}
 function ResourceTab({ tab, tabShape, dragging, separated }) {
     const { id, state, kind } = tab;
     const review = kind === "review";

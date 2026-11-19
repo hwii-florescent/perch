@@ -69,6 +69,7 @@ use std::time::{Duration, Instant};
 
 mod browsing;
 mod context_bridge;
+mod links;
 mod review;
 pub use browsing::is_browser_tab;
 pub use context_bridge::bridge_available;
@@ -224,6 +225,8 @@ pub struct Workspace {
     panes: HashMap<String, Pane>,
     /// A split that was asked for and waits for its new terminal to be opened.
     pending_split: Option<(Side, Instant)>,
+    /// A `perch://` link whose session the core has not listed yet, waiting for it (`links.rs`).
+    link_wait: Option<Task<()>>,
     /// Sessions whose tab the person closed here without ending them: not opened again with their
     /// lead until they are picked.
     put_away: HashSet<String>,
@@ -302,6 +305,8 @@ pub struct Workspace {
     /// The in-flow mod whose own field has the keyboard (the sidebar's Add project form): the
     /// window leaves the keyboard there and types into it rather than running plain keys.
     keyboard_held: Option<(String, u64)>,
+    /// What had the window's focus when the hold was last looked at (`None`: nothing, or no hold).
+    held_focus: Option<gpui::WeakFocusHandle>,
     /// A press on a tab of the strip, which may become a drag (`tab.beginDrag`).
     drag: Option<TabDrag>,
     /// A press a mod follows (`pointer.follow`): its token while the press lasts, and the
@@ -389,6 +394,7 @@ impl Workspace {
             parked: HashMap::new(),
             panes: HashMap::new(),
             pending_split: None,
+            link_wait: None,
             put_away: HashSet::new(),
             ended: HashSet::new(),
             shared_base: HashMap::new(),
@@ -422,6 +428,7 @@ impl Workspace {
             worktree_request: Value::Null,
             worktree_requests: 0,
             keyboard_held: None,
+            held_focus: None,
             drag: None,
             follow: None,
             pointer: Value::Null,
@@ -1191,6 +1198,35 @@ impl Workspace {
         }
     }
 
+    /// While a field of an in-flow mod holds the keyboard, a move of the window's focus (a press
+    /// on a terminal) makes that screen render again: nothing it reads changed, and only a render
+    /// sees the keyboard gone, blurs its field and lets go (`screen.js`), so a rename ends.
+    fn look_again_when_focus_moves(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((key, _)) = &self.keyboard_held else {
+            self.held_focus = None;
+            return;
+        };
+        let focus = window.focused(cx);
+        let same = match (&self.held_focus, &focus) {
+            (Some(held), Some(focus)) => held == focus,
+            (None, None) => true,
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        self.held_focus = focus.map(|f| f.downgrade());
+        if let Some(view) = self
+            .screens
+            .inflow(key)
+            .and_then(|v| v.read(cx).script_view(cx))
+        {
+            window.defer(cx, move |_, cx| {
+                view.update(cx, |view, cx| view.refresh(cx))
+            });
+        }
+    }
+
     /// Whether a field of an in-flow mod holds the keyboard.
     pub fn keyboard_held(&self) -> bool {
         self.keyboard_held.is_some()
@@ -1902,12 +1938,11 @@ impl Workspace {
             .iter()
             .filter(|p| p.host_id == workspace.host_id)
             .collect();
-        let own = projects
-            .iter()
-            .find(|p| p.id == workspace.project_id && p.path == workspace.path)
+        let project = projects.iter().find(|p| p.id == workspace.project_id);
+        let own = project
+            .filter(|p| p.path == workspace.path)
             .map(|p| p.name.clone());
-        // Quickchat sessions run in the home folder, so that is what it shows.
-        let quickchat = workspace.path.ends_with("/.perch/scratch");
+        let quickchat = project.is_some_and(|p| p.quickchat);
         let name = if quickchat {
             "Quickchat".to_string()
         } else {
@@ -1924,7 +1959,11 @@ impl Workspace {
         let mut targets = vec![json!({
             "key": workspace.path, "label": format!("{name} (current folder)"), "name": name, "path": path,
         })];
-        for p in projects.iter().filter(|p| p.path != workspace.path) {
+        // A Quickchat is no project: it is offered as "No project" below, never as a folder.
+        for p in projects
+            .iter()
+            .filter(|p| p.path != workspace.path && !p.quickchat)
+        {
             let label = Some(p.name.clone())
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| basename(&p.path));
@@ -3317,7 +3356,7 @@ impl Workspace {
                     })
                 });
             }
-            // As the web's `newScratchpad`: the Quickchat project's start page, which picks the agent.
+            // As the web's `newQuickchat`: the Quickchat project's start page, which picks the agent.
             "quickchat.new" | "nests.scratchpad" => {
                 let target = self.sidebar.update(cx, |sidebar, cx| {
                     sidebar.run_action("nests.scratchpad", cx);
@@ -5098,6 +5137,7 @@ impl gpui::Render for Workspace {
         let wanted = self.inflow_wanted(cx);
         self.let_go_of_stale_hold(&wanted, cx);
         self.screens.place(wanted.clone(), window, cx);
+        self.look_again_when_focus_moves(window, cx);
         self.browser_engine_frame(&wanted, window, cx);
         // A terminal that attaches takes the keyboard when it first draws; the tab that has it in
         // the layout keeps it. A modal screen has the keyboard while it is up.

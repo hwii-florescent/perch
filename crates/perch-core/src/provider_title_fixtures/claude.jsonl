@@ -1,0 +1,8 @@
+{"type":"last-prompt","leafUuid":"32ddc1da-4e7d-4e76-aa0e-384d2e251946","sessionId":"0875eaf4-4f52-4d77-a897-a8bc95223438"}
+{"type":"mode","mode":"normal","sessionId":"0875eaf4-4f52-4d77-a897-a8bc95223438"}
+{"parentUuid":"32ddc1da-4e7d-4e76-aa0e-384d2e251946","isSidechain":false,"type":"user","message":{"role":"user","content":"/ak-debug '/Users/someone/shot.png'"},"uuid":"87e31810-f832-47cf-b9f1-5b4ce2499b3b","timestamp":"2026-11-19T00:24:46.854Z","cwd":"/tmp/project","sessionId":"0875eaf4-4f52-4d77-a897-a8bc95223438","version":"2.1.327"}
+{"type":"ai-title","aiTitle":"Debug login screenshot","sessionId":"0875eaf4-4f52-4d77-a897-a8bc95223438"}
+{"parentUuid":"87e31810-f832-47cf-b9f1-5b4ce2499b3b","isSidechain":false,"message":{"model":"claude-haiku-4-5","id":"msg_01","type":"message","role":"assistant","content":[{"type":"text","text":"Looking at it."}]},"type":"assistant","uuid":"1ae00d5b-49f6-43e2-a796-00b68ea6bc65","timestamp":"2026-11-19T00:24:48.817Z","sessionId":"0875eaf4-4f52-4d77-a897-a8bc95223438"}
+{"type":"last-prompt","leafUuid":"1ae00d5b-49f6-43e2-a796-00b68ea6bc65","sessionId":"0875eaf4-4f52-4d77-a897-a8bc95223438"}
+{"type":"ai-title","aiTitle":"Mobile route subsession layout","sessionId":"0875eaf4-4f52-4d77-a897-a8bc95223438"}
+{"type":"permission-mode","permissionMode":"default","sessionId":"0875eaf4-4f52-4d77-a897-a8bc95223438"}

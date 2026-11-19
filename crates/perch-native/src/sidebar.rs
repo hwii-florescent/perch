@@ -1334,8 +1334,9 @@ fn needing(events: &[AttentionEvent]) -> HashSet<String> {
         .collect()
 }
 
+/// Quickchat: the project its core keeps at that computer's home folder.
 fn is_chats(project: &ProjectSummary) -> bool {
-    project.path.ends_with("/.perch/scratch")
+    project.quickchat
 }
 
 fn project_name(project: &ProjectSummary) -> String {
@@ -1714,8 +1715,8 @@ mod tests {
             LOCAL,
             vec![
                 project("a", LOCAL, "alpha"),
-                json!({"id": "c", "hostId": LOCAL, "name": "Chats", "path": "/home/me/.perch/scratch",
-                       "favorite": false, "createdAt": 0, "updatedAt": 0}),
+                json!({"id": "c", "hostId": LOCAL, "name": "Quickchat", "path": "/home/me",
+                       "favorite": false, "createdAt": 0, "updatedAt": 0, "quickchat": true}),
             ],
         ));
         let shell = |id, project| session(id, LOCAL, project, json!({"cliProviderId": "terminal"}));

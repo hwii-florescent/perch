@@ -75,14 +75,17 @@ impl Render for TooltipLabel {
             // between the two, and it belongs to the content because the
             // positioner has no spacing of its own.
             .m(spacing.xs)
-            .px(spacing.sm)
-            .py(spacing.xxs)
+            // PERCH: small and quiet: muted text in a tight box with a hairline
+            // border, no shadow, so a label never competes with what it names.
+            .px(gpui::px(6.))
+            .py(gpui::px(2.))
             .bg(colors.surface)
-            .text_color(colors.surface_foreground)
+            .text_color(colors.muted_foreground)
             .border_1()
-            .border_color(colors.border)
-            .rounded(radius.md)
-            .text_sm()
+            .border_color(colors.border.opacity(0.6))
+            .rounded(radius.sm)
+            .text_xs()
+            .max_w(gpui::px(420.))
             .child(self.text.clone())
     }
 }
@@ -100,9 +103,32 @@ where
         return element;
     };
 
+    // PERCH: a tooltip that repeats the element's own text shows only while
+    // that text is cut short. Prepaint runs inside the element's text style, so
+    // the text is measured in the font it is drawn in, against its box.
+    let cut = behavior.tooltip_overflow.then(|| Rc::new(Cell::new(false)));
+    let element = match &cut {
+        Some(cut) => {
+            let (cut, text) = (Rc::clone(cut), text.clone());
+            element.on_prepaint(move |bounds, window, _| {
+                let style = window.text_style();
+                let size = style.font_size.to_pixels(window.rem_size());
+                let width = window
+                    .text_system()
+                    .shape_line(text.clone(), size, &[style.to_run(text.len())], None)
+                    .width;
+                cut.set(width > bounds.size.width + gpui::px(0.5));
+            })
+        }
+        None => element,
+    };
+
     // HERDR: embedded mods have an AppWindow root, so use GPUI's window-owned tooltip.
     if window.root::<ShellRoot>().flatten().is_none() {
-        return element.tooltip(move |_, cx| cx.new(|_| TooltipLabel { text: text.clone() }).into());
+        return element.tooltip(move |_, cx| match &cut {
+            Some(cut) if !cut.get() => cx.new(|_| gpui::Empty).into(),
+            _ => cx.new(|_| TooltipLabel { text: text.clone() }).into(),
+        });
     }
 
     // The trigger's own box, written during prepaint and read when the pointer
@@ -121,7 +147,7 @@ where
                 // script one — and one the window announces loudly elsewhere.
                 return;
             };
-            if !*hovered {
+            if !*hovered || cut.as_ref().is_some_and(|cut| !cut.get()) {
                 overlay.update(cx, |overlay, cx| overlay.request_hide(window, cx));
                 return;
             }

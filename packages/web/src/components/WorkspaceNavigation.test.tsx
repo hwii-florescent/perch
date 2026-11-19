@@ -331,12 +331,12 @@ it("all catalog harnesses have bundled artwork; custom and unknown harnesses hav
 });
 
 it("Quickchat is the last nest: the nest keys reach it, wrap past it, and leave project numbers alone", () => {
-  const chats = { ...workspace, id: "chats", projectId: "chats-project", path: "/home/.perch/scratch", name: "Quickchat" };
+  const chats = { ...workspace, id: "chats", projectId: "chats-project", path: "/home", name: "Quickchat" };
   const chat = (id: string, createdAt: number): SessionSummary => ({ ...session, id, workspaceId: "chats", cwd: chats.path, createdAt });
   usePerchStore.setState({
     workspaces: [workspace, chats], activeWorkspaceId: "main", sessionId: "project-chat",
     sessions: [{ ...session, id: "project-chat", workspaceId: "main", cwd: workspace.path }, chat("old", 1), chat("mid", 2), chat("new", 3)],
-    workspaceProjects: [...usePerchStore.getState().workspaceProjects, { id: "chats-project", hostId: "remote", name: "Quickchat", path: chats.path, favorite: false, createdAt: 1, updatedAt: 1 }],
+    workspaceProjects: [...usePerchStore.getState().workspaceProjects, { id: "chats-project", hostId: "remote", name: "Quickchat", path: chats.path, favorite: false, createdAt: 1, updatedAt: 1, quickchat: true }],
   });
   expect(orderedNests().map(({ id }) => id)).toEqual(["main", "chats"]);
   jumpToNest(1);
@@ -411,4 +411,33 @@ describe("stacks in the tab strip", () => {
     drop("tree\na.ts", 0);
     expect(entries()).toEqual(["tree\na.ts", "lead", "kid1", "kid2", "term"]);
   });
+
+  it("renames a stack member and a folded stack's tab in place, keeping the stack", () => {
+    for (const fold of [false, true]) {
+      if (fold) click(get("tab-stack-count-lead"));
+      const id = fold ? "lead" : "kid1";
+      act(() => get(`tab-${id}`).dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+      const input = get("rename-input") as HTMLInputElement;
+      expect(input.closest("[data-tab-entry]")?.getAttribute("data-tab-entry")).toBe(id);
+      expect(input.closest("[data-stack]")?.getAttribute("data-stack")).toBe("lead");
+      expect(get("tab-stack-count-lead")).toBeTruthy();
+      act(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+      expect(host.querySelector('[data-testid="rename-input"]')).toBeNull();
+    }
+  });
+});
+
+it("double-click renames a session tab in place: the tab keeps its box, icon and close button", () => {
+  usePerchStore.setState({ sessionId: "session" });
+  render(<TabBar />);
+  const tab = get("tab-session");
+  const box = tab.className;
+  act(() => tab.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+  const input = get("rename-input") as HTMLInputElement;
+  const body = input.parentElement!;
+  expect(body.tagName).toBe("DIV");
+  expect(body.className).toBe(box);
+  expect(body.querySelector("svg")).not.toBeNull();
+  expect(get("tab-close-session")).toBeTruthy();
+  expect(input.value).toBe("My agent");
 });

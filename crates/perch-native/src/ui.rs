@@ -162,7 +162,7 @@ impl Sidebar {
         let provider_id = row.and_then(|s| s.provider_id.clone()).or(provider);
         let blank = provider_id.is_none() && row.is_some_and(|s| !s.cli_started);
         self.notice = None;
-        self.nav.selected = Some((host_id.clone(), session_id.clone()));
+        self.nav.select(&self.model, &host_id, &session_id);
         self.nav.workspace = None;
         self.send(Command::View(session_id.clone()));
         cx.emit(OpenSession {

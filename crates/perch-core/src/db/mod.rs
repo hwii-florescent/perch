@@ -133,6 +133,21 @@ impl HistoryDb {
         Ok(())
     }
 
+    /// Keep a consistent copy of the database beside it, named with `suffix`, before a data
+    /// change that cannot be undone. Never over an earlier copy; an in-memory database has none.
+    pub fn back_up_once(&self, suffix: &str) -> anyhow::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let path: String = conn.query_row("PRAGMA database_list", [], |row| row.get(2))?;
+        if path.is_empty() {
+            return Ok(());
+        }
+        let backup = format!("{path}{suffix}");
+        if !Path::new(&backup).exists() {
+            conn.execute("VACUUM INTO ?1", params![backup])?;
+        }
+        Ok(())
+    }
+
     pub fn limits(&self) -> crate::sub_sessions::RunLimits {
         *self.limits.lock().unwrap()
     }
@@ -748,6 +763,12 @@ impl HistoryDb {
         // title rather than drifting to whatever was typed most recently.
         if !existing_session_columns.contains("cli_title") {
             conn.execute("ALTER TABLE sessions ADD COLUMN cli_title TEXT", [])?;
+        }
+        // The title the session's own provider gave it (Claude Code's `ai-title`, Codex's
+        // `thread_name`, OMP's header title): see `provider_title.rs`. Unlike `cli_title` it
+        // follows the provider's renames; a Perch rename (`title_override`) still outranks it.
+        if !existing_session_columns.contains("provider_title") {
+            conn.execute("ALTER TABLE sessions ADD COLUMN provider_title TEXT", [])?;
         }
         if !existing_session_columns.contains("project_id") {
             conn.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT", [])?;

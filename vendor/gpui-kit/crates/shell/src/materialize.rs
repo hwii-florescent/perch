@@ -547,6 +547,9 @@ struct Behavior {
     /// which is the one place a retained script closure would put the VM back
     /// on the frame path.
     tooltip: Option<SharedString>,
+    /// PERCH: the tooltip repeats the element's own text, so it shows only
+    /// while that text is cut short (`tooltip(text, true)`).
+    tooltip_overflow: bool,
     /// How long the pointer rests on a `HoverCard`'s trigger before it appears,
     /// and how long it may leave before it goes away.
     open_delay: Option<Duration>,
@@ -3757,6 +3760,9 @@ fn apply_behavior(behavior: &mut Behavior, name: &str, args: &[Bridged]) {
                 .first()
                 .and_then(|value| value.as_str().ok())
                 .map(SharedString::from);
+            behavior.tooltip_overflow = args
+                .get(1)
+                .is_some_and(|value| matches!(value, Bridged::Bool(true)));
         }
         "open_delay" => behavior.open_delay = milliseconds(args),
         "close_delay" => behavior.close_delay = milliseconds(args),

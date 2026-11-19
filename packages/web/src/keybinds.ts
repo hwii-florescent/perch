@@ -15,7 +15,7 @@ import { usePerchStore, effectiveActiveProject, effectiveWorkspace } from "./sto
 import { activateTab, currentTabs } from "./workspaceTabs";
 import { getPaneController as getDockviewController, splitActiveTab } from "./tiledPanes";
 import { useFileTabs } from "./fileTabs";
-import { jumpToNest, newScratchpad, stepNest } from "./workspaceNav";
+import { jumpToNest, newQuickchat, stepNest } from "./workspaceNav";
 import { requestCloseSession } from "./closeGuard";
 import { requestAddProject, requestNewSession, requestNewTab, withSidebar } from "./appEvents";
 import { browserOwner, closeBrowserById, useDrawerBrowsers } from "./drawerBrowsers";
@@ -144,7 +144,7 @@ for (let i = 1; i <= 9; i++) {
 }
 shortcut("nests.new", "nests", "mod+n", "New workspace (worktree)", () => openWorktreeMenuForActiveProject(true));
 shortcut("nests.addBirdhouse", "nests", "mod+o", "Add project", () => requestAddProject());
-shortcut("nests.scratchpad", "nests", ["cmd+shift+n", null], "New quickchat", () => newScratchpad());
+shortcut("nests.scratchpad", "nests", ["cmd+shift+n", null], "New quickchat", () => newQuickchat());
 
 // Splits and panes (iTerm2/Ghostty)
 shortcut("panes.splitRight", "panes", "mod+d", "Split right", () => splitActiveTab("right"));

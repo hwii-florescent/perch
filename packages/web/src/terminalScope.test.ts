@@ -4,7 +4,7 @@ import { dirScopeId, scopeSessionId, terminalScopeId, workspaceRecord } from "./
 
 const state = {
   workspaces: [
-    { id: "w-chats", projectId: "p-chats", hostId: "local", path: "/home/u/.perch/scratch" },
+    { id: "w-chats", projectId: "p-chats", hostId: "local", path: "/home/u" },
     { id: "w-proj", projectId: "p-proj", hostId: "local", path: "/work/proj" },
   ],
   sessions: [] as SessionSummary[],
