@@ -559,7 +559,8 @@ fn stacks_among_other_tabs(rig: &mut Rig) {
     let last = rig.strip().last().cloned().unwrap();
     let p4 = rig.center("tab:p4");
     let end = rig.center(&format!("tab:{last}"));
-    rig.drag(p4, &[(p4.0 + 10., p4.1)], (end.0 + 30., p4.1));
+    // Past the last tab's middle, still inside the strip (which scrolls: its last tab runs past its edge).
+    rig.drag(p4, &[(p4.0 + 10., p4.1)], (end.0 + 15., p4.1));
     let strip = agrees(rig, false, "a sub-session dragged away");
     let lead = strip.iter().position(|id| id == "leader").unwrap();
     assert_eq!(&strip[lead..lead + 3], strings(&["leader", "p7", "p4"]));

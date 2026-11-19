@@ -385,6 +385,27 @@ describe("stacks in the tab strip", () => {
     expect(rowIds()).toEqual(tabIds());
   });
 
+  it("marks a stack's members with one bracket and no fill of its own, the accent only while a member has the keyboard", () => {
+    const slot = (id: string) => host.querySelector<HTMLElement>(`[data-tab-entry="${id}"]`)!;
+    const mark = (id: string) => slot(id).querySelector<HTMLElement>('[data-testid="tab-stack-mark"]');
+    const marks = () => ["lead", "kid1", "kid2"].map((id) => mark(id)!.className);
+    // Open: every member carries the bracket, its ends turned up on the first and last; an ordinary tab has none.
+    expect(marks().every((name) => /border-b\b/.test(name))).toBe(true);
+    expect(marks().map((name) => [/border-l\b/.test(name), /border-r\b/.test(name)])).toEqual([[true, false], [false, false], [false, true]]);
+    expect(mark("term")).toBeNull();
+    // The focused lead makes it the accent; only the focused tab is filled, the stack's slots never are.
+    expect(marks().every((name) => name.includes("border-accent"))).toBe(true);
+    for (const id of ["lead", "kid1", "kid2", "term"]) expect(slot(id).className).not.toMatch(/\bbg-|box-shadow/);
+    // Another tab focused: the bracket is muted, and separators stand between the members as between any tabs.
+    act(() => usePerchStore.setState({ sessionId: "term" }));
+    expect(marks().every((name) => name.includes("border-overlay-1") && !name.includes("border-accent"))).toBe(true);
+    expect(["kid1", "kid2"].map((id) => !!slot(id).querySelector('[data-testid="tab-separator"]'))).toEqual([true, true]);
+    // Folded: the one tab carries the whole bracket; the count is quiet text, no fill at rest.
+    click(get("tab-stack-count-lead"));
+    expect(mark("lead")!.className).toMatch(/border-l\b.*border-r\b|border-r\b.*border-l\b/);
+    expect(get("tab-stack-count-lead").className).toContain("bg-transparent");
+  });
+
   it("drags a folded or an open stack as one, never into a stack, and keeps a sub-session in its own", () => {
     click(get("tab-stack-count-lead"));
     expect(drawn()).toEqual(["lead", "term"]);
