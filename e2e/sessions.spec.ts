@@ -1,8 +1,8 @@
 /**
  * sessions.spec.ts — session lifecycle:
  *   S1 — "New session" opens a picker of listed projects plus "No project",
- *         with no folder browser; "No project" starts the session in Chats,
- *         a flat chat list after the projects with no scratch-folder row.
+ *         with no folder browser; "No project" starts the session in Quickchat
+ *         (the home folder), a flat chat list after the projects.
  *   S4 — Close in a row's … menu deletes the session, and so does exiting its terminal:
  *         it leaves the sidebar for good.
  *   S5 — a project's "Close all sessions" and "Remove project" delete its
@@ -44,7 +44,7 @@ async function open(page: Page): Promise<void> {
 }
 
 test.describe("Session lifecycle", () => {
-  test("S1. New session offers projects and Chats, never a folder browser", async ({ page }) => {
+  test("S1. New session offers projects and Quickchat, never a folder browser", async ({ page }) => {
     await open(page);
     await page.getByTestId("new-session-local").click();
     await expect(page.getByTestId("new-session-dialog")).toBeVisible();
@@ -66,7 +66,7 @@ test.describe("Session lifecycle", () => {
     };
     await checkCwd();
 
-    // Reopen requests the Scratchpad workspace, not an unlisted HOME project.
+    // Reopen starts again in Quickchat, and home is never listed as an ordinary project.
     await closeFromRowMenu(page, id);
     await expect(chats.getByTestId(`workspace-session-${id}`)).toHaveCount(0);
     await page.keyboard.press(process.platform === "darwin" ? "Meta+Shift+t" : "Control+Shift+t");

@@ -59,7 +59,7 @@ fn state() -> State {
     let project = json!({"id": "p", "hostId": "local", "name": "Work", "path": "/work",
         "favorite": false, "createdAt": 0, "updatedAt": 0});
     let chats = json!({"id": "chats", "hostId": "local", "name": "Quickchat",
-        "path": "/home/dev/.perch/scratch", "favorite": false, "createdAt": 0, "updatedAt": 0});
+        "path": "/home/dev", "favorite": false, "createdAt": 0, "updatedAt": 0, "quickchat": true});
     let mut state = State::default();
     state.connect();
     state.apply(&message(json!({
@@ -71,7 +71,7 @@ fn state() -> State {
     state.apply(&message(json!({
         "type": "workspace.snapshot", "requestId": "r", "hostId": "local", "snapshotEpoch": "e",
         "snapshotRevision": 1, "projects": [project, chats], "workspaces": [{"id": "wc",
-        "projectId": "chats", "hostId": "local", "path": "/home/dev/.perch/scratch", "name": "main",
+        "projectId": "chats", "hostId": "local", "path": "/home/dev", "name": "main",
         "dirty": false, "state": "active", "createdAt": 0, "updatedAt": 0, "pinned": false}]})));
     let sessions: Vec<Value> = ["alpha", "bravo"]
         .iter()
@@ -1073,7 +1073,7 @@ fn new_session(rig: &mut Rig) {
     let props = rig
         .ws(|ws, _, _| ws.screen_props("new-session").cloned())
         .unwrap();
-    assert_eq!(props["fixedCwd"], "/home/dev/.perch/scratch");
+    assert_eq!(props["fixedCwd"], "/home/dev");
     // With a workspace, the strip's extras follow the agents, as the web's "+" menu.
     let extras: Vec<_> = props["extras"]
         .as_array()

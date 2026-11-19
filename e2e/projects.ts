@@ -3,7 +3,7 @@ import { choose, optionStates } from "./select";
 import { realpathSync } from "node:fs";
 
 /** Start a CLI session from the start panel: pick where (a project whose name contains `where`, else the
- * Scratchpad), then the agent (default: the first button, which is the host's default agent). */
+ * Quickchat), then the agent (default: the first button, which is the host's default agent). */
 export async function startFromPanel(page: Page, opts: { agent?: string; where?: string } = {}): Promise<void> {
   const target = page.getByTestId("cli-start-target");
   if (await target.count()) {

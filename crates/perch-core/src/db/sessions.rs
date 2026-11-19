@@ -187,8 +187,8 @@ impl HistoryDb {
         self.create_session_on_host(id, cwd, "local")
     }
 
-    /// Create a session whose execution directory can differ from its workspace
-    /// (Scratchpad runs in HOME but keeps its own navigation/file scope).
+    /// Create a session filed under `workspace` whose execution directory may
+    /// differ from the workspace's own folder.
     pub fn create_session_in_workspace(
         &self,
         id: &str,

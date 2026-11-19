@@ -600,3 +600,23 @@ describe("deleteSession (tab close)", () => {
     expect(sent.at(-1)).toMatchObject({ sessionId: "B" });
   });
 });
+
+describe("Quickchat", () => {
+  it("keeps the active project: a new quickchat and its chat stay on Quickchat, not the newest project", async () => {
+    const { newQuickchat } = await import("./workspaceNav");
+    const project = (id: string, path: string, quickchat = false) => ({ id, hostId: "local", name: id, path, favorite: false, createdAt: 1, updatedAt: 1, quickchat });
+    const workspace = (id: string, projectId: string, path: string) => ({ id, projectId, hostId: "local", path, name: id, dirty: false, state: "active" as const, createdAt: 1, updatedAt: 1 });
+    usePerchStore.setState({
+      connected: true, activeHostId: "local", sessionId: null, activeWorkspaceId: null,
+      workspaceProjects: [project("p", "/work/p"), project("q", "/home/me", true)],
+      workspaces: [workspace("wp", "p", "/work/p"), workspace("wq", "q", "/home/me")],
+      // The project's chat is the newest, so a lost pin would fall back to it.
+      sessions: [session({ id: "chat", cwd: "/home/me", workspaceId: "wq", projectId: "q", createdAt: 1 }), session({ id: "work", cwd: "/work/p", workspaceId: "wp", projectId: "p", createdAt: 9 })],
+    });
+    newQuickchat();
+    expect(effectiveActiveProject(usePerchStore.getState())).toEqual({ hostId: "local", cwd: "/home/me" });
+    usePerchStore.getState().switchSession("chat");
+    expect(effectiveActiveProject(usePerchStore.getState())).toEqual({ hostId: "local", cwd: "/home/me" });
+    expect(usePerchStore.getState().activeWorkspaceId).toBe("wq");
+  });
+});

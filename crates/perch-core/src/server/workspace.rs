@@ -48,8 +48,9 @@ pub(super) fn publish_project_pair(
     );
 }
 
-fn project_to_wire(row: crate::db::ProjectRow) -> ProjectSummary {
+pub(super) fn project_to_wire(row: crate::db::ProjectRow) -> ProjectSummary {
     ProjectSummary {
+        quickchat: super::session::is_quickchat_project(&row),
         id: row.id,
         host_id: row.host_id,
         name: row.name,

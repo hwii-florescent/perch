@@ -325,12 +325,12 @@ it("all catalog harnesses have bundled artwork; custom and unknown harnesses hav
 });
 
 it("Quickchat is the last nest: the nest keys reach it, wrap past it, and leave project numbers alone", () => {
-  const chats = { ...workspace, id: "chats", projectId: "chats-project", path: "/home/.perch/scratch", name: "Quickchat" };
+  const chats = { ...workspace, id: "chats", projectId: "chats-project", path: "/home", name: "Quickchat" };
   const chat = (id: string, createdAt: number): SessionSummary => ({ ...session, id, workspaceId: "chats", cwd: chats.path, createdAt });
   usePerchStore.setState({
     workspaces: [workspace, chats], activeWorkspaceId: "main", sessionId: "project-chat",
     sessions: [{ ...session, id: "project-chat", workspaceId: "main", cwd: workspace.path }, chat("old", 1), chat("mid", 2), chat("new", 3)],
-    workspaceProjects: [...usePerchStore.getState().workspaceProjects, { id: "chats-project", hostId: "remote", name: "Quickchat", path: chats.path, favorite: false, createdAt: 1, updatedAt: 1 }],
+    workspaceProjects: [...usePerchStore.getState().workspaceProjects, { id: "chats-project", hostId: "remote", name: "Quickchat", path: chats.path, favorite: false, createdAt: 1, updatedAt: 1, quickchat: true }],
   });
   expect(orderedNests().map(({ id }) => id)).toEqual(["main", "chats"]);
   jumpToNest(1);

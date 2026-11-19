@@ -70,12 +70,12 @@ it("shows the core's reason and certainty on a Needs you row, under its project"
 
 it("By status keeps each section's chats under their project, in the sidebar's project order, Quickchat last", () => {
   const other = { ...project, id: "q", name: "Other", path: "/tmp/other", updatedAt: 0 };
-  const scratch = { ...project, id: "s", name: "Chats", path: "/tmp/.perch/scratch", updatedAt: 5 };
+  const quick = { ...project, id: "s", name: "Quickchat", path: "/tmp", quickchat: true, updatedAt: 5 };
   const ow = { ...workspace, id: "ow", projectId: "q", path: other.path };
-  const sw = { ...workspace, id: "sw", projectId: "s", path: scratch.path };
-  usePerchStore.setState({ workspaceProjects: [scratch, other, project], workspaces: [workspace, ow, sw], sessions: [
+  const sw = { ...workspace, id: "sw", projectId: "s", path: quick.path };
+  usePerchStore.setState({ workspaceProjects: [quick, other, project], workspaces: [workspace, ow, sw], sessions: [
     chat("q1", { workspaceId: "ow", projectId: "q", cwd: other.path, createdAt: 9 }),
-    chat("s1", { workspaceId: "sw", projectId: "s", cwd: scratch.path, createdAt: 8 }),
+    chat("s1", { workspaceId: "sw", projectId: "s", cwd: quick.path, createdAt: 8 }),
     chat("p1", { createdAt: 1 }),
     chat("p2", { createdAt: 2 }),
   ] });
@@ -150,9 +150,9 @@ it("reads its settings again when the host says they changed elsewhere", () => {
 it.each(["project", "status", "list"])("%s always lists Quickchat terminals, regardless of Show terminals", (mode) => {
   storage.set("perch.sidebar.organize", mode);
   storage.set("perch.sidebar.showTerminals", "0");
-  const scratch = { ...project, id: "s", name: "Chats", path: "/tmp/.perch/scratch" };
-  const sw = { ...workspace, id: "sw", projectId: "s", path: scratch.path };
-  usePerchStore.setState({ workspaceProjects: [project, scratch], workspaces: [workspace, sw], sessions: [
+  const quick = { ...project, id: "s", name: "Quickchat", path: "/tmp", quickchat: true };
+  const sw = { ...workspace, id: "sw", projectId: "s", path: quick.path };
+  usePerchStore.setState({ workspaceProjects: [project, quick], workspaces: [workspace, sw], sessions: [
     chat("project-shell", { cliProviderId: "terminal", createdAt: 1 }),
     chat("project-agent", { createdAt: 2 }),
     chat("quick-shell", { workspaceId: "sw", projectId: "s", cwd: "/tmp", cliProviderId: "terminal", createdAt: 3 }),
@@ -359,11 +359,11 @@ describe("reordering", () => {
   });
 
   it("Quickchat shows newest first but writes strip order, so a first Move cannot flip the strips", () => {
-    const scratch = { ...project, id: "s", name: "Chats", path: "/tmp/.perch/scratch" };
-    const sw = { ...workspace, id: "sw", projectId: "s", path: scratch.path };
-    const qc = (id: string, createdAt: number) => chat(id, { createdAt, workspaceId: "sw", projectId: "s", cwd: scratch.path });
+    const quick = { ...project, id: "s", name: "Quickchat", path: "/tmp", quickchat: true };
+    const sw = { ...workspace, id: "sw", projectId: "s", path: quick.path };
+    const qc = (id: string, createdAt: number) => chat(id, { createdAt, workspaceId: "sw", projectId: "s", cwd: quick.path });
     storage.set("perch.sidebar.organize", "project");
-    usePerchStore.setState({ workspaceProjects: [scratch], workspaces: [sw], activeWorkspaceId: "sw", sessions: [qc("a", 1), qc("b", 2), qc("c", 3)] });
+    usePerchStore.setState({ workspaceProjects: [quick], workspaces: [sw], activeWorkspaceId: "sw", sessions: [qc("a", 1), qc("b", 2), qc("c", 3)] });
     act(() => root.render(<WorkspaceOverview />));
     const ids = () => [...get("workspace-chats")!.querySelectorAll('[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])')].map((el) => el.getAttribute("data-testid")!.replace("workspace-session-", ""));
     expect(ids()).toEqual(["c", "b", "a"]);

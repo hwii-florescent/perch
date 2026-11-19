@@ -527,7 +527,7 @@ pub fn launch_command(model: &Model, target: &NewSession, provider: &str) -> Opt
     }
     Some(Command::Launch {
         host_id: host.id.clone(),
-        // Quickchat starts in the core's own scratch folder, which the core chooses.
+        // Quickchat starts in the home folder, which the core chooses.
         cwd: (!project.quickchat).then(|| project.path.clone()),
         provider: provider.to_string(),
     })

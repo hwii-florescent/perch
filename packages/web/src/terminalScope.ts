@@ -11,10 +11,10 @@ import type { usePerchStore, WorkspaceProject, WorkspaceRecord } from "./store";
 
 type State = ReturnType<typeof usePerchStore.getState>;
 
-/** The Chats project: the scratch folder "No project" sessions are filed under
- * (`session::chats_pair`). Listed as a flat chat list after the projects. */
-export function isChatsProject(project: WorkspaceProject): boolean {
-  return project.path.endsWith("/.perch/scratch");
+/** Quickchat: the project at its core's home folder, where sessions started without a project
+ * run (`session::quickchat_pair`). Listed as a flat chat list after the projects. */
+export function isQuickchatProject(project: WorkspaceProject): boolean {
+  return project.quickchat === true;
 }
 
 const PREFIX = "term:";

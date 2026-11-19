@@ -25,6 +25,7 @@ import { useIsMobileWidth } from "../responsive";
 import perchLogo from "../assets/perch-logo-texture-medium.webp";
 import Start from "../stock-ui/start/main";
 import { useAgentChoices } from "./AgentPicker";
+import { isQuickchatProject } from "../terminalScope";
 import { StockRoute } from "./mod-root";
 
 const QUICKCHAT = "~";
@@ -80,10 +81,10 @@ export function NoSessionPanel({ connected }: { connected: boolean }) {
   const projects = usePerchStore((s) => s.workspaceProjects);
 
   if (connected && workspace) {
-    // A project's own checkout goes by the project's name ("Chats", not "scratch").
-    const projectName = projects.find((p) => p.id === workspace.projectId && p.path === workspace.path)?.name;
-    // Quickchat sessions run in HOME, so show that rather than its bookkeeping folder.
-    const quickchat = workspace.path.endsWith("/.perch/scratch");
+    // A project's own checkout goes by the project's name.
+    const project = projects.find((p) => p.id === workspace.projectId);
+    const projectName = project?.path === workspace.path ? project.name : undefined;
+    const quickchat = !!project && isQuickchatProject(project);
     return <WorkspaceStart key={workspace.id} hostId={workspace.hostId} name={quickchat ? "Quickchat" : workspace.name || projectName || basename(workspace.path)} path={quickchat ? "~" : workspace.path} startPath={workspace.path} quickchat={quickchat} />;
   }
   const props: StartScreenProps = {

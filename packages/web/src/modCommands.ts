@@ -18,7 +18,7 @@ import { usePerchStore } from "./store";
 import { orderProjects, writeScope } from "./sidebarOrder";
 import { requestCloseSession } from "./closeGuard";
 import { moveBeside } from "./tabOrder";
-import { navigateToWorkspace, newScratchpad } from "./workspaceNav";
+import { navigateToWorkspace, newQuickchat } from "./workspaceNav";
 
 /** App commands that take arguments, for `api.run(id, args)` (keys cannot run these, so they are not
  * in the keybinding table). Add one here and it is listed by `api.commands()` and the guide. */
@@ -432,7 +432,7 @@ export const TYPED_COMMANDS: Record<string, { description: string; args: string;
     if (!cwd) throw new Error('This command needs {cwd: "/path"}.');
     usePerchStore.getState().setActiveProject(word(args, "host") ?? usePerchStore.getState().activeHostId, cwd);
   } },
-  "quickchat.new": { description: "A new chat in Quickchat: its start screen, or the agent set for empty workspaces", args: "{}", run: () => newScratchpad() },
+  "quickchat.new": { description: "A new chat in Quickchat: its start screen, or the agent set for empty workspaces", args: "{}", run: () => newQuickchat() },
 };
 
 /** The session, project, workspace or host named by `{key}`; a missing one throws, so a command never acts on another. */

@@ -1049,7 +1049,7 @@ const STATES = [
       const st = window.usePerchStore, g = st.getState();
       window.__visOv = { workspaces: g.workspaces, sessions: g.sessions, jobs: g.worktreeJobs, projects: g.workspaceProjects, snap: g.workspaceSnapshotByHost, sid: g.sessionId };
       const main = g.workspaces.find((w) => w.id === ctx.workspaceId);
-      const chats = g.workspaces.find((w) => w.path.endsWith("/.perch/scratch"));
+      const chats = g.workspaces.find((w) => g.workspaceProjects.some((p) => p.id === w.projectId && p.quickchat));
       const project = g.workspaceProjects.find((p) => p.id === main.projectId);
       const extra = [];
       // a linked worktree of the main checkout, with a worktree nested under it

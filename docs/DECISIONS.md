@@ -7,6 +7,20 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-18 — Quickchat is the home folder; the phone leaves browser tabs out (owner)
+
+- **No Chats folder.** A Quickchat is plain default terminal behaviour: it opens at the home folder
+  (`~`). The core files it under a project at that folder, marked `quickchat` on the wire (optional
+  field; older cores omit it and older clients ignore it), which the clients list as Quickchat. Perch no
+  longer creates `~/.perch/scratch`; it never deletes it either. A database's old Chats project stays as
+  it was: its sessions keep their folder and open where they are (it lists as an ordinary project).
+  Supersedes the 2026-10-25 "`~/.perch/scratch` remains the workspace's bookkeeping" note and the older
+  "perch never turns $HOME into a project" rule, for Quickchat only.
+- Fixes the desktop losing its project after a chat: the pin was the scratch folder while chats ran in
+  home, so `effectiveActiveProject` fell back to the newest project. A Quickchat now keeps it.
+- **The phone's tab row omits browser tabs for now**, and a browser tab never becomes the phone's
+  active tab. The desktop keeps them in the shared tabs unchanged.
+
 ## 2026-11-18 — Files and Git belong to the tab (owner)
 
 - A tab's Files and Git follow that tab's own folder (its cwd), never the project. Git shows only when
