@@ -1110,9 +1110,14 @@ export function describe(document, perch, sheet, kept = {}, names = null) {
     trees.forEach(walk);
     nameElements(document, names, nodes);
   }
+  return { schema: SCHEMA, root: trees[0] ?? null, overlays: trees.slice(1), document_events: documentEvents(document), unsupported: ctx.findings.list() };
+}
+
+/** The engine events the source listens for on `document`/`window`. */
+export function documentEvents(document) {
   const listening = new Set();
   for (const target of [document, document.defaultView]) {
     for (const { type } of target?.listeners ?? []) if (DOCUMENT_EVENTS[type]) listening.add(DOCUMENT_EVENTS[type]);
   }
-  return { schema: SCHEMA, root: trees[0] ?? null, overlays: trees.slice(1), document_events: [...listening].sort(), unsupported: ctx.findings.list() };
+  return [...listening].sort();
 }
