@@ -287,6 +287,9 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
     `vendor/gpui-kit/crates/shell/src/materialize/components/scrollbar.rs`: a scroll request
     made before a scroll area's first layout waits for it, and one made after is taken in the
     same frame.
+  - `vendor/gpui-kit/crates/shell/src/materialize/components/tooltip.rs`: a small, quiet
+    tooltip (muted text, a tight box with a hairline border, no shadow), and one that only
+    repeats its element's own visible text shows only while that text is cut off.
   - `vendor/gpui-kit/crates/shell/src/engine/quickjs/mod.rs`,
     `vendor/gpui-kit/crates/shell/src/engine/quickjs/entity_api.rs` and
     `vendor/gpui-kit/crates/shell/src/typings.rs`: a scroll handle's `item_bounds`, where a
