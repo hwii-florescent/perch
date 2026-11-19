@@ -32,11 +32,7 @@
     },
     {
       "testId": null,
-      "text": "Show an open tab beside this one"
-    },
-    {
-      "testId": "tab-split-with-s-perch-3",
-      "text": "Show beside Review agent mail"
+      "text": "Show besideReview agent mail"
     },
     {
       "divider": true

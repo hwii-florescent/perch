@@ -28,11 +28,7 @@
     },
     {
       "testId": null,
-      "text": "Show an open tab beside this one"
-    },
-    {
-      "testId": "tab-split-with-s-infra-2",
-      "text": "Show beside Audit open ports"
+      "text": "Show besideAudit open ports"
     },
     {
       "divider": true
