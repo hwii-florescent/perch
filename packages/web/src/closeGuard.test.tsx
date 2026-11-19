@@ -5,9 +5,10 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 
-vi.mock("./agentTerminals", () => ({ isWatchingAgent: () => false }));
+const stops = vi.hoisted(() => [] as unknown[][]);
+vi.mock("./agentTerminals", () => ({ isWatchingAgent: () => false, stopAgent: (...args: unknown[]) => { stops.push(args); return true; } }));
 const { usePerchStore } = await import("./store");
-const { requestCloseSession, useCloseGuard } = await import("./closeGuard");
+const { requestCloseSession, requestStopAgent, useCloseGuard } = await import("./closeGuard");
 const { default: CloseGuard } = await import("./stock-ui/close-guard/main");
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -41,6 +42,33 @@ it("the guard keeps the sub-sessions by default and closes them on its own butto
   act(() => button("confirm-accept").click());
   act(() => button("close-guard-stop-sub-sessions").click());
   expect(stops).toEqual([[false, false], [false, true]]);
+  act(() => root.unmount());
+  host.remove();
+});
+
+it("a person's Stop of a lead asks the same question; another agent stops at once", () => {
+  usePerchStore.setState({ sessions: [session("lead"), session("kid", "lead"), session("plain")] } as never);
+  requestStopAgent("plain");
+  expect(stops).toEqual([["plain"]]);
+  requestStopAgent("lead");
+  expect(useCloseGuard.getState()).toMatchObject({ pending: { id: "lead" }, stopping: true });
+  expect(stops).toEqual([["plain"]]);
+  useCloseGuard.setState({ pending: null, stopping: false });
+});
+
+it("the Stop guard keeps the sub-sessions by default and closes them on its own button", () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const answers: unknown[][] = [];
+  act(() => root.render(<CloseGuard sessionId="lead" label="lead" action="stop" subSessions={1} onStop={(...a) => answers.push(a)} onKeepRunning={() => {}} onCancel={() => {}} />));
+  const button = (id: string) => document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)!;
+  expect(document.querySelector(".confirm-dialog__message")!.textContent).toMatch(/^Stop "lead"\?/);
+  expect(document.querySelector('[data-testid="close-agent-never"]')).toBeNull();
+  expect(button("confirm-accept").textContent).toBe("Keep them as sessions");
+  act(() => button("confirm-accept").click());
+  act(() => button("close-guard-stop-sub-sessions").click());
+  expect(answers).toEqual([[false, false], [false, true]]);
   act(() => root.unmount());
   host.remove();
 });

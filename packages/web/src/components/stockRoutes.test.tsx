@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   routed: [] as { name: string; props: Record<string, any> }[],
   pending: null as { id: string } | null,
+  stopping: false,
   calls: [] as unknown[][],
 }));
 vi.mock("./mod-root", () => ({ StockRoute: ({ name, props }: { name: string; props: Record<string, any> }) => { h.routed.push({ name, props }); return null; } }));
@@ -15,15 +16,16 @@ vi.mock("../stock-ui/close-guard/main", () => ({ default: () => null }));
 vi.mock("../stock-ui/pane-menu/main", () => ({ default: () => null }));
 vi.mock("../workspaceTabs", () => ({ sessionLabel: (s: { id: string }) => `label ${s.id}` }));
 vi.mock("../closeGuard", () => ({
-  useCloseGuard: Object.assign((select: (s: { pending: unknown }) => unknown) => select({ pending: h.pending }), { setState: (next: { pending: null }) => { h.pending = next.pending; h.calls.push(["dismiss"]); } }),
+  useCloseGuard: Object.assign((select: (s: { pending: unknown; stopping: boolean }) => unknown) => select({ pending: h.pending, stopping: h.stopping }), { setState: (next: { pending: null }) => { h.pending = next.pending; h.calls.push(["dismiss"]); } }),
   dismissSessionView: (id: string) => h.calls.push(["dismissView", id]),
   subSessionsOf: () => 2,
+  requestStopAgent: (id: string) => h.calls.push(["stop", id]),
 }));
 vi.mock("../store", () => ({ usePerchStore: { getState: () => ({
   updateSettings: (patch: unknown) => h.calls.push(["settings", patch]),
   deleteSession: (id: string, stopSubSessions?: boolean) => h.calls.push(stopSubSessions === undefined ? ["delete", id] : ["delete", id, stopSubSessions]),
 }) } }));
-vi.mock("../agentTerminals", () => ({ canStopAgent: () => true, stopAgent: (id: string) => h.calls.push(["stop", id]) }));
+vi.mock("../agentTerminals", () => ({ canStopAgent: () => true, stopAgent: (id: string, subs?: boolean) => h.calls.push(subs === undefined ? ["stop", id] : ["stop", id, subs]) }));
 vi.mock("../splitSets", () => ({ useSplitSets: { getState: () => ({ openMenu: (...args: unknown[]) => h.calls.push(["beside", ...args]) }) } }));
 vi.mock("../tiledPanes", () => ({ splitActiveTab: (direction: string) => h.calls.push(["split", direction]) }));
 
@@ -38,7 +40,7 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  h.routed = []; h.calls = []; h.pending = null;
+  h.routed = []; h.calls = []; h.pending = null; h.stopping = false;
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
@@ -89,4 +91,17 @@ it("routes the docked pane menu as stock:pane-menu, bound to its own panel; a pa
   props.actions.splitSession();
   expect(h.calls).toEqual([["split", "below"], ["beside", "s1", 10, 20], ["stop", "s1"]]);
   expect(onSplitSession).toHaveBeenCalledTimes(1);
+});
+
+it("routes a lead's Stop question as stock:close-guard; each answer stops the lead, with or without its sub-sessions", () => {
+  h.pending = { id: "s1" };
+  h.stopping = true;
+  act(() => root.render(<CloseAgentGuard />));
+  const { name, props } = h.routed.at(-1)!;
+  expect(name).toBe("close-guard");
+  expect(props).toMatchObject({ sessionId: "s1", action: "stop", subSessions: 2 });
+  props.onStop(false, false);
+  props.onStop(false, true);
+  props.onCancel();
+  expect(h.calls).toEqual([["stop", "s1", false], ["dismiss"], ["stop", "s1", true], ["dismiss"], ["dismiss"]]);
 });

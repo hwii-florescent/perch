@@ -673,13 +673,21 @@ impl Connection {
         Ok(())
     }
 
-    /// End the shell. Only the view holding the input lease may.
-    pub async fn terminal_kill(&mut self, terminal: &Terminal) -> Result<()> {
+    /// End the shell. Only the view holding the input lease may. A lead's sub-sessions stop too
+    /// only with `stop_sub_sessions`, once the lead has.
+    pub async fn terminal_kill(
+        &mut self,
+        terminal: &Terminal,
+        stop_sub_sessions: bool,
+    ) -> Result<()> {
         if terminal.input.is_none() {
             bail!("another view controls this terminal's input");
         }
-        self.send(json!({"type": "terminal.kill", "terminalId": terminal.id}))
-            .await
+        let mut frame = json!({"type": "terminal.kill", "terminalId": terminal.id});
+        if stop_sub_sessions {
+            frame["stopSubSessions"] = Value::Bool(true);
+        }
+        self.send(frame).await
     }
 
     /// Ask the core to end a session and delete it. The core answers every connection with

@@ -4668,6 +4668,62 @@ impl Workspace {
         }
     }
 
+    /// A person's Stop of a terminal (`terminal.kill`). A lead with sub-sessions asks first, in the
+    /// close guard (`action: "stop"`), whether they stop too (once it has) or keep running as
+    /// ordinary sessions (the default); Cancel stops nothing.
+    fn stop_terminal(
+        &mut self,
+        view: Entity<TerminalView>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        const CANNOT: &str = "This terminal cannot be stopped from here: another view controls \
+                              it, or it is not attached.";
+        if !view.read(cx).can_stop() {
+            return Err(CANNOT.into());
+        }
+        let session = self
+            .panes
+            .iter()
+            .find(|(_, pane)| pane.view.as_ref() == Some(&view))
+            .map(|(id, _)| id.clone());
+        let subs = session
+            .as_deref()
+            .map_or(0, |id| self.sub_sessions_of(id, cx));
+        let Some(session) = session.filter(|_| subs > 0) else {
+            view.read(cx).kill(false);
+            return Ok(());
+        };
+        if !self.screens.has("confirm", cx) {
+            return Err(
+                "No mod draws the confirmation, so the agent was not stopped. The stock one is \
+                 restored when the app starts."
+                    .into(),
+            );
+        }
+        let label = self.title_of(&session, cx);
+        let mut props = guard_props(&session, &label, subs);
+        props["action"] = json!("stop");
+        let view = view.downgrade();
+        self.open_screen(
+            "confirm",
+            props,
+            None,
+            Some(Box::new(move |this, result, _, cx| {
+                if result.get("confirmed").and_then(Value::as_bool) != Some(true) {
+                    return;
+                }
+                let stop = result.get("stopSubSessions").and_then(Value::as_bool) == Some(true);
+                let stopped = view.upgrade().is_some_and(|view| view.read(cx).kill(stop));
+                if !stopped {
+                    this.notice = Some(CANNOT.into());
+                    cx.notify();
+                }
+            })),
+            cx,
+        );
+        Ok(())
+    }
+
     /// A terminal's named action (`terminal.find`, `terminal.scroll {pages: -1}`, ...) on the tab
     /// on screen. The key dispatcher and the Navigator both end here.
     fn terminal_command(
@@ -4678,6 +4734,9 @@ impl Workspace {
     ) -> Result<(), String> {
         let id = args.and_then(|a| a.get("id")).and_then(Value::as_str);
         let view = self.terminal_named(id)?;
+        if name == "terminal.kill" {
+            return self.stop_terminal(view, cx);
+        }
         // The action, and what to say if the view did nothing.
         let (action, nothing) = match name {
             "terminal.find" => (Action::Find, ""),
@@ -4716,10 +4775,6 @@ impl Workspace {
             "terminal.takeBack" => (
                 Action::TakeBack,
                 "No phone holds this terminal's size, or it is not attached.",
-            ),
-            "terminal.kill" => (
-                Action::Kill,
-                "This terminal cannot be stopped from here: another view controls it, or it is not attached.",
             ),
             _ => return Err(format!("No command {name}.")),
         };

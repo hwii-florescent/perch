@@ -736,6 +736,15 @@ impl TerminalView {
     /// holds the keyboard. Nothing happens here until the core answers with
     /// [`TerminalEvent::Ended`] or [`TerminalEvent::EndRefused`]. False, asking nothing, when the
     /// view cannot ask ([`Self::can_end`]).
+    /// Stop the shell, as [`Action::Kill`], saying whether a lead's sub-sessions stop too.
+    pub fn kill(&self, stop_sub_sessions: bool) -> bool {
+        let can = self.can_stop();
+        if can {
+            self.send(ToCore::Kill { stop_sub_sessions });
+        }
+        can
+    }
+
     pub fn end(&self, stop_sub_sessions: bool) -> bool {
         let can = self.can_end();
         if can {
@@ -2479,13 +2488,7 @@ impl TerminalView {
                 self.send(ToCore::TakeSize);
                 true
             }
-            Action::Kill => {
-                if !self.can_stop() {
-                    return false;
-                }
-                self.send(ToCore::Kill);
-                true
-            }
+            Action::Kill => self.kill(false),
         }
     }
 }

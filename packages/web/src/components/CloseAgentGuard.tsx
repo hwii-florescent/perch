@@ -5,14 +5,29 @@
  */
 import { sessionLabel } from "../workspaceTabs";
 import { dismissSessionView, subSessionsOf, useCloseGuard } from "../closeGuard";
+import { stopAgent } from "../agentTerminals";
 import { usePerchStore } from "../store";
 import CloseGuard from "../stock-ui/close-guard/main";
 import { StockRoute } from "./mod-root";
 
 export function CloseAgentGuard() {
   const pending = useCloseGuard((s) => s.pending);
+  const stopping = useCloseGuard((s) => s.stopping);
   if (!pending) return null;
-  const dismiss = () => useCloseGuard.setState({ pending: null });
+  const dismiss = () => useCloseGuard.setState({ pending: null, stopping: false });
+  if (stopping) {
+    // A Stop of a lead: only whether its sub-sessions stop too.
+    const props = {
+      sessionId: pending.id,
+      label: sessionLabel(pending),
+      action: "stop" as const,
+      subSessions: subSessionsOf(pending.id) || undefined,
+      onCancel: dismiss,
+      onKeepRunning: dismiss,
+      onStop: (_never: boolean, stopSubSessions?: boolean) => { stopAgent(pending.id, !!stopSubSessions); dismiss(); },
+    };
+    return <StockRoute key={`stop-${pending.id}`} name="close-guard" props={props} stock={CloseGuard} />;
+  }
   const props = {
     sessionId: pending.id,
     label: sessionLabel(pending),

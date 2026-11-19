@@ -1990,8 +1990,14 @@ pub enum ClientMessage {
     /// for Hosted, or deleting the session it's attached to — so the spawned
     /// `claude --resume`/`codex resume` process doesn't keep running (and
     /// blocking a fresh attach) after the view that owned it is gone.
+    /// A lead's sub-sessions are stopped too only with `stop_sub_sessions`, once the lead's stop
+    /// is confirmed; otherwise they keep running as ordinary sessions.
     #[serde(rename = "terminal.kill", rename_all = "camelCase")]
-    TerminalKill { terminal_id: String },
+    TerminalKill {
+        terminal_id: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stop_sub_sessions: bool,
+    },
 
     /// Offer a pairing code so another device can claim a token from
     /// `POST {base}pair`. Only an already-authorized client can ask.

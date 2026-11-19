@@ -385,6 +385,9 @@ struct AppState {
     /// here because the SQLite mutex alone cannot keep a list/snapshot from
     /// observing a mutation between its DB reads and its revision number.
     foundation_lock: Arc<Mutex<()>>,
+    /// Leads a person is stopping together with their sub-sessions: their exit does not promote
+    /// the children meanwhile (`sub_sessions::stop_lead`).
+    leads_closing_children: Arc<Mutex<HashSet<String>>>,
     /// Background worktree creates — see `worktree_jobs.rs`.
     worktree_jobs: worktree_jobs::JobTable,
     /// One retained-descriptor service per durable workspace. The service
@@ -639,6 +642,7 @@ pub async fn run(
         snapshot_epoch: Uuid::new_v4().to_string(),
         snapshot_revision: Arc::new(AtomicU64::new(0)),
         foundation_lock: Arc::new(Mutex::new(())),
+        leads_closing_children: Arc::new(Mutex::new(HashSet::new())),
         worktree_jobs: Arc::new(Mutex::new(HashMap::new())),
         filesystem_services: Arc::new(Mutex::new(HashMap::new())),
         filesystem_operation_locks: Arc::new(Mutex::new(HashMap::new())),

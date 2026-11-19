@@ -18,8 +18,11 @@ children by itself):
 - Kept children are detached: they become top-level sessions, keep running and take the lead's place in the
   order. Their sub-session records go, so `perch list` and reports no longer route to the lead.
 - A lead that exits on its own promotes its children the same way, without asking.
-- A person's Stop of a lead (terminal kill), `perch stop` of a lead and bulk deletes (archiving a Workspace,
-  removing a project, purging archived sessions) still stop its children first.
+- A person's Stop of a lead asks the same question in the same guard (default **Keep them as sessions**).
+  The lead is stopped first: if its stop fails, every child keeps running as its child; children chosen to
+  close are stopped only once the lead's stop is confirmed, and kept ones become ordinary sessions then.
+- `perch stop` of a lead and bulk deletes (archiving a Workspace, removing a project, purging archived
+  sessions, removing the old Chats project) still stop its children first.
 
 ## 2026-11-18 — One order: the tab strip follows the sidebar, and a lead's sub-sessions are a stack (owner)
 

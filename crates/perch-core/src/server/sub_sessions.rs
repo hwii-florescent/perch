@@ -390,6 +390,10 @@ fn rearrange(app: &AppState, edit: impl FnOnce(&mut Vec<String>) -> bool) {
 /// oldest first, as clients show them. Every client hears each child's new summary. Returns the
 /// children promoted.
 pub(super) fn promote_children_of(app: &AppState, lead: &str) -> Vec<String> {
+    // A person is stopping it with its children: they are stopped, not promoted, once it is.
+    if app.leads_closing_children.lock().unwrap().contains(lead) {
+        return Vec::new();
+    }
     let workspace = app
         .db
         .get_session(lead)
@@ -915,6 +919,41 @@ pub(super) fn stop_child(app: &AppState, row: &SubSessionRow) -> Result<SubState
 /// its own; one that is not stays `stop_unknown` and the rest still proceed. `Err` says how many
 /// children may still be running (a stop not confirmed, a launch still in flight, an unreadable
 /// record), so a caller about to forget the lead can refuse instead.
+/// A person's Stop of a lead (`terminal.kill`): `stop` stops the lead itself. With
+/// `stop_sub_sessions` its children are stopped only once the lead's stop is confirmed, and its
+/// exit does not promote them meanwhile; if the lead's stop fails, they keep running as its
+/// children. Children kept, and any that could not be shown stopped, become ordinary sessions in
+/// the lead's place once it is stopped.
+pub(super) fn stop_lead<E: std::fmt::Debug>(
+    app: &AppState,
+    key: &AgentKey,
+    stop_sub_sessions: bool,
+    stop: impl FnOnce() -> Result<(), E>,
+) {
+    let lead = key.session_id.clone();
+    if stop_sub_sessions {
+        app.leads_closing_children
+            .lock()
+            .unwrap()
+            .insert(lead.clone());
+    }
+    let stopped = stop();
+    if let Err(error) = &stopped {
+        tracing::warn!(
+            ?error,
+            "could not stop a lead's agent; its sub-sessions keep running"
+        );
+    } else if stop_sub_sessions {
+        if let Err(error) = stop_children_of(app, &lead) {
+            tracing::warn!(%error, "children of a stopped lead may still be running");
+        }
+    }
+    app.leads_closing_children.lock().unwrap().remove(&lead);
+    if stopped.is_ok() {
+        promote_children_of(app, &lead);
+    }
+}
+
 pub(super) fn stop_children_of(app: &AppState, lead_session_id: &str) -> Result<(), String> {
     let children = app
         .db
@@ -1753,6 +1792,82 @@ pub(super) mod tests {
         );
         // Nothing left to promote, and a stopped child would have stayed the lead's record.
         assert!(promote_children_of(&app, "lead").is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A person's Stop of a lead: whatever was chosen, a failed stop of the lead leaves its
+    /// children running as its children; children chosen to close are stopped only once the
+    /// lead's stop is confirmed, and its exit meanwhile does not promote them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_stopped_lead_stops_the_children_chosen_to_close_only_after_itself() {
+        let root = std::env::temp_dir().join(format!("perch-sub-stop-lead-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let (address, db) = boot(&root).await;
+        let app = crate::server::booted_state(address);
+        let (workspace, _) = lead_with_child(&db, &nest, SubState::Running);
+        let lead = AgentKey::new(&workspace.id, "lead", "claude").unwrap();
+        let terminal = crate::agent_runtime::terminal_key(
+            &AgentKey::new(&workspace.id, "child", "codex").unwrap(),
+        );
+        crate::daemon::client()
+            .unwrap()
+            .create(
+                &terminal,
+                vec!["/bin/sh".into(), "-c".into(), "sleep 60".into()],
+                None,
+                vec![],
+                80,
+                24,
+            )
+            .unwrap();
+        let alive =
+            || crate::daemon::session_state(&terminal) == crate::daemon::RuntimeState::Alive;
+
+        for stop_sub_sessions in [false, true] {
+            stop_lead(&app, &lead, stop_sub_sessions, || {
+                Err("the lead would not stop")
+            });
+            assert!(
+                alive(),
+                "a failed stop of the lead stops none of its children"
+            );
+            assert_eq!(db.parent_of("child").unwrap().as_deref(), Some("lead"));
+            assert!(db.sub_session("child").unwrap().is_some());
+        }
+
+        stop_lead(&app, &lead, true, || {
+            assert!(alive(), "the lead stops first");
+            // Its exit, seen while it stops, leaves the children to be stopped.
+            assert!(promote_children_of(&app, "lead").is_empty());
+            Ok::<(), ()>(())
+        });
+        assert!(!alive(), "then the child chosen to close");
+        assert_eq!(
+            db.sub_session("child").unwrap().map(|row| row.state),
+            Some(SubState::Stopped)
+        );
+        assert!(
+            promote_children_of(&app, "lead").is_empty(),
+            "nothing left to promote"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A lead stopped keeping its children makes them ordinary sessions in its place.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_lead_stopped_keeping_its_children_promotes_them() {
+        let root = std::env::temp_dir().join(format!("perch-sub-stop-keep-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let (address, db) = boot(&root).await;
+        let app = crate::server::booted_state(address);
+        let (workspace, _) = lead_with_child(&db, &nest, SubState::Running);
+        let lead = AgentKey::new(&workspace.id, "lead", "claude").unwrap();
+        stop_lead(&app, &lead, false, || Ok::<(), ()>(()));
+        assert!(db.session_exists("child").unwrap());
+        assert_eq!(db.parent_of("child").unwrap(), None);
+        assert!(db.sub_session("child").unwrap().is_none());
         let _ = std::fs::remove_dir_all(root);
     }
 

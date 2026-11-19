@@ -914,7 +914,7 @@ fn link(
 
 fn ends(rx: &mut UnboundedReceiver<ToCore>) -> usize {
     std::iter::from_fn(|| rx.try_recv().ok())
-        .filter(|m| *m == ToCore::End)
+        .filter(|m| matches!(m, ToCore::End { .. }))
         .count()
 }
 
@@ -1000,6 +1000,74 @@ fn confirm(rig: &mut Rig) {
         "the tab goes once the core says it ended"
     );
     println!("confirm: ok");
+}
+
+/// What each Stop asked of the core: `Some(stop_sub_sessions)` per stop.
+fn kills(rx: &mut UnboundedReceiver<ToCore>) -> Vec<bool> {
+    std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|m| match m {
+            ToCore::Kill { stop_sub_sessions } => Some(stop_sub_sessions),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A person's Stop of a lead asks, in the same guard, whether its sub-sessions stop too: Enter
+/// keeps them (the default), the other button stops them once the lead has, Escape stops nothing.
+/// A session with none stops at once.
+fn stop_lead(rig: &mut Rig) {
+    rig.ws(|ws, _, cx| {
+        ws.sidebar().update(cx, |s, cx| {
+            s.open("local".into(), "alpha".into(), Some("claude".into()), cx)
+        })
+    });
+    rig.draw();
+    let (mut to_core, _core) = link(rig);
+    let stop = |rig: &mut Rig| {
+        rig.ws(|ws, window, cx| ws.run_command("terminal.kill", None, window, cx))
+            .unwrap();
+        rig.draw();
+    };
+    stop(rig);
+    assert!(
+        rig.open_screens().is_empty(),
+        "no sub-sessions: no question"
+    );
+    assert_eq!(kills(&mut to_core), [false]);
+
+    let mut more = state();
+    more.apply(&message(
+        json!({"type": "session.updated", "session": {"id": "kid",
+        "title": "kid", "cwd": "/work", "createdAt": 9, "status": "idle", "hostId": "local",
+        "projectId": "p", "cliProviderId": "claude", "parentSessionId": "alpha"}}),
+    ));
+    rig.ws(|ws, _, cx| {
+        ws.sidebar().update(cx, |s, cx| {
+            s.apply(perch_native::client::Update::Model(more.model()), cx)
+        })
+    });
+    rig.draw();
+    stop(rig);
+    assert_eq!(rig.open_screens(), ["confirm"], "a lead asks first");
+    assert!(rig.record("close-guard-stop-sub-sessions").is_some());
+    assert!(kills(&mut to_core).is_empty(), "nothing before the answer");
+    rig.press("escape");
+    assert!(rig.open_screens().is_empty());
+    assert!(kills(&mut to_core).is_empty(), "Cancel stops nothing");
+
+    stop(rig);
+    rig.press("enter");
+    assert_eq!(kills(&mut to_core), [false], "the default keeps them");
+
+    stop(rig);
+    rig.click("close-guard-stop-sub-sessions");
+    assert!(rig.open_screens().is_empty());
+    assert_eq!(
+        kills(&mut to_core),
+        [true],
+        "the other button stops them too"
+    );
+    println!("stop lead: ok");
 }
 
 fn new_session(rig: &mut Rig) {
@@ -1541,6 +1609,7 @@ fn main() {
     toast(&mut rig);
     daemon_health(&mut rig);
     confirm(&mut rig);
+    stop_lead(&mut rig);
     readback(&mut rig, &scratch.join("native-mods"));
 
     rig.cx

@@ -8,7 +8,8 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 //! The decision stays Perch's: `onStop` stops the session (and, with `never`, turns this warning off in Settings),
 //! `onKeepRunning` only dismisses this view of it, `onCancel` does nothing. A lead with `subSessions` asks
 //! what becomes of them: "Keep them as sessions" (the default, Enter) leaves them running as ordinary sessions in
-//! the lead's place, "Close all sub-sessions" stops them with it. The question is `ConfirmDialog` from
+//! the lead's place, "Close all sub-sessions" stops them with it. A Stop of a lead (`action: "stop"`) asks the same
+//! question, and only that one. The question is `ConfirmDialog` from
 //! `@perch/sdk`, so a copy chosen for `stock:confirm` draws it.
 //!
 //! This file is the source of a package: `scripts/export-stock-ui.mjs` turns it into the plain JS the app runs and
@@ -16,9 +17,24 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 //! beside it (docs/MOD-SDK.md).
 import { useState } from "react";
 import { ConfirmDialog } from "@perch/sdk";
-export default function CloseGuard({ label, subSessions = 0, onStop, onKeepRunning, onCancel }) {
+export default function CloseGuard({ label, action = "close", subSessions = 0, onStop, onKeepRunning, onCancel }) {
     const [never, setNever] = useState(false);
     const subs = subSessions === 1 ? "1 sub-session" : `${subSessions} sub-sessions`;
+    if (action === "stop") {
+        return (_jsx(ConfirmDialog, {
+            message: `Stop "${label}"?\n\nIt has ${subs}: keep them running as sessions where it was, or close them too once it has stopped.`,
+            confirmLabel: "Keep them as sessions",
+            onCancel: onCancel,
+            onConfirm: () => onStop(false, false),
+            children: _jsx("button", {
+                type: "button",
+                className: "mb-4 block text-sm underline",
+                "data-testid": "close-guard-stop-sub-sessions",
+                onClick: () => onStop(false, true),
+                children: "Close all sub-sessions"
+            })
+        }));
+    }
     return (_jsxs(ConfirmDialog, {
         message: subSessions > 0
             ? `Close "${label}"?\n\nClosing this tab stops its agent and shells for everyone watching. It has ${subs}: keep them running as sessions where it was, or close them too.`
