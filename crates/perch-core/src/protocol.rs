@@ -2611,9 +2611,6 @@ pub enum ClientMessage {
         parent_workspace_id: Option<String>,
     },
 
-    /// Replace the core's sidebar order (capability `workspace.order.v1`).
-    /// Each list that is present replaces the stored one (last write wins);
-    /// absent lists are untouched. Answered by a `workspace.order` broadcast.
     /// Replace a local workspace's shared tabs (capability `workspace.tabs.v1`,
     /// `shared_tabs.rs`): its strip of tab ids and its split sets. With
     /// `baseRevision` not current nothing is stored and only the sender gets the
@@ -2630,6 +2627,9 @@ pub enum ClientMessage {
         sets: Vec<serde_json::Value>,
     },
 
+    /// Replace the core's sidebar order (capability `workspace.order.v1`).
+    /// Each list that is present replaces the stored one (last write wins);
+    /// absent lists are untouched. Answered by a `workspace.order` broadcast.
     #[serde(rename = "workspace.order.set", rename_all = "camelCase")]
     WorkspaceOrderSet {
         request_id: String,
@@ -3658,11 +3658,6 @@ pub enum ServerMessage {
     #[serde(rename = "worktree.jobs", rename_all = "camelCase")]
     WorktreeJobs { jobs: Vec<WorktreeJob> },
 
-    /// The core's sidebar order: project ids and session ids, first to last.
-    /// Sent on connect and broadcast to every viewer after each change (the
-    /// requester's copy echoes `requestId`). Ids may be stale or unknown.
-    /// Through a hub, `hostId` names the owning remote and project ids are
-    /// host-qualified.
     /// A local workspace's shared tabs: sent on connect for each workspace that
     /// has them, broadcast after each change (the writer's copy echoes
     /// `requestId`), and sent to a stale writer alone with `conflict`.
@@ -3678,6 +3673,11 @@ pub enum ServerMessage {
         conflict: bool,
     },
 
+    /// The core's sidebar order: project ids and session ids, first to last.
+    /// Sent on connect and broadcast to every viewer after each change (the
+    /// requester's copy echoes `requestId`). Ids may be stale or unknown.
+    /// Through a hub, `hostId` names the owning remote and project ids are
+    /// host-qualified.
     #[serde(rename = "workspace.order", rename_all = "camelCase")]
     WorkspaceOrder {
         #[serde(skip_serializing_if = "Option::is_none", default)]

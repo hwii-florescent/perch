@@ -167,8 +167,36 @@ fn store(conn: &rusqlite::Connection, tabs: &SharedTabs) -> rusqlite::Result<()>
     Ok(())
 }
 
-/// Give each local workspace with a per-viewer presentation but no shared row the newest of
-/// those presentations' strips (the web's layout v1: `{v: 1, strip, sets}`).
+/// `strip` without the sessions known to be gone: ended (no row, or archived) or of another
+/// workspace. A session id only marks a session's place. One whose row cannot be read is unknown,
+/// not gone, and keeps its place; so does one with no workspace recorded (an older row).
+fn live(conn: &rusqlite::Connection, workspace_id: &str, strip: &[String]) -> Vec<String> {
+    strip
+        .iter()
+        .filter(|id| {
+            if id.contains('\n') {
+                return true;
+            }
+            let row = conn
+                .query_row(
+                    "SELECT workspace_id FROM sessions WHERE id = ?1 AND archived = 0",
+                    params![id],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .optional();
+            match row {
+                Ok(Some(owner)) => owner.is_none_or(|owner| owner == workspace_id),
+                Ok(None) => false,
+                Err(_) => true,
+            }
+        })
+        .cloned()
+        .collect()
+}
+
+/// Give each local workspace with a per-viewer presentation but no shared row the strip of the
+/// newest of those presentations (the web's layout v1: `{v: 1, strip, sets}`), without its ended
+/// sessions. An older presentation is never used: what the newest one left out stays out.
 fn seed(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
     let legacy = conn
         .prepare(
@@ -182,20 +210,23 @@ fn seed(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut done = HashSet::new();
     for (workspace_id, layout) in legacy {
+        if !done.insert(workspace_id.clone()) {
+            continue;
+        }
         let Ok(layout) = serde_json::from_str::<Value>(&layout) else {
             continue;
         };
-        if done.contains(&workspace_id) || layout["v"] != 1 {
+        if layout["v"] != 1 {
             continue;
         }
         let strip: Vec<String> =
             serde_json::from_value(layout["strip"].clone()).unwrap_or_default();
         let sets: Vec<Value> = serde_json::from_value(layout["sets"].clone()).unwrap_or_default();
+        let strip = live(conn, &workspace_id, &strip);
         let (strip, sets) = clean(&workspace_id, &strip, &sets);
         if strip.is_empty() {
             continue;
         }
-        done.insert(workspace_id.clone());
         store(
             conn,
             &SharedTabs {
@@ -256,19 +287,7 @@ pub fn set(
         if local.as_deref() != Some("local") {
             anyhow::bail!("workspace is not present on the local host");
         }
-        // A session id only marks a session's place; one that has ended goes.
-        let mut strip = strip.clone();
-        strip.retain(|id| {
-            id.contains('\n')
-                || tx
-                    .query_row(
-                        "SELECT 1 FROM sessions WHERE id = ?1 AND archived = 0",
-                        params![id],
-                        |_| Ok(()),
-                    )
-                    .optional()
-                    .is_ok_and(|row| row.is_some())
-        });
+        let strip = live(&tx, workspace_id, &strip);
         // A set left with a member that went is dropped with it.
         let (strip, sets) = clean(workspace_id, &strip, &sets);
         let current = read(&tx, workspace_id)?;
@@ -452,6 +471,49 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn a_session_is_kept_unless_known_ended_or_elsewhere() {
+        let (db, w) = db_with_workspace();
+        let (_, other) = db
+            .create_project("local", "/tmp/other", Some("other"), None)
+            .unwrap();
+        db.create_session_in_workspace("there", &other, "/tmp/other")
+            .unwrap();
+        // An ended session goes, as does one of another workspace.
+        let Written::Changed(tabs) =
+            set_tabs(&db, &w, None, &["s1", "gone", "there"], &[]).unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(tabs.strip, ids(&["s1"]));
+        // A session whose row cannot be read is unknown, not ended: it keeps its place.
+        db.with_connection(|conn| {
+            Ok(conn.execute_batch("ALTER TABLE sessions RENAME TO sessions_away")?)
+        })
+        .unwrap();
+        let Written::Changed(tabs) = set_tabs(&db, &w, Some(1), &["s1", "unknown"], &[]).unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(tabs.strip, ids(&["s1", "unknown"]));
+    }
+
+    #[test]
+    fn seeding_uses_only_the_newest_layout_and_drops_ended_sessions() {
+        let (db, w) = db_with_workspace();
+        let file = format!("{w}\na.rs");
+        for (viewer, strip) in [("old", vec!["s1", file.as_str()]), ("new", vec!["ended"])] {
+            let update = crate::surfaces::PresentationUpdate {
+                layout: Some(json!({"v": 1, "strip": strip, "sets": []})),
+                ..Default::default()
+            };
+            crate::surfaces::set_presentation(&db, viewer, &w, &update).unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(3));
+        }
+        // The newest holds only an ended session: nothing is seeded, the older one is not used.
+        assert_eq!(all(&db).unwrap(), vec![]);
     }
 
     #[test]
