@@ -181,10 +181,10 @@ const programIn = (args: unknown) => {
   return async (workspaceId: string) => showWhenListed(await runInWorkspace(workspaceId, command));
 };
 
-/** The projects of the computer on screen, in the order the sidebar shows them. */
+/** The projects of the computer on screen, in the order the sidebar shows them (Quickchat is none). */
 const projectsOnScreen = () => {
   const { workspaceProjects, activeHostId, workspaceOrderByHost } = usePerchStore.getState();
-  return orderProjects(workspaceProjects.filter((project) => project.hostId === activeHostId), workspaceOrderByHost?.[activeHostId]?.projects);
+  return orderProjects(workspaceProjects.filter((project) => project.hostId === activeHostId && !project.quickchat), workspaceOrderByHost?.[activeHostId]?.projects);
 };
 /** Show the project `step` away from the shown one (wrapping), or the one at `index` (1 = first) or named by `id`. */
 const stepProject = (step: number) => () => {

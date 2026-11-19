@@ -30,13 +30,16 @@ export type ProjectNavState = Pick<
   workspaces?: WorkspaceRecord[];
   /** The cores' chat order (`workspace.order`); absent = each strip keeps its own order. */
   workspaceOrderByHost?: PerchState["workspaceOrderByHost"];
+  /** Optional; with it, Quickchat's sessions (no project) are left out of `projectsForHost`. */
+  workspaceProjects?: PerchState["workspaceProjects"];
 };
 
-/** Projects belonging to `hostId`, newest-first. */
+/** Projects belonging to `hostId`, newest-first. A Quickchat is no project. */
 export function projectsForHost(state: ProjectNavState, hostId: string): ProjectGroup[] {
   const map = new Map<string, ProjectGroup>();
+  const quickchats = new Set(state.workspaceProjects?.filter((project) => project.quickchat).map((project) => project.id));
   for (const s of state.sessions) {
-    if ((s.hostId ?? "local") !== hostId) continue;
+    if ((s.hostId ?? "local") !== hostId || quickchats.has(s.projectId ?? "")) continue;
     const cwd = s.cwd ?? "(unknown)";
     const key = `${hostId}:${cwd}`;
     let group = map.get(key);

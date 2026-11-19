@@ -262,7 +262,7 @@ export function useSessionFolders(): { hostId: string; folders: Sdk.SessionFolde
   const remembered = usePerchStore((s) => s.cliAgentBySession);
   const review = usePerchStore((s) => (hostId === "local" ? s.serverInfo?.capabilities : s.workspaceCapabilitiesByHost[hostId])?.includes("git.status") === true);
   const needIds = new Set(needsYou(useAttention((s) => s.events)).map((event) => event.sessionId));
-  const nav = { sessions, sessionId, activeHostId: hostId, activeProject };
+  const nav = { sessions, sessionId, activeHostId: hostId, activeProject, workspaceProjects: registered };
   const active = effectiveActiveProject(nav);
   const info = (session: SessionSummary): Sdk.SessionInfo => {
     const section = sectionOf(session, needIds, null);

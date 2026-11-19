@@ -107,7 +107,7 @@ function WorkspaceStart({ hostId, name, path, startPath, quickchat }: { hostId: 
   const place = useStartPlace(startPath);
   const targets: StartTarget[] = [
     { key: startPath, label: `${name} (current folder)`, name, path },
-    ...projects.filter((project) => project.hostId === hostId && project.path !== startPath).map((project) => ({ key: project.path, label: project.name || basename(project.path), name: project.name || basename(project.path), path: project.path })),
+    ...projects.filter((project) => project.hostId === hostId && project.path !== startPath && !isQuickchatProject(project)).map((project) => ({ key: project.path, label: project.name || basename(project.path), name: project.name || basename(project.path), path: project.path })),
     ...(quickchat ? [] : [{ key: QUICKCHAT, label: "No project (Quickchat)", name: "Quickchat", path: "~" }]),
   ];
   const target = targets.find((candidate) => candidate.key === place.key) ?? targets[0]!;
@@ -167,7 +167,7 @@ export function CliStartPanel() {
   const targets: StartTarget[] = [
     ...(current?.cwd ? [{ key: "here", label: `${basename(current.cwd)} (this session)`, name: basename(current.cwd), path: current.cwd }] : []),
     ...workspaceProjects
-      .filter((project) => project.hostId === activeHostId && project.path !== current?.cwd)
+      .filter((project) => project.hostId === activeHostId && project.path !== current?.cwd && !isQuickchatProject(project))
       .map((project) => ({ key: project.path, label: basename(project.path), name: basename(project.path), path: project.path })),
     { key: QUICKCHAT, label: "No project (Quickchat)", name: "Quickchat", path: "~" },
   ];

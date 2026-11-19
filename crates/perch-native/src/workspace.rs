@@ -1951,7 +1951,11 @@ impl Workspace {
         let mut targets = vec![json!({
             "key": workspace.path, "label": format!("{name} (current folder)"), "name": name, "path": path,
         })];
-        for p in projects.iter().filter(|p| p.path != workspace.path) {
+        // A Quickchat is no project: it is offered as "No project" below, never as a folder.
+        for p in projects
+            .iter()
+            .filter(|p| p.path != workspace.path && !p.quickchat)
+        {
             let label = Some(p.name.clone())
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| basename(&p.path));

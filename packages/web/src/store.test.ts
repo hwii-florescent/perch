@@ -602,21 +602,28 @@ describe("deleteSession (tab close)", () => {
 });
 
 describe("Quickchat", () => {
-  it("keeps the active project: a new quickchat and its chat stay on Quickchat, not the newest project", async () => {
+  it("is no project: starting or opening one keeps the active project, and it is never listed as one", async () => {
     const { newQuickchat } = await import("./workspaceNav");
     const project = (id: string, path: string, quickchat = false) => ({ id, hostId: "local", name: id, path, favorite: false, createdAt: 1, updatedAt: 1, quickchat });
     const workspace = (id: string, projectId: string, path: string) => ({ id, projectId, hostId: "local", path, name: id, dirty: false, state: "active" as const, createdAt: 1, updatedAt: 1 });
     usePerchStore.setState({
-      connected: true, activeHostId: "local", sessionId: null, activeWorkspaceId: null,
+      connected: true, activeHostId: "local", sessionId: "work", activeWorkspaceId: "wp", activeProjectId: "p",
+      activeProject: { hostId: "local", cwd: "/work/p" },
       workspaceProjects: [project("p", "/work/p"), project("q", "/home/me", true)],
       workspaces: [workspace("wp", "p", "/work/p"), workspace("wq", "q", "/home/me")],
-      // The project's chat is the newest, so a lost pin would fall back to it.
-      sessions: [session({ id: "chat", cwd: "/home/me", workspaceId: "wq", projectId: "q", createdAt: 1 }), session({ id: "work", cwd: "/work/p", workspaceId: "wp", projectId: "p", createdAt: 9 })],
+      // The chat is the newest session, so a project made of it would win the fallback.
+      sessions: [session({ id: "work", cwd: "/work/p", workspaceId: "wp", projectId: "p", createdAt: 1 }), session({ id: "chat", cwd: "/home/me", workspaceId: "wq", projectId: "q", createdAt: 9 })],
     });
+    const kept = () => {
+      const state = usePerchStore.getState();
+      expect(effectiveActiveProject(state)).toEqual({ hostId: "local", cwd: "/work/p" });
+      expect(state.activeProjectId).toBe("p");
+    };
     newQuickchat();
-    expect(effectiveActiveProject(usePerchStore.getState())).toEqual({ hostId: "local", cwd: "/home/me" });
+    kept();
+    expect(usePerchStore.getState().activeWorkspaceId).toBe("wq"); // its chats are on screen
     usePerchStore.getState().switchSession("chat");
-    expect(effectiveActiveProject(usePerchStore.getState())).toEqual({ hostId: "local", cwd: "/home/me" });
-    expect(usePerchStore.getState().activeWorkspaceId).toBe("wq");
+    kept();
+    expect(projectsForHost(usePerchStore.getState(), "local").map((group) => group.cwd)).toEqual(["/work/p"]);
   });
 });

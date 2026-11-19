@@ -1065,8 +1065,10 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     const newHostId = s?.hostId ?? "local";
     // Opening a session from *anywhere* (sidebar row, tab, Navigator, mobile
     // switcher, toast) re-scopes the nav onto that session's host + project.
-    const newProject = s?.cwd ? { hostId: newHostId, cwd: s.cwd } : get().activeProject;
-    const stableProjectId = s?.projectId ?? get().workspaceProjects.find(
+    // A Quickchat is no project: it keeps whichever project was active.
+    const quickchat = !!s && isQuickchatId(get(), s.projectId);
+    const newProject = quickchat ? get().activeProject : s?.cwd ? { hostId: newHostId, cwd: s.cwd } : get().activeProject;
+    const stableProjectId = quickchat ? get().activeProjectId : s?.projectId ?? get().workspaceProjects.find(
       (project) => project.hostId === newHostId && project.path === s?.cwd,
     )?.id ?? null;
     const stableWorkspaceId = s?.workspaceId ?? (stableProjectId
@@ -1203,15 +1205,19 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       workspaceId: state.activeWorkspaceId,
       legacy: state.activeProject,
     };
+    // A Quickchat is no project: focusing it shows its chats and keeps the active project.
+    const keep = project.quickchat === true;
+    const legacy = keep ? state.activeProject : { hostId: project.hostId, cwd: project.path };
+    const pinnedId = keep ? state.activeProjectId : project.id;
     writeActiveHostStored(project.hostId);
-    writeActiveProjectStored({ hostId: project.hostId, cwd: project.path });
-    writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, project.id);
+    writeActiveProjectStored(legacy);
+    writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, pinnedId);
     const workspace = state.workspaces.find((candidate) => candidate.projectId === project.id && candidate.state !== "archived");
     writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, workspace?.id ?? null);
     set({
       activeHostId: project.hostId,
-      activeProject: { hostId: project.hostId, cwd: project.path },
-      activeProjectId: project.id,
+      activeProject: legacy,
+      activeProjectId: pinnedId,
       activeWorkspaceId: workspace?.id ?? null,
     });
     if (state.connected && hasWorkspaceCapability(state, project.hostId, WORKSPACE_CAPABILITIES.projectFocus)) {
@@ -1237,14 +1243,18 @@ export const usePerchStore = create<PerchState>((set, get) => ({
       workspaceId: state.activeWorkspaceId,
       legacy: state.activeProject,
     };
+    // A Quickchat is no project: focusing it shows its chats and keeps the active project.
+    const keep = project.quickchat === true;
+    const legacy = keep ? state.activeProject : { hostId: workspace.hostId, cwd: workspace.path };
+    const pinnedId = keep ? state.activeProjectId : project.id;
     writeActiveHostStored(workspace.hostId);
-    writeActiveProjectStored({ hostId: workspace.hostId, cwd: workspace.path });
-    writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, project.id);
+    writeActiveProjectStored(legacy);
+    writeStoredId(ACTIVE_PROJECT_ID_STORAGE_KEY, pinnedId);
     writeStoredId(ACTIVE_WORKSPACE_ID_STORAGE_KEY, workspace.id);
     set({
       activeHostId: workspace.hostId,
-      activeProject: { hostId: workspace.hostId, cwd: workspace.path },
-      activeProjectId: project.id,
+      activeProject: legacy,
+      activeProjectId: pinnedId,
       activeWorkspaceId: workspace.id,
     });
     if (state.connected && hasWorkspaceCapability(state, workspace.hostId, WORKSPACE_CAPABILITIES.workspaceFocus)) {
@@ -1746,6 +1756,11 @@ function mergeHostRecordsScoped<T extends { hostId: string; id: string }>(
   ];
 }
 
+/** Whether `projectId` is a Quickchat, which is no project: never the active one. */
+function isQuickchatId(state: Pick<PerchState, "workspaceProjects">, projectId: string | null | undefined): boolean {
+  return !!projectId && state.workspaceProjects.some((project) => project.id === projectId && project.quickchat === true);
+}
+
 function stableLegacyProject(
   project: WorkspaceProject | undefined,
   workspace: WorkspaceRecord | undefined,
@@ -1806,7 +1821,8 @@ function handleWorkspaceMessage(raw: unknown): boolean {
     const activeWorkspace = msg.activeWorkspaceId
       ? msg.workspaces.find((workspace) => workspace.id === msg.activeWorkspaceId)
       : undefined;
-    const useServerFocus = state.activeHostId === hostId &&
+    // The core's focus is adopted only when this viewer has none, and never a Quickchat (no project).
+    const useServerFocus = state.activeHostId === hostId && !activeProject?.quickchat &&
       (!state.activeProjectId || !state.workspaceProjects.some((project) => project.id === state.activeProjectId));
     const nextProjectId = useServerFocus ? msg.activeProjectId ?? null : state.activeProjectId;
     const nextWorkspaceId = useServerFocus ? msg.activeWorkspaceId ?? null : state.activeWorkspaceId;
