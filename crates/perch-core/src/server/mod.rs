@@ -122,6 +122,17 @@ fn booted_state(address: SocketAddr) -> AppState {
         .map(|(_, state)| state.clone())
         .expect("no core booted at that address")
 }
+/// The address a test core reports once it is bound. A loaded run can take far longer to boot a core
+/// than an idle machine, so this waits up to 30 s but returns the moment the core is ready.
+#[cfg(test)]
+pub(crate) async fn ready_address(
+    ready_rx: tokio::sync::oneshot::Receiver<SocketAddr>,
+) -> SocketAddr {
+    tokio::time::timeout(std::time::Duration::from_secs(30), ready_rx)
+        .await
+        .expect("server should bind within 30 s")
+        .expect("server should report its bound address")
+}
 use session::{
     build_session_summary, local_sessions_snapshot, mark_unseen_if_unviewed,
     should_forward_to_viewer, status_message,
@@ -3872,10 +3883,7 @@ mod boot_smoke_tests {
             Arc::new(HistoryDb::open(&db_path).unwrap()),
             root.display().to_string(),
         ));
-        let address = tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx)
-            .await
-            .unwrap()
-            .unwrap();
+        let address = crate::server::ready_address(ready_rx).await;
         let url = format!("ws://{address}/ws");
         let mut hostile = url.clone().into_client_request().unwrap();
         hostile
@@ -3971,10 +3979,7 @@ mod boot_smoke_tests {
             std::env::temp_dir().display().to_string(),
         ));
 
-        let address = tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx)
-            .await
-            .expect("server should bind before the smoke timeout")
-            .expect("server should report its bound address");
+        let address = crate::server::ready_address(ready_rx).await;
         assert!(address.ip().is_loopback());
         assert_ne!(address.port(), 0);
 

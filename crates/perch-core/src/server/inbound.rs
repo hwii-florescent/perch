@@ -235,10 +235,7 @@ mod tests {
             db.clone(),
             root.display().to_string(),
         ));
-        let address = tokio::time::timeout(Duration::from_secs(5), ready_rx)
-            .await
-            .unwrap()
-            .unwrap();
+        let address = crate::server::ready_address(ready_rx).await;
         let (workspace, _) = super::super::sub_sessions::tests::lead_with_child(
             &db,
             &nest,

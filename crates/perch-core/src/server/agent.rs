@@ -881,10 +881,7 @@ pub(super) mod tests {
             db.clone(),
             root.display().to_string(),
         ));
-        let address = tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx)
-            .await
-            .unwrap()
-            .unwrap();
+        let address = crate::server::ready_address(ready_rx).await;
         let key = |session: &str| AgentKey::new("nest", session, "claude").unwrap();
         let alpha = db.issue(&key("alpha")).unwrap();
         let beta = db.issue(&key("beta")).unwrap();
