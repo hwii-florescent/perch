@@ -1,4 +1,8 @@
-//! Frame pacing for macOS windows, built on `CVDisplayLink`.
+//! Frame pacing for macOS windows.
+//!
+//! On macOS 14 and later a window is paced by a `CAMetalDisplayLink` on its
+//! layer ([`gpui_apple::display_link::MetalFrameSource`]). Earlier systems use
+//! the shared `CVDisplayLink` registry described below ([`WindowFrameSource`]).
 //!
 //! CVDisplayLink has no safe teardown: `CVDisplayLinkStop` merely flags the
 //! link's io thread to exit "soon" and returns immediately, and there is no
@@ -50,22 +54,21 @@
 //! is a std implementation detail, not a guarantee; if it changes, the cost
 //! is added latency under contention, not incorrectness.)
 
+use crate::main_thread_marker;
 use anyhow::Result;
 use core_graphics::display::CGDirectDisplayID;
-use core_video::host_time;
 use dispatch2::{
     _dispatch_source_type_data_add, DispatchObject, DispatchQueue, DispatchRetained, DispatchSource,
 };
 use gpui::{FrameRequestSource, PlatformFrameSignal};
+use gpui_apple::display_link::MetalFrameSource;
 use gpui_util::ResultExt;
 use scheduler::Instant;
 use std::{
+    cell::{Cell, RefCell},
     collections::{BTreeMap, btree_map},
     ffi::c_void,
-    sync::{
-        Arc, Mutex, MutexGuard, PoisonError,
-        atomic::{AtomicBool, AtomicU32, Ordering},
-    },
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::Duration,
 };
 
@@ -116,17 +119,11 @@ fn lock_registry() -> MutexGuard<'static, Registry> {
 }
 
 fn debug_assert_main_thread() {
-    #[cfg(debug_assertions)]
-    {
-        use objc::{class, msg_send, sel, sel_impl};
-        let is_main_thread: objc::runtime::BOOL =
-            unsafe { msg_send![class!(NSThread), isMainThread] };
-        debug_assert!(
-            is_main_thread == objc::runtime::YES,
-            "display link registry mutations must happen on the main thread; \
-             the registry's lock ordering and state consistency depend on it"
-        );
-    }
+    debug_assert!(
+        main_thread_marker().is_some(),
+        "display link registry mutations must happen on the main thread; \
+         the registry's lock ordering and state consistency depend on it"
+    );
 }
 
 unsafe extern "C" fn display_link_output_callback(
@@ -139,9 +136,9 @@ unsafe extern "C" fn display_link_output_callback(
 ) -> i32 {
     let signal_at = PlatformFrameSignal::capture(|| {
         // Instant cannot be constructed from Mach ticks, so sample both clock domains.
-        let current_host_time = host_time::get_current_host_time();
+        let current_host_time = objc2_core_video::CVGetCurrentHostTime();
         let received_at = Instant::now();
-        let host_clock_frequency = host_time::get_host_clock_frequency();
+        let host_clock_frequency = objc2_core_video::CVGetHostClockFrequency();
         // SAFETY: CoreVideo owns this timestamp for the lifetime of the callback.
         let current_time = unsafe { current_time.as_ref() };
         frame_request_instant(
@@ -297,6 +294,68 @@ fn unsubscribe(display_id: CGDirectDisplayID, subscriber_id: SubscriberId) {
     }
 }
 
+/// A window's `CAMetalDisplayLink`, shared with GPUI's frame waker so that a
+/// wake reaches the current link without taking the window's lock.
+///
+/// The link pauses after any update in which GPUI neither drew, presented,
+/// nor asked for another frame, so an idle window acquires no drawables. GPUI
+/// decides when frames are needed (including presenting after high-rate
+/// input); this only stops the link between those decisions.
+#[derive(Default)]
+pub struct MetalFrames {
+    source: RefCell<Option<MetalFrameSource>>,
+    /// Whether GPUI asked for a frame since the current update began.
+    woken: Cell<bool>,
+}
+
+impl MetalFrames {
+    pub fn replace(&self, source: Option<MetalFrameSource>) {
+        *self.source.borrow_mut() = source;
+    }
+
+    pub fn is_attached(&self) -> bool {
+        self.source.borrow().is_some()
+    }
+
+    pub fn wake(&self) {
+        self.woken.set(true);
+        // A source being replaced starts unpaused, so skipping it is safe.
+        if let Ok(source) = self.source.try_borrow()
+            && let Some(source) = source.as_ref()
+        {
+            source.set_paused(false);
+        }
+    }
+
+    pub fn begin_frame(&self) {
+        self.woken.set(false);
+    }
+
+    pub fn debug_state(&self) -> serde_json::Value {
+        let paused = self
+            .source
+            .try_borrow()
+            .ok()
+            .and_then(|source| source.as_ref().map(MetalFrameSource::is_paused));
+        serde_json::json!({
+            "kind": "CAMetalDisplayLink",
+            "attached": self.is_attached(),
+            "paused": paused,
+            "woken": self.woken.get(),
+        })
+    }
+
+    /// Ends an update, pausing the link if GPUI neither used its drawable nor
+    /// asked for another frame while it ran. Returns whether it paused.
+    pub fn end_frame(&self, used_drawable: bool) -> bool {
+        let pause = !used_drawable && !self.woken.get();
+        if pause && let Some(source) = self.source.borrow().as_ref() {
+            source.set_paused(true);
+        }
+        pause
+    }
+}
+
 /// A per-window source of frame requests, paced by the display the window is
 /// on. The wrapped dispatch source coalesces vsync ticks from the display's
 /// io thread and invokes `callback(data)` on the main queue.
@@ -337,15 +396,12 @@ impl WindowFrameSource {
         Ok(())
     }
 
-    /// PERCH: whether the source is subscribed to a display link now.
-    pub fn is_running(&self) -> bool {
-        self.registration.is_some()
-    }
-
-    /// PERCH: the dispatch source that delivers frame requests, so a waker can deliver one while
-    /// the link is paused (`merge_data` runs the callback on the main queue).
-    pub fn requests(&self) -> DispatchRetained<DispatchSource> {
-        self.frame_requests.clone()
+    pub fn debug_state(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "CVDisplayLink",
+            "attached": self.registration.is_some(),
+            "display_id": self.registration.map(|(display_id, _)| display_id),
+        })
     }
 
     pub fn take_signal(&self) -> Option<(Instant, FrameRequestSource)> {
@@ -357,58 +413,6 @@ impl WindowFrameSource {
             unsubscribe(display_id, subscriber_id);
         }
         self.signal.take();
-    }
-}
-
-/// PERCH: when a window's display link pauses. Upstream ran the link (and woke the main thread
-/// on every vsync, 120 times a second on a ProMotion display) for as long as the window was
-/// visible, even with nothing to draw. GPUI's core already tells a platform when a window wants
-/// a frame (`PlatformWindow::frame_waker`), so the link pauses after [`Self::IDLE_FRAMES`]
-/// requests that nothing wanted, and the waker delivers the next request itself and restarts it.
-#[derive(Default)]
-pub struct FrameDemand {
-    demanded: AtomicBool,
-    paused: AtomicBool,
-    idle_frames: AtomicU32,
-}
-
-impl FrameDemand {
-    /// Vsyncs with nothing to draw before the link pauses: long enough that steady output (a
-    /// terminal streaming, an animation) keeps it running, short enough to cost nothing at rest.
-    pub const IDLE_FRAMES: u32 = 8;
-
-    /// Something wants a frame. True when the link is paused, so the caller must deliver a frame
-    /// request itself.
-    pub fn demand(&self) -> bool {
-        self.demanded.store(true, Ordering::SeqCst);
-        self.paused.load(Ordering::SeqCst)
-    }
-
-    /// A frame request is being served. True when it came while the link was paused, so the
-    /// caller restarts the link.
-    pub fn begin_frame(&self) -> bool {
-        self.demanded.store(false, Ordering::SeqCst);
-        self.paused.swap(false, Ordering::SeqCst)
-    }
-
-    /// The request was served. True when the link should pause now.
-    pub fn end_frame(&self) -> bool {
-        if self.demanded.load(Ordering::SeqCst) {
-            self.idle_frames.store(0, Ordering::SeqCst);
-            return false;
-        }
-        if self.idle_frames.fetch_add(1, Ordering::SeqCst) + 1 < Self::IDLE_FRAMES {
-            return false;
-        }
-        self.idle_frames.store(0, Ordering::SeqCst);
-        self.paused.store(true, Ordering::SeqCst);
-        true
-    }
-
-    /// The link was (re)started for another reason (visibility, resize, a new screen).
-    pub fn reset(&self) {
-        self.paused.store(false, Ordering::SeqCst);
-        self.idle_frames.store(0, Ordering::SeqCst);
     }
 }
 
@@ -606,6 +610,56 @@ mod sys {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use objc2::AnyThread;
+    use objc2_quartz_core::CAMetalDisplayLink;
+
+    #[test]
+    fn metal_frames_pause_only_when_gpui_neither_draws_nor_asks_again() {
+        let frames = MetalFrames::default();
+
+        frames.begin_frame();
+        assert!(
+            !frames.end_frame(true),
+            "a frame that drew keeps the link running"
+        );
+
+        frames.begin_frame();
+        frames.wake();
+        assert!(
+            !frames.end_frame(false),
+            "a wake during the update, like a throttled frame's retry, keeps it running"
+        );
+
+        frames.wake();
+        frames.begin_frame();
+        assert!(
+            frames.end_frame(false),
+            "a wake before the update was served by it"
+        );
+
+        frames.begin_frame();
+        assert!(frames.end_frame(false), "an idle update pauses the link");
+    }
+
+    #[test]
+    fn a_renderer_draws_normally_after_its_display_link_is_invalidated() {
+        if !MetalFrameSource::is_available() {
+            return;
+        }
+        let mut renderer =
+            crate::renderer::MetalRenderer::new(Default::default(), false, false).unwrap();
+        renderer.update_drawable_size(gpui::size(gpui::DevicePixels(64), gpui::DevicePixels(64)));
+        let layer = renderer.layer().expect("window renderer has a layer");
+        // The link is never added to a run loop: attaching it to the layer is
+        // the state under test.
+        let link = CAMetalDisplayLink::initWithMetalLayer(CAMetalDisplayLink::alloc(), layer);
+        renderer.set_display_link_attached(true);
+        renderer.draw(&gpui::Scene::default());
+
+        link.invalidate();
+        renderer.set_display_link_attached(false);
+        renderer.draw(&gpui::Scene::default());
+    }
 
     #[test]
     fn host_timestamp_preserves_request_age_at_different_clock_rates() {
@@ -646,37 +700,6 @@ mod tests {
                 received_at,
             );
         }
-    }
-
-    // PERCH: the idle pause.
-    #[test]
-    fn a_link_with_nothing_to_draw_pauses_and_a_demand_resumes_it() {
-        let demand = FrameDemand::default();
-        assert!(!demand.demand(), "a running link delivers the request");
-        assert!(!demand.begin_frame());
-        demand.demand(); // the frame draws
-        assert!(!demand.end_frame(), "this frame was wanted");
-        for _ in 1..FrameDemand::IDLE_FRAMES {
-            assert!(!demand.begin_frame());
-            assert!(!demand.end_frame());
-        }
-        assert!(!demand.begin_frame());
-        assert!(demand.end_frame(), "idle vsyncs pause the link");
-        assert!(demand.demand(), "a paused link needs the request delivered");
-        assert!(demand.begin_frame(), "the request restarts the link");
-        assert!(!demand.end_frame());
-    }
-
-    #[test]
-    fn demand_during_a_frame_keeps_the_link_running() {
-        let demand = FrameDemand::default();
-        for _ in 0..FrameDemand::IDLE_FRAMES * 3 {
-            demand.begin_frame();
-            demand.demand();
-            assert!(!demand.end_frame());
-        }
-        demand.reset();
-        assert!(!demand.demand());
     }
 
     fn timestamp(host_time: u64) -> sys::CVTimeStamp {
