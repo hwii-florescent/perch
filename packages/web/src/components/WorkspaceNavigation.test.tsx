@@ -346,3 +346,18 @@ it("Quickchat is the last nest: the nest keys reach it, wrap past it, and leave 
   jumpToNest(2);
   expect(focus).toHaveBeenLastCalledWith("chats");
 });
+
+it("double-click renames a session tab in place: the tab keeps its box, icon and close button", () => {
+  usePerchStore.setState({ sessionId: "session" });
+  render(<TabBar />);
+  const tab = get("tab-session");
+  const box = tab.className;
+  act(() => tab.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+  const input = get("rename-input") as HTMLInputElement;
+  const body = input.parentElement!;
+  expect(body.tagName).toBe("DIV");
+  expect(body.className).toBe(box);
+  expect(body.querySelector("svg")).not.toBeNull();
+  expect(get("tab-close-session")).toBeTruthy();
+  expect(input.value).toBe("My agent");
+});
