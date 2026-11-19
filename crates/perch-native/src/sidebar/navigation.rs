@@ -144,6 +144,10 @@ pub struct SessionInfo {
     pub workspace_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
+    /// The branch of the separate checkout it runs in, when that is not its workspace's folder (a
+    /// sub-session started with `perch spawn --worktree`, which stays with its lead).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkout: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     /// `AgentState`: blocked, working, done or idle.
@@ -482,6 +486,26 @@ pub fn sessions_of_workspace(store: &Store, key: &str) -> Vec<String> {
         .collect()
 }
 
+/// `nestUnderLeads`: `list` with each sub-session right after its lead, in the order given, when
+/// both are listed; a child whose lead is not in it stays where it is. One level, Perch's limit.
+fn nest_under_leads(list: Vec<&SessionSummary>) -> Vec<&SessionSummary> {
+    let nested = |s: &SessionSummary| {
+        s.parent_session_id
+            .as_deref()
+            .is_some_and(|lead| lead != s.id && list.iter().any(|o| o.id == lead))
+    };
+    list.iter()
+        .filter(|s| !nested(s))
+        .flat_map(|lead| {
+            std::iter::once(*lead).chain(
+                list.iter()
+                    .copied()
+                    .filter(|s| nested(s) && s.parent_session_id.as_deref() == Some(&lead.id)),
+            )
+        })
+        .collect()
+}
+
 /// `terminalScopeId`: the Files and Git scope of a terminal on this computer whose shell is
 /// known to be outside its workspace's folder, `term:<session id>:<base64url folder>`; `None`
 /// for any other session, which keeps its workspace.
@@ -792,6 +816,23 @@ impl<'a> Builder<'a> {
         (shown >= 2).then(|| non_empty(&own.branch).unwrap_or_else(|| own.name.clone()))
     }
 
+    /// The branch of the other checkout `session` runs in (navigation.ts `checkout`).
+    fn checkout(&self, session: &SessionSummary) -> Option<String> {
+        session.workspace_id.as_ref()?;
+        let other = self.store.workspaces.iter().find(|w| {
+            session.workspace_id.as_deref() != Some(w.id.as_str())
+                && w.host_id == session.host_id
+                && w.path == session.cwd
+        })?;
+        non_empty(&other.branch)
+            .or_else(|| (!other.name.is_empty()).then(|| other.name.clone()))
+            .or_else(|| {
+                std::path::Path::new(&other.path)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+    }
+
     fn info(&self, session: &SessionSummary) -> SessionInfo {
         let section = self.facts.section(session);
         let need_reason = (section == Attention::NeedsYou).then(|| {
@@ -821,6 +862,7 @@ impl<'a> Builder<'a> {
             workspace_id: session.workspace_id.clone(),
             workspace_label: self.workspace_label(session),
             parent_id: session.parent_session_id.clone(),
+            checkout: self.checkout(session),
             provider: provider_of(session).map(str::to_string),
             state: dot_word(dot(session)),
             section: section_key(section),
@@ -839,13 +881,15 @@ impl<'a> Builder<'a> {
             .map_or(&[][..], |(_, sessions)| sessions.as_slice())
     }
 
-    /// `workspaceTabs` for `workspace`, sessions only: every session of the checkout (listed or
-    /// not) oldest first, then the core's chat order over them.
+    /// `workspaceTabs` for `workspace`, sessions only: the sidebar's order of the checkout's
+    /// sessions (listed or not), which the strip shows too.
     fn strip(&self, workspace: &WorkspaceSummary) -> Vec<&'a SessionSummary> {
         self.strip_of(&workspace.host_id, |s| in_workspace(s, workspace))
     }
 
-    /// [`Self::strip`] for the sessions `of` accepts, on computer `host_id`.
+    /// [`Self::strip`] for the sessions `of` accepts, on computer `host_id` (`sessionOrder`): oldest
+    /// first, the core's chat order over the ones it lists, then each sub-session right after its
+    /// lead (`nestUnderLeads`).
     fn strip_of(
         &self,
         host_id: &str,
@@ -855,7 +899,7 @@ impl<'a> Builder<'a> {
         mine.sort_by_key(|s| s.created_at);
         let order = self.session_order(host_id);
         if order.is_empty() {
-            return mine;
+            return nest_under_leads(mine);
         }
         // `applySessionOrder`: the sessions the order knows take its order in their own slots.
         let known: HashSet<&str> = order.iter().map(String::as_str).collect();
@@ -865,15 +909,17 @@ impl<'a> Builder<'a> {
             .filter(|s| known.contains(s.id.as_str()))
             .collect();
         let mut fill = order_by(slotted, order, |s| s.id.as_str()).into_iter();
-        mine.into_iter()
-            .map(|s| {
-                if known.contains(s.id.as_str()) {
-                    fill.next().unwrap_or(s)
-                } else {
-                    s
-                }
-            })
-            .collect()
+        nest_under_leads(
+            mine.into_iter()
+                .map(|s| {
+                    if known.contains(s.id.as_str()) {
+                        fill.next().unwrap_or(s)
+                    } else {
+                        s
+                    }
+                })
+                .collect(),
+        )
     }
 
     /// A checkout's listed sessions in its strip's order.
@@ -1560,7 +1606,7 @@ mod tests {
     /// The strip lists a workspace's sessions in the core's order and leaves a sub-session where
     /// that order puts it, as the web's strip does: a person's drag is not undone.
     #[test]
-    fn a_workspace_strip_keeps_the_core_order_without_nesting() {
+    fn a_workspace_strip_keeps_the_core_order_with_each_sub_session_after_its_lead() {
         let mut lead = session("lead", LOCAL, "/a", 1);
         let mut other = session("other", LOCAL, "/a", 2);
         let mut kid = session("kid", LOCAL, "/a", 3);
@@ -1574,12 +1620,12 @@ mod tests {
             sessions: vec![lead, other, kid, away],
             ..Store::default()
         };
-        assert_eq!(sessions_of_workspace(&store, "w"), ["lead", "other", "kid"]);
+        assert_eq!(sessions_of_workspace(&store, "w"), ["lead", "kid", "other"]);
         store.order.insert(
             LOCAL.into(),
             (vec![], vec!["other".into(), "kid".into(), "lead".into()]),
         );
-        assert_eq!(sessions_of_workspace(&store, "w"), ["other", "kid", "lead"]);
+        assert_eq!(sessions_of_workspace(&store, "w"), ["other", "lead", "kid"]);
         assert_eq!(sessions_of_workspace(&store, "v"), ["away"]);
         assert!(sessions_of_workspace(&store, "none").is_empty());
     }

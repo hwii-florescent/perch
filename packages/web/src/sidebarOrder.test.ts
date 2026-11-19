@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applySessionOrder, isNestedIn, nestUnderLeads, orderBy, orderProjects, refillSlots, stepTarget, writeScope } from "./sidebarOrder";
+import { applySessionOrder, followSessions, isNestedIn, nestUnderLeads, orderBy, orderProjects, refillSlots, stepTarget, writeScope } from "./sidebarOrder";
 
 describe("nestUnderLeads", () => {
   const item = (id: string, parentSessionId?: string) => ({ id, parentSessionId });
@@ -95,5 +95,22 @@ describe("refillSlots / applySessionOrder", () => {
 
   it("refills by an explicit replacement list", () => {
     expect(refillSlots(["x", "a", "y", "b"], (id) => id === "a" || id === "b", ["b", "a"])).toEqual(["x", "b", "y", "a"]);
+  });
+});
+
+describe("followSessions", () => {
+  const tab = (id: string, parentSessionId?: string) => ({ id, parentSessionId });
+  const isSession = (entry: { id: string }) => !entry.id.startsWith("f");
+  const ids = (list: { id: string }[]) => list.map((entry) => entry.id);
+
+  it("orders the sessions as the sidebar does and keeps each other tab after the session it followed", () => {
+    const strip = [tab("f0"), tab("b"), tab("fb"), tab("a"), tab("fa")];
+    expect(ids(followSessions(strip, isSession, [tab("a"), tab("b")]))).toEqual(["f0", "a", "fa", "b", "fb"]);
+  });
+
+  it("never puts another tab inside a lead's stack", () => {
+    const strip = [tab("lead"), tab("f1"), tab("kid", "lead"), tab("f2"), tab("term")];
+    const sessions = [tab("lead"), tab("kid", "lead"), tab("term")];
+    expect(ids(followSessions(strip, isSession, sessions))).toEqual(["lead", "kid", "f1", "f2", "term"]);
   });
 });

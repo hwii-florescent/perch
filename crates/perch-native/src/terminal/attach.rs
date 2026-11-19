@@ -38,8 +38,9 @@ pub enum ToCore {
     Kill,
     /// End the session, from this connection, which holds the keyboard: the core refuses to end
     /// a session another connection controls. It answers with [`FromCore::Ended`] or
-    /// [`FromCore::EndRefused`].
-    End,
+    /// [`FromCore::EndRefused`]. A lead's sub-sessions stop with it only with
+    /// `stop_sub_sessions`; otherwise they keep running as ordinary sessions.
+    End { stop_sub_sessions: bool },
     /// Copy these files to the core, in order, over a connection of their own, so typing is not
     /// held up: staged on this computer, or, with `host_id`, copied to that computer over SSH.
     /// Answered with [`FromCore::Uploaded`].
@@ -387,9 +388,9 @@ async fn run(
                         asked.insert(id, reply);
                         connection.send(frame).await
                     }
-                    Some(ToCore::End) => {
+                    Some(ToCore::End { stop_sub_sessions }) => {
                         ending = true;
-                        connection.delete_session(&session_id).await
+                        connection.delete_session(&session_id, stop_sub_sessions).await
                     }
                     Some(job) => {
                         transfer(core.clone(), session_id.clone(), events.clone(), job);

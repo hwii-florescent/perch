@@ -437,7 +437,7 @@ fn close_untabbed(rig: &mut Rig) {
     click_at(rig, accept);
     let asked = rig.asked();
     assert!(
-        matches!(&asked[..], [Command::DeleteSession { session_id }] if session_id == "echo"),
+        matches!(&asked[..], [Command::DeleteSession { session_id, .. }] if session_id == "echo"),
         "the answer ends it through the core: {asked:?}"
     );
     assert!(rig.ws(|ws, _, _| ws.screens_open()).is_empty());
@@ -464,10 +464,71 @@ fn close_untabbed(rig: &mut Rig) {
     close(rig, "foxtrot").unwrap();
     let asked = rig.asked();
     assert!(
-        matches!(&asked[..], [Command::DeleteSession { session_id }] if session_id == "foxtrot"),
+        matches!(&asked[..], [Command::DeleteSession { session_id, .. }] if session_id == "foxtrot"),
         "ended through the core: {asked:?}"
     );
     println!("close untabbed: ok");
+}
+
+/// Closing a lead asks what becomes of its sub-sessions even with no agent warning to give (both
+/// are terminals here): the default keeps them, the other button stops them with it.
+fn close_lead(rig: &mut Rig) {
+    rig.asked();
+    let mut more = state();
+    for (id, parent) in [("golf", None), ("hotel", Some("golf"))] {
+        more.apply(&message(
+            json!({"type": "session.updated", "session": {"id": id,
+            "title": id, "cwd": "/work", "createdAt": 20, "status": "idle", "hostId": "local",
+            "cliProviderId": "terminal", "cliStarted": true, "parentSessionId": parent}}),
+        ));
+    }
+    rig.ws(|ws, _, cx| {
+        ws.sidebar()
+            .update(cx, |s, cx| s.apply(Update::Model(more.model()), cx))
+    });
+    rig.draw();
+    let close = |rig: &mut Rig, button: &str| {
+        rig.ws(|ws, window, cx| {
+            ws.run_command(
+                "session.request_close",
+                Some(&json!({"id": "golf"})),
+                window,
+                cx,
+            )
+        })
+        .unwrap();
+        rig.draw();
+        assert_eq!(
+            rig.ws(|ws, _, _| ws.screens_open()),
+            ["confirm"],
+            "asked first"
+        );
+        assert!(rig.asked().is_empty(), "nothing before the answer");
+        let drawn = rig.draw();
+        let at = drawn
+            .iter()
+            .find(|r| r.name == "close-guard-stop-sub-sessions")
+            .expect("the guard asks about the sub-sessions")
+            .bounds
+            .center();
+        match button {
+            "enter" => assert!(rig.press("enter")),
+            _ => click_at(rig, at),
+        }
+        assert!(rig.ws(|ws, _, _| ws.screens_open()).is_empty());
+        rig.asked()
+    };
+    let asked = close(rig, "enter");
+    assert!(
+        matches!(&asked[..], [Command::DeleteSession { session_id, stop_sub_sessions: false }] if session_id == "golf"),
+        "the default (Enter) keeps them: {asked:?}"
+    );
+    let asked = close(rig, "close-guard-stop-sub-sessions");
+    assert!(
+        matches!(&asked[..], [Command::DeleteSession { session_id, stop_sub_sessions: true }] if session_id == "golf"),
+        "the other button stops them: {asked:?}"
+    );
+    println!("close lead: ok");
 }
 
 /// `state()` with a core that runs programs, and `more` of what it said.
@@ -790,6 +851,7 @@ fn main() {
     add_project(&mut rig);
     held_keyboard(&mut rig);
     close_untabbed(&mut rig);
+    close_lead(&mut rig);
     new_project_running(&mut rig);
     empty_workspace(&mut rig);
     close_last_tab(&mut rig);

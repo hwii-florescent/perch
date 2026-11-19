@@ -277,6 +277,8 @@ declare module "@perch/sdk" {
     provider?: string;
     /** A session's agent state. */
     activity?: AgentState;
+    /** A sub-session's lead: with the lead in the strip it is a member of the lead's stack. */
+    parentId?: string;
     blocked?: boolean;
     unseen?: boolean;
     /** A file with unsaved changes. */
@@ -449,6 +451,9 @@ declare module "@perch/sdk" {
     workspaceLabel?: string;
     /** A sub-session's lead (`nestSessions` puts it under its lead). */
     parentId?: string;
+    /** The branch of the separate checkout it runs in, when that is not its workspace's folder (a
+     * sub-session started with `perch spawn --worktree`, which stays with its lead). */
+    checkout?: string;
     /** Its agent (`claude`, `codex`, `terminal`, …). */
     provider?: string;
     state: AgentState;
@@ -1750,8 +1755,11 @@ declare module "@perch/sdk" {
   export interface CloseGuardProps {
     sessionId: string;
     label: string;
-    /** Stops the session; `never` also turns this warning off. */
-    onStop(never: boolean): void;
+    /** How many sub-sessions the session has (absent: none). */
+    subSessions?: number;
+    /** Stops the session; `never` also turns this warning off. With sub-sessions, `stopSubSessions` stops
+     * them too; otherwise the running ones become ordinary sessions where the lead was and keep running. */
+    onStop(never: boolean, stopSubSessions?: boolean): void;
     /** Dismisses this view of it; the session keeps running. */
     onKeepRunning(): void;
     onCancel(): void;

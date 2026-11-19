@@ -289,7 +289,8 @@ tells one copy's values apart. Values are kept in memory only.
   activeId, tabs, tabShape, draggingId}`. Each `TabInfo` has an `id`, `kind`
   (`session`, `file`, `review`, `browser`, `mod`), `label`, `state` (`focused`,
   `visible` in a split, `hidden`), and per kind the agent (`provider`,
-  `activity`), unsaved changes (`dirty`), `preview`, a page's `url`/`icon`.
+  `activity`), a sub-session's lead (`parentId`: with the lead in the strip it is
+  in the lead's stack), unsaved changes (`dirty`), `preview`, a page's `url`/`icon`.
 - `runCommand(command, args)` runs a typed app command (`perch mod commands`),
   the same path keys and `perch mod do` use. A strip or a pane acts on one tab
   by id, shown or not: `tab.select`, `tab.close` (a session through the same

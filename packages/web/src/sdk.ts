@@ -151,10 +151,16 @@ export function useStatusLine(): Sdk.StatusLine {
   const tab = useFileTabs((s) => s.tabs.find((candidate) => fileTabKey(candidate) === s.active));
   const shown = usePerchStore((s) => tabDirectory(s, tab)?.path);
   const shownBranch = usePerchStore((s) => tabDirectory(s, tab)?.branch);
+  // The focused session's own folder: `status.update` speaks of the last session created or resumed on this
+  // connection, not of the tab on screen, so it only fills in for a session not known yet.
+  const ownCwd = knownSession && (knownSession.currentCwd || knownSession.cwd);
+  const ownBranch = usePerchStore((s) => knownSession && (knownSession.currentBranch
+    ?? s.workspaces.find((w) => w.path === ownCwd && w.hostId === hostId)?.branch
+    ?? s.workspaces.find((w) => w.id === knownSession.workspaceId)?.branch));
   return {
     connected, hostId, hostName, hostState, sessionId,
-    cwd: shown ?? (status?.cwd || knownSession?.cwd || workspace?.path || ""),
-    branch: shown !== undefined ? shownBranch : status?.branch ?? workspace?.branch,
+    cwd: shown ?? (ownCwd || status?.cwd || workspace?.path || ""),
+    branch: shown !== undefined ? shownBranch : ownCwd ? ownBranch : status?.branch ?? workspace?.branch,
     contextTokens: status?.contextTokens,
     costUsd: status?.costUsd,
   };
@@ -202,6 +208,7 @@ function tabInfo(entry: TabEntry, state: TabPaneState, dirtyKeys: ReadonlySet<st
     return {
       id: s.id, kind: "session", label: sessionLabel(s), title: s.title, state, provider: s.currentProviderId ?? providers[s.id] ?? s.cliProviderId,
       activity: sessionDotState(s), blocked: s.blocked, unseen: s.unseen, dirty: false, preview: false, path: s.cwd,
+      parentId: s.parentSessionId,
     };
   }
   const tab = entry.tab;

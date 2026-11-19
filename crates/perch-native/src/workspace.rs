@@ -262,8 +262,9 @@ pub struct Workspace {
     history: History,
     /// What the last command could not do, or did instead.
     notice: Option<String>,
-    /// The tab whose close the close guard confirmed: the next close of it ends it.
-    armed_close: Option<String>,
+    /// The tab whose close the close guard confirmed: the next close of it ends it, stopping its
+    /// sub-sessions too if the guard said so.
+    armed_close: Option<(String, bool)>,
     /// The room a lone pane has in the main area, as of the last draw: what a hidden pane is
     /// sized for.
     room: Rc<Cell<Option<Size<Pixels>>>>,
@@ -1727,6 +1728,9 @@ impl Workspace {
                     let before = self.strip_sessions(cx);
                     self.tabs.move_tab(&drag.id, index);
                     self.save_strip(before, cx);
+                    // The sidebar's order and the stacks win over where it was let go: a tab
+                    // dropped inside a stack goes beside it, a sub-session stays in its own.
+                    self.sync_strips(cx);
                 }
             }
             Drop::Pane {
@@ -2422,10 +2426,18 @@ impl Workspace {
             store.deleted.iter().any(|d| d == id) || put_away.contains(id) || ended.contains(id)
         };
         // A session the core lists elsewhere moved; one it does not list is gone, unless it has a
-        // terminal here: a session just launched is opened before the core's list holds it.
+        // terminal here (a session just launched is opened before the core's list holds it) or
+        // the core's shared tabs of this workspace hold it (one the core just placed, whose
+        // session the list has not caught up with, keeps that place, as on the web).
         let panes = &self.panes;
-        let left = |id: &str| {
-            known && (store.sessions.iter().any(|s| s.id == id) || !panes.contains_key(id))
+        let left = |key: &str, id: &str| {
+            let listed = store.sessions.iter().any(|s| s.id == id);
+            let placed = !store.deleted.iter().any(|d| d == id)
+                && store
+                    .shared_tabs
+                    .get(key)
+                    .is_some_and(|t| t.strip.iter().any(|s| s == id));
+            known && (listed || (!panes.contains_key(id) && !placed))
         };
         let mut gone = Vec::new();
         let strips = std::iter::once((&self.tabs_of, &mut self.tabs))
@@ -2435,7 +2447,16 @@ impl Workspace {
                 continue;
             }
             let live = navigation::sessions_of_workspace(&store, key);
-            gone.extend(tabs.sync_sessions(&live, left, away));
+            // A sub-session whose lead is listed too is in that lead's stack.
+            let in_stack = |id: &str| {
+                store
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == id)
+                    .and_then(|s| s.parent_session_id.as_ref())
+                    .is_some_and(|lead| live.contains(lead))
+            };
+            gone.extend(tabs.sync_sessions(&live, in_stack, |id| left(key, id), away));
         }
         for id in gone {
             if !self.every_tabs().any(|tabs| tabs.contains(&id)) {
@@ -3030,9 +3051,10 @@ impl Workspace {
             "session.close" => {
                 let id = self.known_session(text("id"), cx)?;
                 // The tab goes when the core says the session is deleted.
-                self.sidebar
-                    .read(cx)
-                    .send(Command::DeleteSession { session_id: id });
+                self.sidebar.read(cx).send(Command::DeleteSession {
+                    session_id: id,
+                    stop_sub_sessions: false,
+                });
             }
             "session.move" => {
                 let id = self.known_session(text("id"), cx)?;
@@ -3930,8 +3952,9 @@ impl Workspace {
     /// while Settings > Warn before closing an agent is on (it is until the core says otherwise),
     /// with the web's close guard drawn by the `confirm` screen (`CloseGuardProps`): stop for
     /// everyone ends it (and may turn the warning off), keep running only puts the tab away, and
-    /// cancel keeps it. With no mod to ask through it is not ended. Everything else is ended at
-    /// once. Ending asks the core to delete the session over the terminal's own
+    /// cancel keeps it. A lead with sub-sessions always asks, warning or not, whether they stop
+    /// with it ("Close all sub-sessions") or keep running as ordinary sessions (the default).
+    /// With no mod to ask through it is not ended. Everything else is ended at once. Ending asks the core to delete the session over the terminal's own
     /// connection, the one that holds the keyboard, because the core refuses to end a session
     /// another connection controls; the tab goes only when the core confirms it is deleted. If
     /// the core refuses, does not answer in time, or the connection drops, the tab stays and says
@@ -3978,8 +4001,9 @@ impl Workspace {
             }
             return;
         }
-        let armed = self.armed_close.take().is_some_and(|armed| armed == id);
-        if !armed && self.warns_before_ending(&open, cx) {
+        let armed = self.armed_close.take().filter(|(armed, _)| armed == id);
+        let stop_sub_sessions = armed.as_ref().is_some_and(|(_, stop)| *stop);
+        if armed.is_none() && self.warns_before_ending(&open, cx) {
             if !self.screens.has("confirm", cx) {
                 self.notice = Some(
                     "No mod draws the confirmation, so the agent was not stopped. The stock one is \
@@ -3991,9 +4015,10 @@ impl Workspace {
             }
             let target = id.to_string();
             let label = self.title_of(id, cx);
+            let subs = self.sub_sessions_of(id, cx);
             self.open_screen(
                 "confirm",
-                json!({ "sessionId": id, "label": label }),
+                guard_props(id, &label, subs),
                 None,
                 Some(Box::new(move |this, result, _, cx| {
                     if result.get("keepRunning").and_then(Value::as_bool) == Some(true) {
@@ -4002,7 +4027,8 @@ impl Workspace {
                         if result.get("never").and_then(Value::as_bool) == Some(true) {
                             this.change(Change::WarnCloseAgent(false), cx);
                         }
-                        this.armed_close = Some(target.clone());
+                        let stop = result.get("stopSubSessions").and_then(Value::as_bool);
+                        this.armed_close = Some((target.clone(), stop == Some(true)));
                         this.close(&target, cx);
                     }
                 })),
@@ -4021,7 +4047,7 @@ impl Workspace {
             }
         });
         if let Some(view) = view {
-            view.update(cx, |view, _| view.end());
+            view.update(cx, |view, _| view.end(stop_sub_sessions));
         }
         if let Some(pane) = self.panes.get_mut(&id) {
             pane.closing = Some(task);
@@ -4177,12 +4203,14 @@ impl Workspace {
             })
         }
         .ok_or_else(|| format!("No session {id}."))?;
-        let delete = Command::DeleteSession {
-            session_id: id.to_string(),
+        let target = id.to_string();
+        let delete = move |stop_sub_sessions| Command::DeleteSession {
+            session_id: target.clone(),
+            stop_sub_sessions,
         };
         let target = id.to_string();
         if !self.warns_before_ending(&open, cx) {
-            self.sidebar.read(cx).send(delete);
+            self.sidebar.read(cx).send(delete(false));
             return Ok(());
         }
         if !self.screens.has("confirm", cx) {
@@ -4195,9 +4223,10 @@ impl Workspace {
         let label = Some(open.title.clone())
             .filter(|t| !t.trim().is_empty())
             .unwrap_or_else(|| self.title_of(id, cx));
+        let subs = self.sub_sessions_of(id, cx);
         self.open_screen(
             "confirm",
-            json!({ "sessionId": id, "label": label }),
+            guard_props(id, &label, subs),
             None,
             Some(Box::new(move |this, result, _, cx| {
                 if result.get("keepRunning").and_then(Value::as_bool) == Some(true) {
@@ -4210,8 +4239,9 @@ impl Workspace {
                 if result.get("never").and_then(Value::as_bool) == Some(true) {
                     this.change(Change::WarnCloseAgent(false), cx);
                 }
+                let stop = result.get("stopSubSessions").and_then(Value::as_bool);
                 let sidebar = this.sidebar.read(cx);
-                sidebar.send(delete);
+                sidebar.send(delete(stop == Some(true)));
                 if sidebar.take_refused() {
                     this.notice = Some(crate::client::NOT_CONNECTED.into());
                     cx.notify();
@@ -4242,6 +4272,10 @@ impl Workspace {
     /// else what it was launched with, as the web's `isAgentSession`) and the core's warning
     /// setting is on, which it is until the settings arrive.
     fn warns_before_ending(&self, open: &OpenSession, cx: &App) -> bool {
+        // A lead with sub-sessions always asks whether they stop with it, warning or not.
+        if self.sub_sessions_of(&open.session_id, cx) > 0 {
+            return true;
+        }
         let sidebar = self.sidebar.read(cx);
         let running = sidebar
             .find_session(&open.session_id)
@@ -4253,6 +4287,17 @@ impl Workspace {
                 .terminal
                 .as_ref()
                 .is_none_or(|t| t.warn_close_agent)
+    }
+
+    /// How many sub-sessions of `lead` the core lists.
+    fn sub_sessions_of(&self, lead: &str, cx: &App) -> usize {
+        let sidebar = self.sidebar.read(cx);
+        let store = &sidebar.model().store;
+        store
+            .sessions
+            .iter()
+            .filter(|s| s.parent_session_id.as_deref() == Some(lead))
+            .count()
     }
 
     /// Keep the terminals of the tabs out of sight within [`MAX_PARKED`], letting go of the ones
@@ -5589,6 +5634,15 @@ impl gpui::Render for Workspace {
             .children(columns)
             .children(pages_follow)
     }
+}
+
+/// The close guard's props (`CloseGuardProps`): `subSessions` only for a lead that has some.
+fn guard_props(id: &str, label: &str, sub_sessions: usize) -> Value {
+    let mut props = json!({ "sessionId": id, "label": label });
+    if sub_sessions > 0 {
+        props["subSessions"] = json!(sub_sessions);
+    }
+    props
 }
 
 #[cfg(test)]

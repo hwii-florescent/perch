@@ -322,9 +322,9 @@ fn main() {
     rig.asked();
     rig.click("agent-control-ended-button:cli-close-session");
     assert!(
-        rig.asked()
-            .iter()
-            .any(|c| matches!(c, Command::DeleteSession { session_id } if session_id == "alpha")),
+        rig.asked().iter().any(
+            |c| matches!(c, Command::DeleteSession { session_id, .. } if session_id == "alpha")
+        ),
         "Close session asks the core"
     );
     assert!(

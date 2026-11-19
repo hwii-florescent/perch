@@ -296,8 +296,10 @@ pub(super) async fn start(
 
     let mut cwd = lead.cwd.clone();
     if request.worktree {
-        cwd = place_in_worktree(app, &row, &workspace, &request.task, None).await?;
+        let name = checkout_name(request.name.as_deref(), &request.task);
+        cwd = place_in_worktree(app, &row, &workspace, &name, None).await?;
     }
+    place_beside_lead(app, &caller.session_id, &child_id);
 
     let launch_app = app.clone();
     let launch_row = row.clone();
@@ -336,25 +338,120 @@ fn discard(app: &AppState, row: &SubSessionRow) {
     }
 }
 
+/// What a spawned checkout and its branch are named from: `--name` when it makes a branch name,
+/// else the task's first line (`worktree::create` slugs either).
+fn checkout_name(name: Option<&str>, task: &str) -> String {
+    match name.filter(|name| !crate::worktree::slugify_task_name(name).is_empty()) {
+        Some(name) => name.to_string(),
+        None => task
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take(60)
+            .collect(),
+    }
+}
+
+/// A new child's default place: right after its lead and the lead's earlier children in the
+/// host's chat order, which the sidebar and the strip both show (clients nest a child under its
+/// lead anyway; this keeps the order they write back the same). Only when the order lists the lead.
+fn place_beside_lead(app: &AppState, lead: &str, child: &str) {
+    let siblings: std::collections::HashSet<String> = app
+        .db
+        .sub_sessions_of(lead)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|row| row.child_session_id)
+        .collect();
+    rearrange(app, |order| {
+        sub_sessions::place_after_lead(order, lead, child, |id| siblings.contains(id))
+    });
+}
+
+/// Apply `edit` to the host's chat order and broadcast it like a person's write.
+fn rearrange(app: &AppState, edit: impl FnOnce(&mut Vec<String>) -> bool) {
+    let _guard = app.foundation_lock.lock().unwrap();
+    let mut order = app.db.workspace_order(crate::db::ORDER_SESSIONS);
+    if !edit(&mut order) {
+        return;
+    }
+    match app.db.set_workspace_order(crate::db::ORDER_SESSIONS, order) {
+        Ok(true) => broadcast_foundation(app, workspace::order_message(app, None)),
+        Ok(false) => {}
+        Err(error) => tracing::warn!(%error, "could not place a sub-session in the chat order"),
+    }
+}
+
+/// A lead closes keeping its children, or exits on its own: every child not stopped becomes an
+/// ordinary session, still running, in its own Workspace and folder. Its record goes (nothing
+/// routes it to the lead again) and it takes the lead's place in the chat order, before the lead's
+/// row goes; an order that does not list the lead yet is first given the Workspace's sessions,
+/// oldest first, as clients show them. Every client hears each child's new summary. Returns the
+/// children promoted.
+pub(super) fn promote_children_of(app: &AppState, lead: &str) -> Vec<String> {
+    let workspace = app
+        .db
+        .get_session(lead)
+        .ok()
+        .flatten()
+        .and_then(|row| row.workspace_id);
+    let children = match app.db.detach_children(lead) {
+        Ok(children) => children,
+        Err(error) => {
+            tracing::warn!(%error, "could not free a lead's sub-sessions");
+            return Vec::new();
+        }
+    };
+    if children.is_empty() {
+        return children;
+    }
+    let mut shown: Vec<String> = app
+        .db
+        .list_sessions()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|row| row.workspace_id.is_some() && row.workspace_id == workspace)
+        .map(|row| row.id)
+        .collect();
+    shown.reverse();
+    rearrange(app, |order| {
+        if !order.iter().any(|id| id == lead) {
+            let missing: Vec<String> = shown.into_iter().filter(|id| !order.contains(id)).collect();
+            order.extend(missing);
+        }
+        sub_sessions::move_after_lead(order, lead, &children)
+    });
+    for child in &children {
+        notify_session_updated(app, child);
+    }
+    children
+}
+
 /// `perch spawn --worktree`: make the child a checkout of the lead's repository, registered under
-/// the lead's Workspace, and move its session and record there. Returns the directory it starts in. A
-/// failure at any step discards the child, which has not started. `path` is the checkout's
-/// location; `None` is Perch's default (`~/.perch/worktrees/<repo>/<branch>`).
+/// the lead's Workspace and hidden there (it hosts only this sub-session, which nests under its lead;
+/// a person can show it). The child's session stays in the lead's Workspace and starts in the
+/// checkout, which its record names. Returns the directory it starts in. A failure at any step
+/// discards the child, which has not started. `name` names the checkout and its branch; `path` is
+/// its location, `None` being Perch's default (`~/.perch/worktrees/<repo>/<branch>`).
 async fn place_in_worktree(
     app: &AppState,
     row: &SubSessionRow,
     lead_workspace: &crate::db::WorkspaceRow,
-    task: &str,
+    name: &str,
     path: Option<String>,
 ) -> Result<String, Failure> {
-    match make_worktree(app, lead_workspace, task, path).await {
+    match make_worktree(app, lead_workspace, name, path).await {
         Ok((checkout, created)) => {
             if let Err(error) =
                 app.db
-                    .move_child_to_workspace(&row.child_session_id, &checkout, &created)
+                    .run_child_in_checkout(&row.child_session_id, &checkout, &created)
             {
                 discard(app, row);
                 return Err(internal("place the sub-session in its checkout", error));
+            }
+            if let Err(error) = workspace::hide_workspace(app, &checkout.id) {
+                tracing::warn!(%error, "could not keep a sub-session's checkout out of the sidebar");
             }
             Ok(created)
         }
@@ -369,19 +466,12 @@ async fn place_in_worktree(
 async fn make_worktree(
     app: &AppState,
     parent: &crate::db::WorkspaceRow,
-    task: &str,
+    name: &str,
     path: Option<String>,
 ) -> Result<(crate::db::WorkspaceRow, String), String> {
-    let name: String = task
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .chars()
-        .take(60)
-        .collect();
     let created = crate::worktree::create(&crate::worktree::CreateRequest {
         repo_path: parent.path.clone(),
-        name: Some(name),
+        name: Some(name.to_string()),
         new_branch: true,
         path,
         ..Default::default()
@@ -1295,7 +1385,7 @@ pub(super) mod tests {
         // A child still starting cannot be shown stopped: the lead stays, with its record.
         db.move_sub_session("child", &[SubState::Running], SubState::Starting)
             .unwrap();
-        let refused = super::super::session::delete_session(&app, "lead").unwrap_err();
+        let refused = super::super::session::delete_session(&app, "lead", true).unwrap_err();
         assert!(
             refused.to_string().contains("session retained"),
             "{refused}"
@@ -1310,7 +1400,7 @@ pub(super) mod tests {
         // A running child is stopped, and only then is the lead forgotten.
         db.move_sub_session("child", &[SubState::Starting], SubState::Running)
             .unwrap();
-        super::super::session::delete_session(&app, "lead").unwrap();
+        super::super::session::delete_session(&app, "lead", true).unwrap();
         assert_eq!(
             crate::daemon::session_state(&terminal),
             crate::daemon::RuntimeState::Exited
@@ -1497,11 +1587,13 @@ pub(super) mod tests {
         assert!(status.success(), "git {args:?}");
     }
 
-    /// `perch spawn --worktree`: the child gets a new checkout of the lead's repository, registered
-    /// under the lead's Workspace in the same Project, and its session and record move there; a repository
-    /// that cannot make one discards the child.
+    /// `perch spawn --worktree`: the child gets a new checkout of the lead's repository, named and
+    /// branched from its `--name`, registered under the lead's Workspace in the same Project and hidden
+    /// there; the child's session stays in the lead's Workspace (it nests under the lead and joins its
+    /// tabs) and starts in the checkout, which its record names. A repository that cannot make one
+    /// discards the child.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn spawn_worktree_places_the_child_in_a_checkout_under_the_leads_nest() {
+    async fn spawn_worktree_runs_the_child_in_a_checkout_but_keeps_it_with_its_lead() {
         let root = std::env::temp_dir().join(format!("perch-sub-worktree-{}", Uuid::new_v4()));
         let repo = root.join("repo");
         std::fs::create_dir_all(&repo).unwrap();
@@ -1514,12 +1606,28 @@ pub(super) mod tests {
         let app = crate::server::booted_state(address);
         let (lead_nest, child) = lead_with_child(&db, &repo, SubState::Starting);
 
-        let checkout_path = root.join("checkouts").join("fix-the-parser");
+        assert_eq!(
+            checkout_name(
+                Some("Review shared tabs"),
+                "Read and execute /plans/task.md"
+            ),
+            "Review shared tabs"
+        );
+        assert_eq!(
+            checkout_name(Some("🚀"), "fix the parser\nmore"),
+            "fix the parser"
+        );
+        assert_eq!(
+            checkout_name(None, "fix the parser\nmore"),
+            "fix the parser"
+        );
+
+        let checkout_path = root.join("checkouts").join("review");
         let cwd = place_in_worktree(
             &app,
             &child,
             &lead_nest,
-            "fix the parser\nmore detail",
+            &checkout_name(Some("Review shared tabs"), "Read and execute the plan"),
             Some(checkout_path.to_string_lossy().into_owned()),
         )
         .await
@@ -1533,17 +1641,25 @@ pub(super) mod tests {
         let listing = crate::worktree::list(&repo.to_string_lossy())
             .await
             .unwrap();
-        assert!(listing
+        let entry = listing
             .worktrees
             .iter()
-            .any(
-                |entry| std::fs::canonicalize(&entry.path).ok().as_deref() == Some(&checkout_path)
-            ));
-        // Registered under the lead's Workspace, in the lead's Project, and the child lives in it.
+            .find(|entry| {
+                std::fs::canonicalize(&entry.path).ok().as_deref() == Some(&checkout_path)
+            })
+            .expect("the checkout is a worktree of the lead's repository");
+        assert_eq!(
+            entry.branch.as_deref(),
+            Some("review-shared-tabs"),
+            "named from --name"
+        );
+        // The session stays in the lead's Workspace and starts in the checkout.
         let session = db.get_session("child").unwrap().unwrap();
         assert_eq!(session.cwd, cwd);
+        assert_eq!(session.workspace_id.as_deref(), Some(lead_nest.id.as_str()));
+        // The record names the checkout: registered under the lead's Workspace, in its Project, hidden.
         let checkout = db
-            .resolve_workspace(session.workspace_id.as_deref().unwrap())
+            .resolve_workspace(&db.sub_session("child").unwrap().unwrap().workspace_id)
             .unwrap();
         assert_ne!(checkout.id, lead_nest.id);
         assert_eq!(checkout.project_id, lead_nest.project_id);
@@ -1555,9 +1671,9 @@ pub(super) mod tests {
             std::fs::canonicalize(&checkout.path).unwrap(),
             checkout_path
         );
-        assert_eq!(
-            db.sub_session("child").unwrap().unwrap().workspace_id,
-            checkout.id
+        assert!(
+            checkout.hidden,
+            "no separate sidebar row while it hosts only the sub-session"
         );
         // The lead stays where it was.
         assert_eq!(
@@ -1598,6 +1714,89 @@ pub(super) mod tests {
         assert_eq!(status, StatusCode::BAD_GATEWAY);
         assert!(db.get_session("child-two").unwrap().is_none());
         assert!(db.sub_session("child-two").unwrap().is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A lead closed with "Keep them as sessions" (or one that exits on its own) frees its running
+    /// children: no record routes them to the lead, they nest under nothing, they keep running, and
+    /// they take the lead's place in the chat order, whatever a person did to them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_lead_closed_keeping_its_children_promotes_them_to_its_place() {
+        let root = std::env::temp_dir().join(format!("perch-sub-promote-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let (address, db) = boot(&root).await;
+        let app = crate::server::booted_state(address);
+        let (workspace, _) = lead_with_child(&db, &nest, SubState::Running);
+        let cwd = nest.to_string_lossy().into_owned();
+        db.create_session_in_workspace("terminal", &workspace, &cwd)
+            .unwrap();
+        // A person dragged the child to the end.
+        let ids = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        db.set_workspace_order(
+            crate::db::ORDER_SESSIONS,
+            ids(&["lead", "terminal", "child"]),
+        )
+        .unwrap();
+
+        super::super::session::delete_session(&app, "lead", false).unwrap();
+
+        assert!(!db.session_exists("lead").unwrap());
+        assert!(db.session_exists("child").unwrap());
+        assert_eq!(db.parent_of("child").unwrap(), None);
+        assert!(db.sub_session("child").unwrap().is_none());
+        assert!(db.sub_sessions_of("lead").unwrap().is_empty());
+        // Where the lead was: before the terminal (clients skip the deleted lead's own id).
+        assert_eq!(
+            db.workspace_order(crate::db::ORDER_SESSIONS),
+            ids(&["lead", "child", "terminal"])
+        );
+        // Nothing left to promote, and a stopped child would have stayed the lead's record.
+        assert!(promote_children_of(&app, "lead").is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A new sub-session is placed right after its lead and the lead's earlier children, in the
+    /// chat order and in the lead Workspace's shared strip, where the sidebar nests it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_new_sub_session_is_placed_after_its_lead_in_the_strip_and_the_chat_order() {
+        let root = std::env::temp_dir().join(format!("perch-sub-place-{}", Uuid::new_v4()));
+        let nest = root.join("nest");
+        std::fs::create_dir_all(&nest).unwrap();
+        let (address, db) = boot(&root).await;
+        let app = crate::server::booted_state(address);
+        let (workspace, _) = lead_with_child(&db, &nest, SubState::Running);
+        let cwd = nest.to_string_lossy().into_owned();
+        db.create_session_in_workspace("terminal", &workspace, &cwd)
+            .unwrap();
+        let ids = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        db.set_workspace_order(crate::db::ORDER_SESSIONS, ids(&["lead", "terminal"]))
+            .unwrap();
+
+        place_beside_lead(&app, "lead", "child");
+        let lead = db
+            .issue_in_current_run(&AgentKey::new(&workspace.id, "lead", "claude").unwrap())
+            .unwrap();
+        let Reserved::New(_) = db
+            .reserve_sub_session(&crate::db::SubSessionSpec {
+                child_session_id: "child-two",
+                parent_session_id: "lead",
+                parent_incarnation: &lead.incarnation,
+                workspace: &workspace,
+                cwd: &cwd,
+                provider_id: "codex",
+                model: None,
+                spawn_key: "k2",
+                task: "again",
+            })
+            .unwrap()
+        else {
+            panic!("the second child should have been recorded");
+        };
+        place_beside_lead(&app, "lead", "child-two");
+
+        let placed = ids(&["lead", "child", "child-two", "terminal"]);
+        assert_eq!(db.workspace_order(crate::db::ORDER_SESSIONS), placed);
         let _ = std::fs::remove_dir_all(root);
     }
 

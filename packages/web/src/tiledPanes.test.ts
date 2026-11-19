@@ -27,6 +27,9 @@ beforeEach(() => {
     workspaces: [{ id: "w", projectId: "p", hostId: "local", path: "/p", name: "w", dirty: false, state: "active", createdAt: 1, updatedAt: 1 }],
     switchSession: (id) => usePerchStore.setState({ sessionId: id }),
     deleteSession: vi.fn(),
+    // The strip's sessions are the core's chat order, which a swap writes.
+    workspaceOrderByHost: {},
+    setWorkspaceOrder: (hostId, order) => usePerchStore.setState({ workspaceOrderByHost: { [hostId]: { projects: [], sessions: order.sessions ?? [] } } }),
   });
   useSplitSets.setState({ sets: [{ ids: ["a", "b"], sizes: [0.5, 0.5] }], zoomedId: null });
   registerDockviewController(dock);

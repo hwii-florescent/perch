@@ -1280,7 +1280,10 @@ fn asked(rx: &mut UnboundedReceiver<ToCore>) -> Vec<ToCore> {
 
 /// How many times the core was asked to end the session.
 fn ends(rx: &mut UnboundedReceiver<ToCore>) -> usize {
-    asked(rx).iter().filter(|m| **m == ToCore::End).count()
+    asked(rx)
+        .iter()
+        .filter(|m| matches!(m, ToCore::End { .. }))
+        .count()
 }
 
 /// Closing a tab ends its session as the web does: a terminal at once, an agent only through the
@@ -1302,7 +1305,9 @@ fn closing_a_tab_ends_its_session() {
     let (mut rx, core) = h.live();
     assert_eq!(h.run("tabs.close", json!({})), Ok(()));
     assert!(
-        asked(&mut rx).contains(&ToCore::End),
+        asked(&mut rx)
+            .iter()
+            .any(|m| matches!(m, ToCore::End { .. })),
         "a terminal ends at once"
     );
     assert!(h.notice().unwrap().starts_with("Ending the session"));
@@ -1388,9 +1393,9 @@ fn a_tab_that_cannot_end_its_session_is_put_away() {
     assert_eq!(h.run("tabs.close", json!({})), Ok(()));
     let asked: Vec<Command> = std::iter::from_fn(|| sent.try_recv().ok()).collect();
     assert!(
-        asked
-            .iter()
-            .any(|c| matches!(c, Command::DeleteSession { session_id } if session_id == "blank")),
+        asked.iter().any(
+            |c| matches!(c, Command::DeleteSession { session_id, .. } if session_id == "blank")
+        ),
         "the core is asked to delete it: {asked:?}"
     );
     assert!(
@@ -1427,7 +1432,9 @@ fn a_deleted_session_closes_its_tab_whenever_the_core_says_so() {
     h.draw();
     let (mut rx, core) = h.live();
     assert_eq!(h.run("tabs.close", json!({})), Ok(()));
-    assert!(asked(&mut rx).contains(&ToCore::End));
+    assert!(asked(&mut rx).contains(&ToCore::End {
+        stop_sub_sessions: false
+    }));
     h.cx.advance_clock(std::time::Duration::from_secs(6));
     h.cx.run_until_parked();
     assert!(
@@ -1447,7 +1454,9 @@ fn a_deleted_session_closes_its_tab_whenever_the_core_says_so() {
     h.draw();
     let (mut rx, core) = h.live();
     assert_eq!(h.run("tabs.close", json!({})), Ok(()));
-    assert!(asked(&mut rx).contains(&ToCore::End));
+    assert!(asked(&mut rx).contains(&ToCore::End {
+        stop_sub_sessions: false
+    }));
     core.unbounded_send(FromCore::EndRefused("another view controls it".into()))
         .unwrap();
     h.cx.run_until_parked();
@@ -1468,7 +1477,7 @@ fn a_deleted_session_closes_its_tab_whenever_the_core_says_so() {
 }
 
 /// Every session of the workspace has a tab, sub-sessions too, as the web's strip lists them:
-/// oldest first, behind the tabs already there, leaving the keyboard where it is.
+/// in the sidebar's order, each sub-session in its lead's stack, leaving the keyboard where it is.
 fn sub_sessions_open_beside_their_lead() {
     let terminal = |parent: Option<&str>| match parent {
         Some(p) => json!({"cliProviderId": "terminal", "parentSessionId": p}),
@@ -1493,8 +1502,8 @@ fn sub_sessions_open_beside_their_lead() {
         Some("lead".into())
     );
 
-    // The lead spawns another: its tab opens in the order the core's list gives (oldest first), and
-    // the lead keeps the keyboard; so does a session of this workspace whose lead is elsewhere.
+    // The lead spawns another: its tab joins the lead's stack, and the lead keeps the keyboard; a
+    // session of this workspace whose lead is elsewhere goes by the core's order (oldest last).
     let more = model(&[
         ("lead", terminal(None)),
         ("k1", terminal(Some("lead"))),
@@ -1509,7 +1518,7 @@ fn sub_sessions_open_beside_their_lead() {
         })
         .unwrap();
     h.cx.run_until_parked();
-    assert_eq!(strip(&mut h), ["lead", "k1", "loose", "k2", "k3"]);
+    assert_eq!(strip(&mut h), ["lead", "k1", "k2", "loose", "k3"]);
     assert_eq!(
         h.ws(|ws| ws.tabs().active().map(str::to_string)),
         Some("lead".into())
@@ -1538,7 +1547,7 @@ fn sub_sessions_open_beside_their_lead() {
     h.cx.run_until_parked();
     assert_eq!(
         strip(&mut h),
-        ["lead", "loose", "k2", "k3"],
+        ["lead", "k2", "loose", "k3"],
         "put away, it stays away"
     );
     h.open("k1");

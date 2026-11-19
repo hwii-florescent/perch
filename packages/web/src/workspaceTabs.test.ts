@@ -35,9 +35,17 @@ describe("workspaceTabs", () => {
     expect(workspaceTabs(nav(), [file, review]).map((e) => e.id)).toEqual(["a", "b", fileTabKey(file), fileTabKey(review)]);
   });
 
-  it("applies one stored order across sessions and resources", () => {
-    saveTabOrder(tabOrderKey(nav())!, [fileTabKey(file), "b", "a"]);
-    expect(workspaceTabs(nav(), [file, review]).map((e) => e.id)).toEqual([fileTabKey(file), "b", "a", fileTabKey(review)]);
+  it("keeps the sidebar's session order and each stored resource beside the session it followed", () => {
+    // A viewer's own drag order cannot reorder the sessions: they are the sidebar's (here, oldest first).
+    saveTabOrder(tabOrderKey(nav())!, [fileTabKey(file), "b", "a", fileTabKey(review)]);
+    expect(workspaceTabs(nav(), [file, review]).map((e) => e.id)).toEqual([fileTabKey(file), "a", fileTabKey(review), "b"]);
+  });
+
+  it("puts a sub-session in its lead's stack and keeps other tabs out of the stack", () => {
+    const kid = { ...session("kid", 3), parentSessionId: "a" } as SessionSummary;
+    const state = { ...nav(), sessions: [...nav().sessions, kid] };
+    saveTabOrder(tabOrderKey(nav())!, ["b", "a", fileTabKey(file), "kid"]);
+    expect(workspaceTabs(state, [file]).map((e) => e.id)).toEqual(["a", "kid", fileTabKey(file), "b"]);
   });
 
   it("leaves out another workspace's resources", () => {
@@ -58,7 +66,7 @@ describe("workspaceTabs", () => {
   describe("with the core's chat order", () => {
     const withCore = (sessions: string[]) => ({ ...nav(), workspaceOrderByHost: { local: { projects: [], sessions } } });
 
-    it("refills the session slots in core order and leaves file tabs in place", () => {
+    it("orders the sessions by the core and keeps file tabs beside theirs", () => {
       expect(workspaceTabs(withCore(["b", "a"]), [file, review]).map((e) => e.id)).toEqual(["b", "a", fileTabKey(file), fileTabKey(review)]);
       saveTabOrder(tabOrderKey(nav())!, [fileTabKey(file), "a", "b"]);
       expect(workspaceTabs(withCore(["b", "a"]), [file, review]).map((e) => e.id)).toEqual([fileTabKey(file), "b", "a", fileTabKey(review)]);
@@ -111,12 +119,12 @@ describe("scoped writes: a move only touches the workspaces it involves", () => 
     usePerchStore.setState({ ...nav("a1"), sessions, workspaces: [workspace("w1"), workspace("w2")], workspaceOrderByHost: {}, setWorkspaceOrder });
   });
 
-  it("a strip drag in one workspace leaves the other strip identical, custom per-viewer order included", () => {
+  it("a strip drag in one workspace leaves the other strip identical; a per-viewer order does not reorder sessions", () => {
     saveTabOrder(key("w2"), ["b3", "b1", "b2"]);
-    expect(strip("w2")).toEqual(["b3", "b1", "b2"]);
+    expect(strip("w2")).toEqual(["b1", "b2", "b3"]);
     saveTabStrip(key("w1"), ["a3", "a1", "a2"]);
     expect(strip("w1")).toEqual(["a3", "a1", "a2"]);
-    expect(strip("w2")).toEqual(["b3", "b1", "b2"]);
+    expect(strip("w2")).toEqual(["b1", "b2", "b3"]);
     expect(core()).toEqual(["a3", "a1", "a2"]); // the other workspace stays unlisted
   });
 

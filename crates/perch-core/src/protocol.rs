@@ -2049,9 +2049,15 @@ pub enum ClientMessage {
     HostsDelete { id: String },
 
     /// Permanently delete a session: its messages, its DB row, any in-flight
-    /// turn, its agent and its shells. Closing a tab sends this.
+    /// turn, its agent and its shells. Closing a tab sends this. A lead's live
+    /// sub-sessions are stopped too only with `stop_sub_sessions`; otherwise
+    /// (and from an older client) they become ordinary sessions in its place.
     #[serde(rename = "session.delete", rename_all = "camelCase")]
-    SessionDelete { session_id: String },
+    SessionDelete {
+        session_id: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        stop_sub_sessions: bool,
+    },
 
     /// Request the persisted dockview layout blob for a session (Phase 3:
     /// Workspace → Tab → Pane model). The server never interprets the JSON —

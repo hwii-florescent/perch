@@ -428,7 +428,7 @@ pub(super) fn remove_legacy_chats(app: &AppState) -> anyhow::Result<usize> {
             app.db.back_up_once(".pre-quickchat.bak")?;
         }
         for id in &gone {
-            delete_session(app, id)?;
+            delete_session(app, id, true)?;
         }
         waiting += live.len();
         if live.is_empty() {
@@ -786,7 +786,12 @@ pub(super) fn handle_commands_list(state: &Arc<ConnState>, raw_text: &str, sessi
     });
 }
 
-pub(super) fn handle_session_delete(state: &Arc<ConnState>, raw_text: &str, session_id: String) {
+pub(super) fn handle_session_delete(
+    state: &Arc<ConnState>,
+    raw_text: &str,
+    session_id: String,
+    stop_sub_sessions: bool,
+) {
     // Route remote sessions through the hub.
     if let Some(host_id) = state.app.hub.route_for_session(&session_id) {
         state.app.hub.forward(&host_id, raw_text);
@@ -819,6 +824,21 @@ pub(super) fn handle_session_delete(state: &Arc<ConnState>, raw_text: &str, sess
         fail(&state.out_tx, None, "agent_control_required",
             "Another view controls this session. Dismiss your view, or take control before stopping it for everyone", false);
         return;
+    }
+
+    // A lead's children are settled before anything of the lead stops, so its exit (which promotes
+    // whatever children it still has) cannot overtake a person's "close all sub-sessions".
+    if stop_sub_sessions {
+        if let Err(error) = super::sub_sessions::stop_children_of(&state.app, &session_id) {
+            fail(
+                &state.out_tx,
+                None,
+                "session_delete_failed",
+                format!("session.delete failed: {error}; session retained"),
+                true,
+            );
+            return;
+        }
     }
 
     // Drop this connection's runtime for the session.
@@ -863,7 +883,7 @@ pub(super) fn handle_session_delete(state: &Arc<ConnState>, raw_text: &str, sess
     if state.active_session_id.lock().unwrap().as_deref() == Some(session_id.as_str()) {
         *state.active_session_id.lock().unwrap() = None;
     }
-    if let Err(error) = delete_session(&state.app, &session_id) {
+    if let Err(error) = delete_session(&state.app, &session_id, stop_sub_sessions) {
         fail(
             &state.out_tx,
             None,
@@ -876,12 +896,21 @@ pub(super) fn handle_session_delete(state: &Arc<ConnState>, raw_text: &str, sess
 
 /// Delete a local session for every viewer: its agents and shells end, then
 /// its row goes. The project folder and the agent's own transcript stay on
-/// disk; resuming is the CLI's (`claude --resume <id>`).
-pub(super) fn delete_session(app: &AppState, session_id: &str) -> anyhow::Result<()> {
-    // A lead's live children stop first, each confirmed like a person's kill. If one cannot be
-    // shown stopped the lead is kept: unknown is not exit. (Takes the operation lock itself.)
-    super::sub_sessions::stop_children_of(app, session_id)
-        .map_err(|error| anyhow::anyhow!("{error}; session retained"))?;
+/// disk; resuming is the CLI's (`claude --resume <id>`). A lead's children are stopped with it
+/// when `stop_sub_sessions` says so, else they become ordinary sessions in its place.
+pub(super) fn delete_session(
+    app: &AppState,
+    session_id: &str,
+    stop_sub_sessions: bool,
+) -> anyhow::Result<()> {
+    if stop_sub_sessions {
+        // A lead's live children stop first, each confirmed like a person's kill. If one cannot
+        // be shown stopped the lead is kept: unknown is not exit. (Takes the operation lock.)
+        super::sub_sessions::stop_children_of(app, session_id)
+            .map_err(|error| anyhow::anyhow!("{error}; session retained"))?;
+    } else {
+        super::sub_sessions::promote_children_of(app, session_id);
+    }
     let _agent_operation = app.agent_operation_lock.lock().unwrap();
     // Read before the rows go: each run the lead began has a notes folder of its own, and its
     // stopped children are already closed, so they go with it rather than coming back as rows.

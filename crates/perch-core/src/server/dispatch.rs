@@ -591,9 +591,10 @@ pub(super) fn handle_message(state: &Arc<ConnState>, msg: ClientMessage, raw_tex
         // structure, delete its DB rows, then fan the deletion out to every
         // connection (not just this one — there is no DB row left for the
         // usual session.updated broadcast path to look up).
-        ClientMessage::SessionDelete { session_id } => {
-            session::handle_session_delete(state, raw_text, session_id)
-        }
+        ClientMessage::SessionDelete {
+            session_id,
+            stop_sub_sessions,
+        } => session::handle_session_delete(state, raw_text, session_id, stop_sub_sessions),
         // Phase 3: Workspace → Tab → Pane model — per-session dockview layout
         // persistence. The layout blob is opaque JSON; the server only stores
         // and echoes it.

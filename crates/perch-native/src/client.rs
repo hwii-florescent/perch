@@ -685,8 +685,14 @@ impl Connection {
     /// Ask the core to end a session and delete it. The core answers every connection with
     /// `session.deleted`, or this one with an error (it refuses while another view controls the
     /// session), so the caller waits for one of the two.
-    pub async fn delete_session(&mut self, session_id: &str) -> Result<()> {
-        self.send(delete_frame(session_id)).await
+    /// A lead's sub-sessions stop with it only with `stop_sub_sessions`; otherwise the core
+    /// keeps them running as ordinary sessions in its place.
+    pub async fn delete_session(
+        &mut self,
+        session_id: &str,
+        stop_sub_sessions: bool,
+    ) -> Result<()> {
+        self.send(delete_frame(session_id, stop_sub_sessions)).await
     }
 
     async fn acquire(
@@ -886,8 +892,12 @@ pub enum Command {
         reply: Answer,
     },
     /// End a session and delete it (`session.delete`). Its tab goes when the core says it is
-    /// deleted, not on this request.
-    DeleteSession { session_id: String },
+    /// deleted, not on this request. A lead's sub-sessions stop with it only with
+    /// `stop_sub_sessions`; otherwise they keep running as ordinary sessions in its place.
+    DeleteSession {
+        session_id: String,
+        stop_sub_sessions: bool,
+    },
     /// Replace the core's order of projects or sessions on a computer (`workspace.order.set`);
     /// a list left out is untouched.
     SetOrder {
@@ -1628,8 +1638,8 @@ async fn live(
                     let id = connection.request_id();
                     connection.send(inbound_mode_frame(&id, &session_id, &mode)).await?;
                 }
-                Some(Command::DeleteSession { session_id }) => {
-                    connection.send(delete_frame(&session_id)).await?;
+                Some(Command::DeleteSession { session_id, stop_sub_sessions }) => {
+                    connection.send(delete_frame(&session_id, stop_sub_sessions)).await?;
                 }
                 Some(Command::SetOrder { host_id, projects, sessions }) => {
                     state.set_order(&host_id, projects.clone(), sessions.clone());
@@ -1792,8 +1802,12 @@ fn create_project_frame(request_id: &str, host_id: &str, path: &str, name: Optio
     frame
 }
 
-fn delete_frame(session_id: &str) -> Value {
-    json!({"type": "session.delete", "sessionId": session_id})
+fn delete_frame(session_id: &str, stop_sub_sessions: bool) -> Value {
+    let mut frame = json!({"type": "session.delete", "sessionId": session_id});
+    if stop_sub_sessions {
+        frame["stopSubSessions"] = Value::Bool(true);
+    }
+    frame
 }
 
 fn settings_frame(patch: Value) -> Value {
@@ -2112,7 +2126,8 @@ mod tests {
             rename_frame("s", "a new title"),
             pin_frame("r", "w", true),
             inbound_mode_frame("r", "s", "hold"),
-            delete_frame("s"),
+            delete_frame("s", false),
+            delete_frame("s", true),
             order_frame("r", LOCAL, Some(vec!["p".into()]), None),
             order_frame("r", "build-box", None, Some(vec!["s".into(), "t".into()])),
             create_project_frame("r", LOCAL, "/work", None),
@@ -2353,6 +2368,7 @@ mod tests {
         for command in [
             Command::DeleteSession {
                 session_id: "s1".into(),
+                stop_sub_sessions: false,
             },
             Command::Ask {
                 frame: json!({"type": "worktree.remove", "repoPath": "/work",

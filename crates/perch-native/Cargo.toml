@@ -323,6 +323,11 @@ path = "tests/files_media.rs"
 harness = false
 
 [[test]]
+name = "subsession_layout_window"
+path = "tests/subsession_layout_window.rs"
+harness = false
+
+[[test]]
 name = "tab_strip_overlap_window"
 path = "tests/tab_strip_overlap_window.rs"
 harness = false

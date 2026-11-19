@@ -258,7 +258,10 @@ and native `tabs::merge`, checked against the shared cases in
 `packages/shared/fixtures/shared-tabs-merge.json`; split sets compare in one canonical
 form) and writes again. A client keeps the state it last merged across a reconnect, so
 what changed while away is merged, and writes again whatever an unanswered write may
-have lost. Session ids only mark places: a client never removes one, the core drops
+have lost. Session ids only mark places: the strip's sessions are always shown in the
+sidebar's order (the chat order, each sub-session in its lead's stack; web `followSessions`,
+native `Tabs::follow`), and each other tab follows the session it was after, never inside a
+stack. A client never removes a session id, the core drops
 ended ones and ones of another workspace (one it cannot look up stays). Mod tabs and
 terminal-scoped tabs stay on their device. A workspace with no row is seeded once from
 its newest per-viewer presentation alone, without ended sessions; that presentation is
@@ -512,16 +515,27 @@ the core, not the agent, decides:
   out of every session list (`SESSION_VISIBILITY_FILTER`), and `perch list` shows it `exited`. The
   same applies when `stop_unknown` later settles to `stopped`. An unconfirmed stop changes nothing. On
   start, a `stopped` child that still has a runtime record or a shell (stopped by an older build) is
-  closed by the same rule; nothing else is touched. Deleting a lead (also what archiving its Workspace
-  does, which deletes the Workspace's sessions) first stops its live children, each confirmed; if one
+  closed by the same rule; nothing else is touched. A `session.delete` of a lead with
+  `stopSubSessions` (the close guard's "Close all sub-sessions"; archiving its Workspace, removing a
+  project and purging archived sessions always) first stops its live children, each confirmed; if one
   cannot be shown stopped (a stop not confirmed, a launch still in flight) the delete is refused and the
-  lead and its records are kept. Its closed children are deleted with it; children that exited on their
-  own remain as ordinary sessions without a parent. Deleting a child drops its record.
+  lead and its records are kept. Its closed children are deleted with it. Without it (the default, and an
+  older client) the live children are promoted (`promote_children_of`): their records go, their
+  `parent_session_id` is cleared and they take the lead's place in the chat order, running on as
+  ordinary sessions; a lead whose agent exits on its own promotes them the same way. Children that
+  exited on their own remain as ordinary sessions without a parent. Deleting a child drops its record.
   **Esc in the chat is not a stop:** it interrupts the lead's own turn (a keystroke into its prompt), and
   its children keep running; only a terminal kill, a delete and `perch stop` stop them.
-- *`--worktree`*: after the child is recorded, the core makes a new checkout of the lead's repository,
-  registers it as a Nest under the lead's Workspace in the same Project and moves the child's session and
-  record there before launching; any failure discards the child, which never started.
+- *`--worktree`*: after the child is recorded, the core makes a new checkout of the lead's repository
+  (checkout and branch named from `--name`, else the task's first line), registers it under the lead's
+  Workspace in the same Project, **hidden** (no sidebar row while it only hosts the sub-session; a person
+  can show it), points the child's record at it and starts the child there. The child's session stays in
+  the lead's Workspace, so it nests under the lead and joins the lead's tabs like any sub-session; its
+  `cwd` is the checkout, which the sidebar marks with the branch. A worktree is not deleted while a
+  session runs in it. Any failure discards the child, which never started.
+- *Placement:* a new sub-session goes right after its lead and the lead's earlier children in the chat
+  order, when it already lists the lead; clients nest it under its lead in the sidebar and the strip
+  anyway, and a person may reorder it only among its lead's sub-sessions.
 - *Reports are claims.* `perch list` returns lifecycle, whether the agent needs a person (Perch's own
   blocked state, never something the agent said), the dispatch record, and a report: the child's own
   `perch report` of its latest turn (kept per run, outliving it), else the running summary a cheap model

@@ -51,8 +51,9 @@ function readOrganize(): Organize {
 /** The tree's order: the core's (manual, with drag and favourites) or by what needs you (no drag). */
 const SORT_KEY = "perch.sidebar.sort";
 const SHOW_TERMINALS_KEY = "perch.sidebar.showTerminals";
-/** Sent on `window` by a host that keeps these settings itself (the native window) when they change elsewhere: the
- * sidebar reads them again rather than being mounted again. The web never sends it. */
+/** Sent on `window` when these settings change elsewhere (by a host that keeps them itself, the native window, or by
+ * a screen that changed one, as the tab strip folding a stack): the sidebar reads them again rather than being
+ * mounted again. */
 export const SIDEBAR_SETTINGS_EVENT = "perch:sidebar-settings";
 
 type Drag = { handle: { onPointerDown?: (event: ReactPointerEvent) => void }; zone: Record<string, string> };
@@ -108,7 +109,13 @@ export function WorkspaceOverview({ compact = false, onNavigate }: WorkspaceOver
     return next;
   });
   const toggleCollapsed = idToggler(COLLAPSED_KEY, setCollapsed);
-  const toggleFolded = idToggler(FOLDED_SESSIONS_KEY, setFoldedSessions);
+  // The tab strip folds the same stacks: tell it (and any other screen reading these settings).
+  const toggleFolded = (id: string) => {
+    const next = toggledId(readIds(FOLDED_SESSIONS_KEY), id);
+    saveFlag(FOLDED_SESSIONS_KEY, JSON.stringify(next));
+    setFoldedSessions(next);
+    window.dispatchEvent(new Event(SIDEBAR_SETTINGS_EVENT));
+  };
 
   function nestHint(workspace: WorkspaceInfo) {
     const label = workspace.shortcut;
@@ -894,6 +901,11 @@ const SessionRow = memo(function SessionRow({ session, siblings: siblingIds, gro
       </> : <>
         <SessionDot plain id={session.id} className="h-[18px] w-[18px]" />
         <span className={cn(SESSION_TITLE, lead && "flex-initial")}>{title}</span>
+        {/* A sub-session in its own checkout says which, quietly: it stays with its lead, not under that checkout. */}
+        {session.checkout && <span className="flex min-w-0 max-w-[40%] shrink items-center gap-1 text-[0.62rem] text-subtext-0" title={`Worktree ${session.checkout}`} data-testid={`session-checkout-${session.id}`}>
+          <CheckoutIcon linked />
+          <span className="min-w-0 truncate">{session.checkout}</span>
+        </span>}
         {variant === "list" && session.projectName && <span className="min-w-0 max-w-[35%] truncate text-[0.62rem] text-subtext-0" title={session.projectName}>{session.projectName}</span>}
         {!lead && badge}
       </>}

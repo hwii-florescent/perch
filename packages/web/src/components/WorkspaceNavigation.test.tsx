@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionSummary, WorkspaceSummary } from "@perch/shared";
 
 vi.mock("../ws", () => ({ socket: { connect: vi.fn(), send: vi.fn(), onMessage: vi.fn(() => () => {}), onConnectionChange: vi.fn(() => () => {}) } }));
@@ -19,6 +19,8 @@ const { saveTabOrder } = await import("../tabOrder");
 const { useSplitSets } = await import("../splitSets");
 const { useFileTabs } = await import("../fileTabs");
 const { useCloseGuard } = await import("../closeGuard");
+const { landTab } = await import("../tabDrag");
+const { currentTabs, saveTabStrip, tabOrderKey } = await import("../workspaceTabs");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
@@ -223,14 +225,18 @@ it.each(["single", "worktree"])("%s workspace session rows follow the strip, inc
   const owner = kind === "single" ? workspace : worktree;
   const older = { ...session, workspaceId: owner.id, cwd: owner.path };
   const newer = { ...older, id: "newer", createdAt: 2 };
-  usePerchStore.setState({ workspaces: kind === "single" ? [workspace] : [workspace, worktree], sessions: [newer, older], sessionId: newer.id, activeWorkspaceId: owner.id });
+  usePerchStore.setState({ workspaces: kind === "single" ? [workspace] : [workspace, worktree], sessions: [newer, older], sessionId: newer.id, activeWorkspaceId: owner.id, workspaceOrderByHost: {} });
   render(<><WorkspaceOverview /><TabBar /></>);
   const badgeIds = () => [...host.querySelectorAll<HTMLElement>('.workspace-entry__sessions [data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])')].map((button) => button.dataset.testid!.replace("workspace-session-", ""));
   const tabIds = () => [...host.querySelectorAll('.tab-bar__tab[data-testid^="tab-"]')].map((tab) => tab.getAttribute("data-testid")!.replace("tab-", ""));
   expect(badgeIds()).toEqual([older.id, newer.id]);
   expect(badgeIds()).toEqual(tabIds());
+  // A viewer's own drag order does not reorder sessions; the core's chat order moves both views at once.
   act(() => saveTabOrder(`remote:ws:${owner.id}`, [newer.id, "closed-tab", older.id]));
+  expect(badgeIds()).toEqual([older.id, newer.id]);
+  act(() => usePerchStore.setState({ workspaceOrderByHost: { [owner.hostId]: { projects: [], sessions: [newer.id, older.id] } } }));
   expect(badgeIds()).toEqual([newer.id, older.id]); // updates without remount or switching
+  expect(badgeIds()).toEqual(tabIds());
 });
 
 it("workspace hints match jump targets and temporarily reveal collapsed projects", () => {
@@ -345,6 +351,80 @@ it("Quickchat is the last nest: the nest keys reach it, wrap past it, and leave 
   expect(focus).toHaveBeenLastCalledWith("main");
   jumpToNest(2);
   expect(focus).toHaveBeenLastCalledWith("chats");
+});
+
+describe("stacks in the tab strip", () => {
+  const chat = (id: string, createdAt: number, parentSessionId?: string): SessionSummary => ({ ...session, id, title: id, createdAt, parentSessionId });
+  const family = [chat("lead", 1), chat("term", 2), chat("kid1", 3, "lead"), chat("kid2", 4, "lead")];
+  const tabIds = () => [...host.querySelectorAll('.tab-bar__tab[data-testid^="tab-"]')].map((tab) => tab.getAttribute("data-testid")!.replace("tab-", ""));
+  const rowIds = () => [...host.querySelectorAll<HTMLElement>('.workspace-entry__sessions [data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])')].map((row) => row.dataset.testid!.replace("workspace-session-", ""));
+  const drawn = () => [...host.querySelectorAll<HTMLElement>("[data-tab-entry]")].map((el) => el.dataset.tabEntry!);
+  /** A strip drop as the drag makes it: the tab lands at `index` among the tabs drawn. */
+  function drop(id: string, index: number) {
+    const ids = currentTabs().tabs.map((tab) => tab.id);
+    act(() => saveTabStrip(tabOrderKey(usePerchStore.getState())!, landTab(ids, drawn(), id, index)));
+  }
+  beforeEach(() => {
+    usePerchStore.setState({ sessions: family, sessionId: "lead", workspaceOrderByHost: {},
+      setWorkspaceOrder: (hostId, order) => usePerchStore.setState({ workspaceOrderByHost: { [hostId]: { projects: [], sessions: order.sessions ?? [] } } }) });
+    render(<><WorkspaceOverview /><TabBar /></>);
+  });
+
+  it("shows a lead and its sub-sessions as one stack, in the sidebar's order, folding in either place", () => {
+    expect(tabIds()).toEqual(["lead", "kid1", "kid2", "term"]);
+    expect(rowIds()).toEqual(tabIds());
+    expect([...host.querySelectorAll<HTMLElement>('[data-stack="lead"]')].map((el) => el.dataset.tabEntry)).toEqual(["lead", "kid1", "kid2"]);
+    // The count folds the stack in the strip and the sidebar alike.
+    click(get("tab-stack-count-lead"));
+    expect(tabIds()).toEqual(["lead", "term"]);
+    expect(get("tab-stack-count-lead").textContent).toBe("+2");
+    expect(rowIds()).toEqual(["lead", "term"]);
+    // The sidebar's fold opens both again.
+    click(get("session-fold-lead"));
+    expect(tabIds()).toEqual(["lead", "kid1", "kid2", "term"]);
+    expect(rowIds()).toEqual(tabIds());
+  });
+
+  it("drags a folded or an open stack as one, never into a stack, and keeps a sub-session in its own", () => {
+    click(get("tab-stack-count-lead"));
+    expect(drawn()).toEqual(["lead", "term"]);
+    drop("lead", 1); // the folded stack after the terminal
+    expect(tabIds()).toEqual(["term", "lead"]);
+    click(get("tab-stack-count-lead"));
+    expect(tabIds()).toEqual(["term", "lead", "kid1", "kid2"]);
+    drop("lead", 0); // the open stack back before it
+    expect(tabIds()).toEqual(["lead", "kid1", "kid2", "term"]);
+    drop("term", 1); // the terminal dropped between the lead and its first sub-session lands after the stack
+    expect(tabIds()).toEqual(["lead", "kid1", "kid2", "term"]);
+    drop("kid1", 3); // a sub-session dragged out of its stack stays in it, last
+    expect(tabIds()).toEqual(["lead", "kid2", "kid1", "term"]);
+    expect(rowIds()).toEqual(tabIds());
+  });
+
+  it("puts a file dropped onto a stack beside it", () => {
+    act(() => useFileTabs.setState({ tabs: [{ workspaceId: "tree", path: "a.ts" }], active: null }));
+    const entries = () => currentTabs().tabs.map((tab) => tab.id);
+    expect(entries()).toEqual(["lead", "kid1", "kid2", "term", "tree\na.ts"]);
+    drop("tree\na.ts", 1);
+    expect(entries()).toEqual(["lead", "kid1", "kid2", "tree\na.ts", "term"]);
+    click(get("tab-stack-count-lead"));
+    drop("tree\na.ts", 0);
+    expect(entries()).toEqual(["tree\na.ts", "lead", "kid1", "kid2", "term"]);
+  });
+
+  it("renames a stack member and a folded stack's tab in place, keeping the stack", () => {
+    for (const fold of [false, true]) {
+      if (fold) click(get("tab-stack-count-lead"));
+      const id = fold ? "lead" : "kid1";
+      act(() => get(`tab-${id}`).dispatchEvent(new MouseEvent("dblclick", { bubbles: true })));
+      const input = get("rename-input") as HTMLInputElement;
+      expect(input.closest("[data-tab-entry]")?.getAttribute("data-tab-entry")).toBe(id);
+      expect(input.closest("[data-stack]")?.getAttribute("data-stack")).toBe("lead");
+      expect(get("tab-stack-count-lead")).toBeTruthy();
+      act(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+      expect(host.querySelector('[data-testid="rename-input"]')).toBeNull();
+    }
+  });
 });
 
 it("double-click renames a session tab in place: the tab keeps its box, icon and close button", () => {

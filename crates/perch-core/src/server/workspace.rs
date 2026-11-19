@@ -648,6 +648,14 @@ pub(super) async fn register_created(
     Ok(nested)
 }
 
+/// Keep a workspace out of the sidebar (`workspace.visibility`) and tell every viewer.
+pub(super) fn hide_workspace(app: &AppState, workspace_id: &str) -> anyhow::Result<()> {
+    let _guard = app.foundation_lock.lock().unwrap();
+    let row = app.db.set_workspace_hidden(workspace_id, true)?;
+    publish_workspace_locked(app, None, workspace_to_wire(row));
+    Ok(())
+}
+
 /// Broadcast one changed workspace row. Caller holds `foundation_lock`.
 fn publish_workspace_locked(
     app: &AppState,
@@ -729,10 +737,11 @@ fn worktree_remove_preflight(db: &HistoryDb, path: &str) -> anyhow::Result<()> {
         // A blank session minted on connect is not execution and has no tab
         // the user could close. Only listed tabs block; daemon work is checked
         // independently below, including anything whose attachment was lost.
-        let has_tabs = db
-            .list_sessions()?
-            .iter()
-            .any(|session| session.workspace_id.as_deref() == Some(&workspace.id));
+        // A sub-session started with `--worktree` belongs to its lead's workspace but runs here.
+        let has_tabs = db.list_sessions()?.iter().any(|session| {
+            session.workspace_id.as_deref() == Some(&workspace.id)
+                || std::fs::canonicalize(&session.cwd).is_ok_and(|cwd| cwd.starts_with(&wanted))
+        });
         anyhow::ensure!(!has_tabs,
             "Close this workspace's terminal and agent tabs before deleting its worktree; their processes must be confirmed stopped");
     }
@@ -1176,7 +1185,7 @@ pub(super) fn handle_project_remove(
         .and_then(|sessions| {
             sessions
                 .iter()
-                .try_for_each(|id| super::session::delete_session(&state.app, id))
+                .try_for_each(|id| super::session::delete_session(&state.app, id, true))
         });
     let _foundation_guard = state.app.foundation_lock.lock().unwrap();
     match removed.and_then(|()| state.app.db.delete_project(&project.id)) {

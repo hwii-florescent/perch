@@ -786,6 +786,17 @@
           "textSized": true
         },
         {
+          "name": "tab-stack-count",
+          "selector": "[data-testid^=\"tab-stack-count-\"]",
+          "description": "On a lead's tab, how many sub-sessions its stack holds (+N, folded) or − (open); it folds and opens the stack.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "tab-stack-count-"
+          },
+          "text": true
+        },
+        {
           "name": "tab-close",
           "selector": "[data-tab-entry] > button[aria-label^=\"Close\"]",
           "description": "The x at the tab's right edge.",
@@ -1152,6 +1163,12 @@
           "name": "confirm-buttons",
           "selector": "[data-testid=\"confirm-dialog\"] > div.flex",
           "description": "The row of buttons, right aligned, 8px apart."
+        },
+        {
+          "name": "close-guard-stop-sub-sessions",
+          "selector": "[data-testid=\"close-guard-stop-sub-sessions\"]",
+          "description": "On a lead's close warning: Close all sub-sessions (the default button keeps them as sessions).",
+          "text": true
         },
         {
           "name": "confirm-cancel",

@@ -736,10 +736,10 @@ impl TerminalView {
     /// holds the keyboard. Nothing happens here until the core answers with
     /// [`TerminalEvent::Ended`] or [`TerminalEvent::EndRefused`]. False, asking nothing, when the
     /// view cannot ask ([`Self::can_end`]).
-    pub fn end(&self) -> bool {
+    pub fn end(&self, stop_sub_sessions: bool) -> bool {
         let can = self.can_end();
         if can {
-            self.send(ToCore::End);
+            self.send(ToCore::End { stop_sub_sessions });
         }
         can
     }

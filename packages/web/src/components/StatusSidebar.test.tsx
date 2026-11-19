@@ -392,3 +392,41 @@ it("lists chats in the core's order inside a section", () => {
   const ids = [...get("status-section-idle")!.querySelectorAll('[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close-"])')].map((el) => el.getAttribute("data-session"));
   expect(ids).toEqual(["b", "a", "c"]); // the core's order, mirrored: newest first on screen
 });
+
+it("a sub-session running in its own checkout nests under its lead in the tree and names that checkout's branch", () => {
+  storage.set("perch.sidebar.organize", "tree");
+  const checkout = { ...workspace, id: "wt", path: "/tmp/wt/review", name: "review", branch: "review-shared-tabs", parentWorkspaceId: "w", hidden: true };
+  const other = { ...workspace, id: "w2", path: "/tmp/other", name: "other", branch: "other" };
+  usePerchStore.setState({
+    workspaces: [workspace, checkout, other],
+    sessions: [chat("lead"), chat("term"), chat("kid", { parentSessionId: "lead", cwd: checkout.path }), chat("plain", { parentSessionId: "lead" })],
+  });
+  act(() => root.render(<WorkspaceOverview />));
+  const rows = [...host.querySelectorAll('[data-testid^="workspace-session-"]:not([data-testid^="workspace-session-close"])')].map((el) => el.getAttribute("data-testid")!.replace("workspace-session-", ""));
+  expect(rows.indexOf("kid")).toBe(rows.indexOf("lead") + 1);
+  expect(rows.indexOf("plain")).toBe(rows.indexOf("lead") + 2);
+  expect(get("workspace-session-kid")!.parentElement!.hasAttribute("data-sub-session")).toBe(true);
+  expect(get("session-checkout-kid")?.textContent).toBe("review-shared-tabs");
+  expect(get("session-checkout-plain")).toBeNull();
+  expect(get("session-checkout-lead")).toBeNull();
+});
+
+it("the status bar shows the focused tab's own folder and follows a tab switch", async () => {
+  const { useStatusLine } = await import("../sdk");
+  const checkout = { ...workspace, id: "wt", path: "/tmp/wt/review", name: "review", branch: "review-shared-tabs", hidden: true };
+  let line: ReturnType<typeof useStatusLine> | undefined;
+  const Probe = () => { line = useStatusLine(); return null; };
+  usePerchStore.setState({
+    workspaces: [{ ...workspace, branch: "main" }, checkout],
+    sessions: [chat("lead"), chat("kid", { parentSessionId: "lead", cwd: checkout.path })],
+    // The connection's last `status.update` was about the sub-session, opened earlier.
+    status: { cwd: checkout.path, branch: "review-shared-tabs" },
+    sessionId: "lead",
+  });
+  act(() => root.render(<Probe />));
+  expect([line?.cwd, line?.branch]).toEqual([project.path, "main"]);
+  act(() => usePerchStore.setState({ sessionId: "kid" }));
+  expect([line?.cwd, line?.branch]).toEqual([checkout.path, "review-shared-tabs"]);
+  act(() => usePerchStore.setState({ sessionId: "lead" }));
+  expect([line?.cwd, line?.branch]).toEqual([project.path, "main"]);
+});

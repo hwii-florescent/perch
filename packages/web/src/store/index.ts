@@ -386,7 +386,9 @@ export interface PerchState {
    * broadcasts `session.deleted`, which drives the local cleanup. Leaving the
    * active session lands on a neighbouring tab of the same workspace, or the
    * home screen. */
-  deleteSession: (sessionId: string) => void;
+  /** Ends and deletes a session; a lead's running sub-sessions stop with it only with `stopSubSessions`, else they
+   * become ordinary sessions where it was. */
+  deleteSession: (sessionId: string, stopSubSessions?: boolean) => void;
   /** Rename a session (Wave 1 item 2). Sets a persistent user title override
    * that wins over the auto-derived first-message title once non-empty. */
   renameSession: (sessionId: string, title: string) => void;
@@ -1445,10 +1447,10 @@ export const usePerchStore = create<PerchState>((set, get) => ({
     set({ sessionId: null, cliError: null });
   },
 
-  deleteSession: (sessionId) => {
+  deleteSession: (sessionId, stopSubSessions) => {
     const closing = get().sessions.find((session) => session.id === sessionId);
     if (closing) recordClosedTab(closing);
-    socket.send({ type: "session.delete", sessionId });
+    socket.send(stopSubSessions ? { type: "session.delete", sessionId, stopSubSessions } : { type: "session.delete", sessionId });
     // The session is still in the list until the server says it is gone; subscribers of the move away from it
     // (`fileTabs.ts`) must still be able to tell a closed session from one that lives on elsewhere.
     deletingSessionIds.add(sessionId);

@@ -9,7 +9,7 @@
 // Props and results: a screen the window opens gets its props from `perch.props()` (the web's names), and every
 // callback prop the web passes is made here from `perch.close(result)`, as the window reads results:
 // `onClose()` is `close()`, `onConfirm()` / `onCancel()` are `{ confirmed }`, `onSelect(cwd, agent)` is
-// `{ cwd, agent }`, `onSubmit(value)` is `{ value }`, the close guard's `onStop(never)` is `{ confirmed: true, never }`
+// `{ cwd, agent }`, `onSubmit(value)` is `{ value }`, the close guard's `onStop(never, stopSubSessions)` is `{ confirmed: true, never, stopSubSessions }`
 // and `onKeepRunning()` is `{ keepRunning: true }`, and `actions.x(...args)` is `{ action: "x", args }`.
 // `options.props(raw)` replaces that mapping for a screen whose callbacks differ. The web often calls an action and
 // `onClose()` from one handler, in either order; the screen closes once, at the end of that turn, with the action's
@@ -110,7 +110,7 @@ export function resultProps(raw) {
     onCancel: () => closeWith({ confirmed: false }),
     onSelect: (cwd, agent) => closeWith({ cwd, agent }),
     onSubmit: (value) => closeWith({ value }),
-    onStop: (never) => closeWith({ confirmed: true, never: !!never }),
+    onStop: (never, stopSubSessions) => closeWith({ confirmed: true, never: !!never, stopSubSessions: !!stopSubSessions }),
     onKeepRunning: () => closeWith({ keepRunning: true }),
     // An action given straight to `onClick` gets the click's event, which is not a result: it goes as null.
     actions: new Proxy({}, { get: (_, action) => (...args) => closeWith({ action: String(action), args: args.map(plain) }) }),

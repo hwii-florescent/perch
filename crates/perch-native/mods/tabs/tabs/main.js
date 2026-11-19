@@ -15,6 +15,12 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 //! the active tab scrolls into view, also when the strip narrows. A legacy mod can redraw a session's
 //! tab through the `tab` slot.
 //!
+//! A lead and its sub-sessions are a stack, in the sidebar's order: folded, one tab (the lead, or the member on
+//! screen) with an edge and a count of the others; open, its members side by side on a shared quiet background.
+//! The count folds and opens it, and folding is the sidebar's own (`perch.sidebar.foldedSessions`, per device), so
+//! either place folds both. A folded stack drags as its lead, which moves the whole stack; a drop never lands inside
+//! a stack (Perch puts a session or a file beside the whole stack), and a sub-session stays in its lead's stack.
+//!
 //! This file is the source of a package: `scripts/export-stock-ui.mjs` turns it into the plain JS the
 //! app runs and `perch mod clone stock:tabs` copies. It may import only `react`, `react-dom`,
 //! `@perch/sdk` and files beside it (docs/MOD-SDK.md). The strip's markers (`data-testid="tab-bar"`,
@@ -39,6 +45,31 @@ const CLOSE = `absolute top-1/2 right-[0.25rem] grid h-[1.25rem] w-[1.25rem] cur
 // (overlay-0 is fg-coloured in the terminal theme and hid the x).
 const closeButton = (state) => cn(CLOSE, state === "focused" ? "text-fg hover:bg-panel-bg" : "hover:bg-surface-1");
 const openMenu = (id, x, y) => runCommand("tab.menu", { id, x, y });
+/** The sidebar's folded leads (its `foldedSessions`), shared with it: either place folds a stack in both. */
+const FOLDED_KEY = "perch.sidebar.foldedSessions";
+/** Sent on `window` when a sidebar setting changes, so the other screens read them again. */
+const SETTINGS_EVENT = "perch:sidebar-settings";
+function readFolded() {
+    try {
+        return JSON.parse(localStorage.getItem(FOLDED_KEY) ?? "[]");
+    }
+    catch {
+        return [];
+    }
+}
+export function stacked(tabs) {
+    const ids = new Set(tabs.map((tab) => tab.id));
+    const leadOf = (tab) => (tab.kind === "session" && tab.parentId && tab.parentId !== tab.id && ids.has(tab.parentId) ? tab.parentId : undefined);
+    const items = [];
+    for (let at = 0; at < tabs.length; at++) {
+        const tab = tabs[at];
+        const members = [];
+        while (tabs[at + 1] && leadOf(tabs[at + 1]) === tab.id)
+            members.push(tabs[++at]);
+        items.push(members.length ? { lead: tab, members } : { tab });
+    }
+    return items;
+}
 export default function TabBar() {
     const { tabs, activeId, hostId, cwd, workspace: ws, tabShape, draggingId } = useWorkspaceTabs();
     const [popoverAnchor, setPopoverAnchor] = useState(null);
@@ -48,6 +79,21 @@ export default function TabBar() {
     const [renameValue, setRenameValue] = useState("");
     const renameInputRef = useRef(null);
     const stripRef = useRef(null);
+    const [folded, setFolded] = useState(readFolded);
+    useEffect(() => {
+        const reread = () => setFolded(readFolded());
+        window.addEventListener(SETTINGS_EVENT, reread);
+        return () => window.removeEventListener(SETTINGS_EVENT, reread);
+    }, []);
+    function toggleStack(lead) {
+        const next = folded.includes(lead) ? folded.filter((id) => id !== lead) : [...folded, lead];
+        try {
+            localStorage.setItem(FOLDED_KEY, JSON.stringify(next));
+        }
+        catch { /* per-device convenience */ }
+        setFolded(next);
+        window.dispatchEvent(new Event(SETTINGS_EVENT));
+    }
     useEffect(() => {
         if (renamingId)
             renameInputRef.current?.select();
@@ -81,11 +127,15 @@ export default function TabBar() {
         // The launcher always lets the user choose the CLI before starting it.
         setPopoverAnchor(e.currentTarget.getBoundingClientRect());
     }
-    function sessionTab(tab, separated) {
+    /** A session's tab. `entry` is the id it stands for in the strip (a folded stack's lead, which a drag moves). */
+    function sessionTab(tab, separated, entry = tab.id, stack) {
         const { state } = tab;
         return (_jsxs("span", {
-            className: TAB_SLOT,
-            "data-tab-entry": tab.id,
+            className: cn(TAB_SLOT, stack && !stack.open && "tab-bar__stack-edge rounded-ui [box-shadow:3px_-3px_0_-1px_var(--overlay-0)]", 
+            // An open stack: one quiet band under its members, bridging the strip's gap between them.
+            stack?.open && "tab-bar__stack-member bg-surface-0", stack?.open && (stack.first ? "rounded-l-ui" : "-ml-[3px] pl-[3px]"), stack?.open && stack.last && "rounded-r-ui"),
+            "data-tab-entry": entry,
+            "data-stack": stack?.lead,
             children: [
                 separated && _jsx("span", {
                     className: SEPARATOR,
@@ -107,7 +157,7 @@ export default function TabBar() {
                         "data-pane-state": state,
                         "data-testid": `tab-${tab.id}`,
                         title: tab.title || "New session",
-                        onPointerDown: (e) => beginTabDrag(e, tab.id, tab.label),
+                        onPointerDown: (e) => beginTabDrag(e, entry, tab.label),
                         onClick: () => runCommand("tab.select", { id: tab.id }),
                         onContextMenu: (e) => {
                             e.preventDefault();
@@ -151,6 +201,16 @@ export default function TabBar() {
                         ]
                     })
                 }),
+                stack && (!stack.open || stack.first) && (_jsx("button", {
+                    type: "button",
+                    className: cn("absolute top-1/2 right-[1.6rem] grid h-[1.1rem] min-w-[1.1rem] cursor-pointer place-items-center rounded-full bg-surface-1 px-1 text-[0.65rem] leading-none text-subtext-0 [border:0] [font-family:inherit] [transform:translateY(-50%)] hover:text-fg", FOCUS),
+                    "data-testid": `tab-stack-count-${stack.lead}`,
+                    title: stack.open ? "Fold the sub-sessions" : "Show the sub-sessions",
+                    "aria-label": stack.open ? "Fold the sub-sessions" : `Show ${stack.others} sub-sessions`,
+                    "aria-expanded": stack.open,
+                    onClick: () => toggleStack(stack.lead),
+                    children: stack.open ? "−" : `+${stack.others}`
+                })),
                 _jsx("button", {
                     type: "button",
                     className: closeButton(state),
@@ -169,14 +229,31 @@ export default function TabBar() {
         "data-testid": "tab-bar",
         "data-tauri-drag-region": true,
         children: [
-            tabs.map((tab, i) => {
-                const separated = i > 0 && tab.state !== "focused" && tabs[i - 1].state !== "focused";
-                return tab.kind === "session" ? sessionTab(tab, separated) : (_jsx(ResourceTab, {
-                    tab: tab,
-                    tabShape: tabShape,
-                    dragging: tab.id === draggingId,
-                    separated: separated
-                }, tab.id));
+            stacked(tabs).map((item, i, items) => {
+                const prev = items[i - 1];
+                const lastOf = (it) => ("tab" in it ? it.tab : it.members[it.members.length - 1]);
+                const separated = (tab, before) => !!before && tab.state !== "focused" && before.state !== "focused";
+                if ("tab" in item) {
+                    const { tab } = item;
+                    return tab.kind === "session" ? sessionTab(tab, separated(tab, prev && lastOf(prev))) : (_jsx(ResourceTab, {
+                        tab: tab,
+                        tabShape: tabShape,
+                        dragging: tab.id === draggingId,
+                        separated: separated(tab, prev && lastOf(prev))
+                    }, tab.id));
+                }
+                const { lead, members } = item;
+                const all = [lead, ...members];
+                if (folded.includes(lead.id)) {
+                    // Folded: the member on screen, else the lead, stands for the stack and drags as it.
+                    const shown = members.find((member) => member.state !== "hidden" && lead.state === "hidden") ?? lead;
+                    return sessionTab(shown, separated(shown, prev && lastOf(prev)), lead.id, { lead: lead.id, others: members.length, open: false });
+                }
+                // Open: the members side by side on one quiet background. They stay the strip's own children (no wrapper),
+                // so a drag measures and slides each tab as any other.
+                return all.map((tab, at) => sessionTab(tab, at > 0 && separated(tab, all[at - 1]), tab.id, {
+                    lead: lead.id, others: members.length, open: true, first: at === 0, last: at === all.length - 1,
+                }));
             }),
             _jsx("button", {
                 type: "button",
