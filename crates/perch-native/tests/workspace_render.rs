@@ -1004,6 +1004,8 @@ fn the_size_is_taken_back_from_a_phone_for_one_terminal_or_all() {
     // The grant for c, which is not on screen, arrives: it tells the size it last fitted at
     // once, not when its tab comes back.
     say(&mut h, 2, info(true, false));
+    h.cx.advance_clock(perch_native::terminal::view::RESIZE_QUIET);
+    h.cx.run_until_parked();
     assert_eq!(asked(&mut rxs[2]), vec![ToCore::Resize(91, 29)]);
     say(&mut h, 2, info(false, true));
 
@@ -1731,10 +1733,10 @@ fn a_blank_session_offers_the_launch_choices() {
     println!("workspace_render: blank session choices ok");
 }
 
-/// Two windows on one core (this one and the Tauri app's): the active window sizes the terminals
-/// it shows, taking the size from the other window, and hands it back when it is no longer active,
-/// so one window ever holds it. A phone's hold is never taken this way.
-fn the_active_window_sizes_its_terminals_and_hands_the_size_back() {
+/// Two windows on one core (this one and the Tauri app's): the size of a terminal goes to the
+/// window a person types into, from the other window or a phone, never to the window that is
+/// merely activated, so switching between windows of different widths resizes nothing.
+fn the_size_follows_typing_not_window_activation() {
     use perch_core::agent_fleet::AgentState;
     use perch_native::terminal::attach::AgentInfo;
     let info = |resize: bool, resize_on_device: bool| {
@@ -1748,7 +1750,7 @@ fn the_active_window_sizes_its_terminals_and_hands_the_size_back() {
     };
     let leases = |rx: &mut UnboundedReceiver<ToCore>| -> Vec<ToCore> {
         std::iter::from_fn(|| rx.try_recv().ok())
-            .filter(|m| !matches!(m, ToCore::Resize(..)))
+            .filter(|m| !matches!(m, ToCore::Resize(..) | ToCore::Input(..)))
             .collect()
     };
     let mut h = Harness::new(model(&[("a", json!({"cliProviderId": "terminal"}))]));
@@ -1762,20 +1764,25 @@ fn the_active_window_sizes_its_terminals_and_hands_the_size_back() {
     // The other window on this computer took the size.
     say(&mut h, info(false, false));
     leases(&mut rx);
-    // This window becomes active: it takes the size, once while the answer is on its way.
-    h.view(|v| v.window_active(true));
-    h.view(|v| v.window_active(true));
+    // Drawing this window, as activating it does, asks for nothing.
+    h.draw();
+    h.draw();
+    assert_eq!(leases(&mut rx), vec![], "activation takes nothing");
+    // Typing takes it, once while the answer is on its way.
+    assert!(h.press("x"));
+    assert!(h.press("y"));
     assert_eq!(leases(&mut rx), vec![ToCore::TakeSize]);
     say(&mut h, info(true, false));
-    // It is no longer active: it gives the size up for the other window.
-    h.view(|v| v.window_active(false));
-    assert_eq!(leases(&mut rx), vec![ToCore::GiveSize]);
+    assert!(h.press("z"));
+    assert_eq!(
+        leases(&mut rx),
+        vec![],
+        "a view that holds the size asks nothing"
+    );
+    // A take on its way when the connection drops is not answered: attached again, the next key
+    // asks on the new connection.
     say(&mut h, info(false, false));
-    h.view(|v| v.window_active(false));
-    assert_eq!(leases(&mut rx), vec![], "nothing held, nothing given");
-    // A take on its way when the connection drops is not answered: attached again, the window
-    // takes the size on the new connection.
-    h.view(|v| v.window_active(true));
+    assert!(h.press("x"));
     assert_eq!(leases(&mut rx), vec![ToCore::TakeSize]);
     say(&mut h, FromCore::Disconnected("the core went away".into()));
     say(
@@ -1787,18 +1794,17 @@ fn the_active_window_sizes_its_terminals_and_hands_the_size_back() {
             agent: None,
         },
     );
-    h.view(|v| v.window_active(true));
+    assert!(h.press("x"));
     assert_eq!(
         leases(&mut rx),
         vec![ToCore::TakeSize],
         "asked again after attaching"
     );
-    say(&mut h, info(false, false));
-    // A phone holds it: becoming active does not take it (the phone-size notice offers that).
+    // A phone holds it: typing here takes it too.
     say(&mut h, info(false, true));
-    h.view(|v| v.window_active(true));
-    assert_eq!(leases(&mut rx), vec![]);
-    println!("workspace_render: active window sizes ok");
+    assert!(h.press("x"));
+    assert_eq!(leases(&mut rx), vec![ToCore::TakeSize]);
+    println!("workspace_render: the size follows typing ok");
 }
 
 fn main() {
@@ -1825,7 +1831,7 @@ fn main() {
     editing_keys_reach_the_shell_through_the_window();
     terminal_commands_run_from_keys_and_the_palette();
     the_size_is_taken_back_from_a_phone_for_one_terminal_or_all();
-    the_active_window_sizes_its_terminals_and_hands_the_size_back();
+    the_size_follows_typing_not_window_activation();
     kept_tabs_are_hidden_not_dropped();
     println!("workspace_render: ok");
 }

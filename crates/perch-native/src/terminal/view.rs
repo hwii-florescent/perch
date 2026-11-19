@@ -5,9 +5,11 @@
 //! the web terminal's rules, which are the core's:
 //!
 //! - The size of the shell's terminal is the core's. A view that holds the resize lease fits
-//!   itself to its pane and says so; every other view takes the size the core announces in the
-//!   stream and never sends one. Either way this view's grid is the size the stream last gave
-//!   it, so it always matches what the program draws for.
+//!   itself to its pane and says so, once the fit has held still for [`RESIZE_QUIET`]; every
+//!   other view takes the size the core announces in the stream and never sends one. Either way
+//!   this view's grid is the size the stream last gave it, so it always matches what the program
+//!   draws for. The lease comes to a view when a person types into it (or takes control), never
+//!   because its window is focused: every resize makes an agent repaint over its history.
 //! - Typing, and anything else the program is told (the mouse, answers to its queries, focus),
 //!   needs the input lease.
 //! - A phone can hold the size. Where typing is shared the window draws the web's phone-size
@@ -72,6 +74,10 @@ use std::time::Instant;
 
 /// How often a held drag past the grid's edge scrolls.
 const AUTOSCROLL_TICK: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// How long the pane's size must hold still before the core is told it, as Ghostty coalesces
+/// resizes: a drag or an animation is one resize, and the agent repaints once.
+pub const RESIZE_QUIET: std::time::Duration = std::time::Duration::from_millis(25);
 
 /// How long a blinking cursor stays on, and then off.
 const BLINK_HALF_PERIOD: std::time::Duration = std::time::Duration::from_millis(530);
@@ -266,8 +272,11 @@ pub struct TerminalView {
     fitted: Option<Fit>,
     origin: Point<Pixels>,
     scale: f32,
-    /// The size last asked of the core. `None`: ask at the next layout.
+    /// The size last asked of the core, or waiting to be ([`RESIZE_QUIET`]). `None`: ask at the
+    /// next layout.
     requested: Option<(u16, u16)>,
+    /// Tells the core `requested` once the size has held still.
+    _resize_wait: Option<Task<()>>,
     scrolled: Point<f32>,
     /// The link under the pointer while the link key is held, and where the pointer is.
     hover_link: Option<links::Hit>,
@@ -331,7 +340,7 @@ pub struct TerminalView {
     /// A take-over this view asked for, until the core answers (the leases change) or the
     /// connection changes: the web's `pending`.
     taking: bool,
-    /// The window asked the core for the size as it became active, and has no answer yet.
+    /// A person typed here and the view asked the core for the size, with no answer yet.
     claiming: bool,
     /// The agent-control props last drawn: a change tells the window ([`TerminalEvent::Chrome`]).
     drawn_control: Value,
@@ -366,6 +375,7 @@ impl TerminalView {
             origin: point(px(0.), px(0.)),
             scale: 1.0,
             requested: None,
+            _resize_wait: None,
             scrolled: Point::default(),
             refit: false,
             zoom: 1.0,
@@ -857,8 +867,7 @@ impl TerminalView {
                     if let (true, Some(fit)) =
                         (self.hidden && self.status == Status::Live, self.fitted)
                     {
-                        self.requested = Some((fit.cols, fit.rows));
-                        self.send(ToCore::Resize(fit.cols, fit.rows));
+                        self.tell_size(fit.cols, fit.rows, cx);
                     }
                 }
                 let offered = self.offers_take_back();
@@ -1079,7 +1088,28 @@ impl TerminalView {
         self.blink_on = true;
         self.drop_notice = None;
         self.send(ToCore::Input(bytes));
+        // The size goes where a person types, from another window or a phone, never where a
+        // window is merely looked at: two windows of different widths would resize the agent
+        // on every switch, and each resize makes it repaint over its own history.
+        if !self.resize_lease && !self.claiming && self.status == Status::Live {
+            self.claiming = true;
+            self.send(ToCore::TakeSize);
+        }
         cx.notify();
+    }
+
+    /// Ask the core for this size once the pane has held still for [`RESIZE_QUIET`]; a newer
+    /// size before then replaces it.
+    fn tell_size(&mut self, cols: u16, rows: u16, cx: &mut Context<Self>) {
+        self.requested = Some((cols, rows));
+        self._resize_wait = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(RESIZE_QUIET).await;
+            let _ = this.update(cx, |this, _| {
+                if let (Some((cols, rows)), true) = (this.requested, this.resize_lease) {
+                    this.send(ToCore::Resize(cols, rows));
+                }
+            });
+        }));
     }
 
     /// Whether the window leaves `event` to the system's text input ([`EntityInputHandler`]),
@@ -1967,23 +1997,6 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// The window became active or not. The active window sizes the terminals it shows, taking
-    /// the size from another window on this computer (never from a phone, which the person takes
-    /// back on purpose); an inactive one gives the size up, so the other window sizes them. The
-    /// core's resize lease keeps one owner throughout.
-    pub fn window_active(&mut self, active: bool) {
-        if self.to_core.is_none() || self.status != Status::Live {
-            return;
-        }
-        let phone = self.agent.is_some_and(|a| a.resize_on_device);
-        if active && !self.hidden && !self.resize_lease && !phone && !self.claiming {
-            self.claiming = true;
-            self.send(ToCore::TakeSize);
-        } else if !active && self.resize_lease {
-            self.send(ToCore::GiveSize);
-        }
-    }
-
     /// Scale the text and the padding by `factor` (the window's zoom), refitting the grid.
     pub fn set_zoom(&mut self, factor: f32, cx: &mut Context<Self>) {
         if (self.zoom - factor).abs() > f32::EPSILON {
@@ -2010,7 +2023,12 @@ impl TerminalView {
     /// Size the shell of a pane that is off screen as a pane of `bounds` would, so a program
     /// redraws for the size it will have when its tab comes back. Does nothing for a pane that
     /// is shown (it sizes itself as it is laid out) or that does not hold the resize lease.
-    pub fn size_while_hidden(&mut self, bounds: Size<Pixels>, window: &Window) {
+    pub fn size_while_hidden(
+        &mut self,
+        bounds: Size<Pixels>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.hidden || self.status != Status::Live || !self.resize_lease {
             return;
         }
@@ -2030,8 +2048,7 @@ impl TerminalView {
         );
         self.fitted = Some(fit);
         if self.requested != Some((fit.cols, fit.rows)) {
-            self.requested = Some((fit.cols, fit.rows));
-            self.send(ToCore::Resize(fit.cols, fit.rows));
+            self.tell_size(fit.cols, fit.rows, cx);
         }
     }
 
@@ -2110,8 +2127,7 @@ impl TerminalView {
             && self.status == Status::Live
             && self.requested != Some((fit.cols, fit.rows))
         {
-            self.requested = Some((fit.cols, fit.rows));
-            self.send(ToCore::Resize(fit.cols, fit.rows));
+            self.tell_size(fit.cols, fit.rows, cx);
         }
         self.origin = layout::grid_origin(
             bounds,

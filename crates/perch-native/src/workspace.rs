@@ -5212,14 +5212,6 @@ impl gpui::Render for Workspace {
                 window,
                 move |this, window, cx| {
                     send(window.is_window_active(), &this.sidebar, cx);
-                    // The active window sizes the terminals it shows; an inactive one hands the
-                    // size to the other window on this computer.
-                    let active = window.is_window_active();
-                    for pane in this.panes.values() {
-                        if let Some(view) = &pane.view {
-                            view.update(cx, |view, _| view.window_active(active));
-                        }
-                    }
                     // As the web's blur: a tab drag, or a press a mod follows, ends with nothing
                     // changed.
                     if !window.is_window_active() {
@@ -5294,10 +5286,6 @@ impl gpui::Render for Workspace {
             let Some(view) = &pane.view else { continue };
             let on_screen = shown.contains(id) || self.peek.as_ref() == Some(id);
             view.update(cx, |view, cx| view.set_visible(on_screen, cx));
-            // A terminal shown in the active window is sized by it.
-            if on_screen && window.is_window_active() {
-                view.update(cx, |view, _| view.window_active(true));
-            }
             if on_screen {
                 pane.settle.reset();
             } else if let Some(room) = room {
@@ -5305,7 +5293,7 @@ impl gpui::Render for Workspace {
                 // window and the cell have held still for two draws.
                 let key = (room, view.read(cx).cell_key(window));
                 if pane.settle.tick(key).is_some() {
-                    view.update(cx, |view, _| view.size_while_hidden(room, window));
+                    view.update(cx, |view, cx| view.size_while_hidden(room, window, cx));
                 }
             }
         }

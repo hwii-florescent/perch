@@ -1,6 +1,6 @@
 import { bindContextBridgeStore, handleContextBridgeMessage } from "../contextBridge";
 import { handleNativeUiMessage } from "../nativeUi";
-import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal } from "../agentTerminals";
+import { handleAgentTerminalMessage, sendAgentTerminalInput, resizeAgentTerminal, afterResizeQuiet } from "../agentTerminals";
 import { create } from "zustand";
 import type { HarnessModels, AgentAttach, AgentControlChannel, AgentControlLease, AgentKind, AgentLifecycleStatus, AgentManifestListMessage, AgentManifestSummary, AccountUsage, SpendSummary, UsageRedeemResultMessage, ClientMessage, CommandEntry, FsBrowseResultMessage, ProjectSummary, ServerInfoMessage, ServerMessage, SessionSummary, SettingsData, SettingsPatch, SshHostEntry, TerminalProfile, HostInfoMessage, WorktreeEntry, WorktreeListMessage, WorktreeCreateMessage, WorktreeRemoveMessage, WorktreeListResultMessage, WorktreeDoneMessage, WorktreeErrorMessage, WorktreeJob, WorktreeJobStartMessage, WorktreeJobStartedMessage, WorktreeBranchDeleteMessage, WorkspaceSummary } from "@perch/shared";
 import { socket } from "../ws";
@@ -1637,16 +1637,18 @@ export const usePerchStore = create<PerchState>((set, get) => ({
 
   resizeTerminal: (terminalId, cols, rows) => {
     if (resizeAgentTerminal(terminalId, cols, rows)) return;
-    const state = get();
-    const sessionId = Object.entries(state.cliTerminalIds).find(([, id]) => id === terminalId)?.[0];
-    const control = sessionId ? state.agentControlBySession[sessionId] : undefined;
-    const generation = control?.resize?.generation;
-    socket.send({
-      type: "terminal.resize",
-      terminalId,
-      cols,
-      rows,
-      ...(generation != null ? { generation } : {}),
+    afterResizeQuiet(terminalId, () => {
+      const state = get();
+      const sessionId = Object.entries(state.cliTerminalIds).find(([, id]) => id === terminalId)?.[0];
+      const control = sessionId ? state.agentControlBySession[sessionId] : undefined;
+      const generation = control?.resize?.generation;
+      socket.send({
+        type: "terminal.resize",
+        terminalId,
+        cols,
+        rows,
+        ...(generation != null ? { generation } : {}),
+      });
     });
     set((state) => {
       const existing = state.terminals[terminalId];

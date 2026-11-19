@@ -121,10 +121,23 @@ export function sendAgentTerminalInput(terminalId: string, data: string): boolea
   if (view.sharedInput || view.leases.input) socket.send({ type: "terminal.input", terminalId, data, ...(view.sharedInput ? { shared: true } : { generation: view.leases.input!.generation }) });
   return true;
 }
+/** How long a terminal's size must hold still before the PTY is resized, as Ghostty coalesces
+ * resizes: a drag or an animation is one resize, and the program repaints once. */
+export const RESIZE_QUIET_MS = 25;
+const resizeWaits = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** Run `send` once `terminalId`'s size has held still for {@link RESIZE_QUIET_MS}; a newer size replaces it. */
+export function afterResizeQuiet(terminalId: string, send: () => void): void {
+  clearTimeout(resizeWaits.get(terminalId));
+  resizeWaits.set(terminalId, setTimeout(() => { resizeWaits.delete(terminalId); send(); }, RESIZE_QUIET_MS));
+}
+
 export function resizeAgentTerminal(terminalId: string, cols: number, rows: number): boolean {
-  const view = views.get(terminalId);
-  if (!view) return false;
-  if (view.leases.resize) socket.send({ type: "terminal.resize", terminalId, cols, rows, generation: view.leases.resize.generation });
+  if (!views.has(terminalId)) return false;
+  afterResizeQuiet(terminalId, () => {
+    const lease = views.get(terminalId)?.leases.resize;
+    if (lease) socket.send({ type: "terminal.resize", terminalId, cols, rows, generation: lease.generation });
+  });
   return true;
 }
 
@@ -213,8 +226,17 @@ export function openAgentTerminal(
     }
   };
   takeBacks.set(viewId, { terminalId: () => terminalId, take: () => takeResize() });
+  // A person typed here: the size comes to this view, from another window or a phone, once
+  // while the request is on its way. Being looked at or focused never moves it.
+  let sizing = false;
+  const typed = async () => {
+    const view = terminalId ? views.get(terminalId) : undefined;
+    if (released || sizing || !view || view.leases.resize) return;
+    sizing = true;
+    try { await takeResize(); } finally { sizing = false; }
+  };
   return {
-    ready, release, takeResize,
+    ready, release, takeResize, typed,
     takeControl: async (ifUnowned = false) => { await acquire("input", ifUnowned); await takeResize(ifUnowned); },
   };
 }
