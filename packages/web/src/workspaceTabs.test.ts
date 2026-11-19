@@ -48,6 +48,16 @@ describe("workspaceTabs", () => {
     expect(workspaceTabs(state, [file]).map((e) => e.id)).toEqual(["a", "kid", fileTabKey(file), "b"]);
   });
 
+  it("draws no tab for a session id it cannot resolve, nor for another workspace's sub-session", () => {
+    // A stopped sub-session the core no longer lists, and one whose session lives in another workspace, can still be
+    // in the stored and core orders after the lead: they keep no slot on screen and never become "New session" tabs.
+    const elsewhere = { ...session("kid", 3), parentSessionId: "a", workspaceId: "w2" } as SessionSummary;
+    const state = { ...nav(), sessions: [...nav().sessions, elsewhere], workspaces: [workspace("w1"), workspace("w2")],
+      workspaceOrderByHost: { local: { projects: [], sessions: ["a", "stopped", "kid", "b"] } } };
+    saveTabOrder(tabOrderKey(nav())!, ["a", "stopped", "kid", fileTabKey(file), "b"]);
+    expect(workspaceTabs(state, [file]).map((e) => e.id)).toEqual(["a", fileTabKey(file), "b"]);
+  });
+
   it("leaves out another workspace's resources", () => {
     expect(workspaceTabs(nav(), [{ workspaceId: "w2", path: "y" }]).map((e) => e.id)).toEqual(["a", "b"]);
   });
