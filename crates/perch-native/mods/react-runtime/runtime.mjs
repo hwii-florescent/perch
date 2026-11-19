@@ -524,9 +524,10 @@ class Zt extends Vs {
     this.ticked = !!a;
   }
   /** Selection in a field: the caret stays at the end of its text, and the one selection kept is all of it
-   * (`selectedAll`: the next character typed replaces the text). */
+   * (`selectedAll`: the next character typed replaces the text). `select()` focuses the field first, as WebKit and
+   * Chromium do: a source that only selects (the tab strip's rename) expects the keyboard there. */
   select() {
-    this.selectedAll = !0;
+    this.focus(), this.selectedAll = !0;
   }
   setSelectionRange(a, r) {
     this.selectedAll = a === 0 && r >= this.value.length && r > 0;
@@ -10072,9 +10073,9 @@ function Sb() {
 //!
 //! The engine talks back through the handle `mount` returns: `dispatch(id, type, init)` runs a DOM event through
 //! the tree (capture on `window`, `document` and the ancestors, the target, then bubble, with React's `on<Type>`
-//! and `on<Type>Capture` props at their element), `hover(id, on)` and `focus(id)` set the interaction state the
-//! cascade reads for group variants, and `flush()` runs pending effects. An event is a discrete update: React
-//! commits it before `dispatch` returns.
+//! and `on<Type>Capture` props at their element), `hover(id, on)`, `focus(id)` and `blur()` (the keyboard gone
+//! elsewhere) set the interaction state the cascade reads for group variants, and `flush()` runs pending effects. An
+//! event is a discrete update: React commits it before `dispatch` returns.
 let Gn = Va.NoEventPriority;
 function Eb(n, a) {
   const r = /* @__PURE__ */ new Set([...Object.keys(n), ...Object.keys(a)]);
@@ -10402,6 +10403,14 @@ function Jx(n, a, r = {}) {
       _ && (B(() => {
         const k = o.activeElement;
         k && k !== _ && k !== o.body && g.dispatch(k, "blur"), o.focus(_), g.dispatch(_, "focus");
+      }), E());
+    },
+    /** The keyboard left the screen (a press on a terminal): its focused element loses the focus and gets `blur`, as
+     * a page's field does when the focus moves out of it, so a field that ends on blur (a rename) ends. */
+    blur() {
+      const h = o.activeElement;
+      !h || h === o.body || (B(() => {
+        g.dispatch(h, "blur"), o.blur(h);
       }), E());
     },
     /** A press at node `id` that nothing prevented: the browser's default focuses the element pressed. Only an element

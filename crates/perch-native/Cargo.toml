@@ -228,6 +228,11 @@ path = "tests/context_bridge_window.rs"
 harness = false
 
 [[test]]
+name = "tab_rename_window"
+path = "tests/tab_rename_window.rs"
+harness = false
+
+[[test]]
 name = "workspace_window_size"
 path = "tests/workspace_window_size.rs"
 harness = false
