@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     ops::Range,
-    sync::{Arc, Mutex, OnceLock, Weak},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use gpui::{
@@ -149,13 +149,7 @@ struct CustomBlockElement {
     state: BlockState,
 }
 
-impl IntoElement for CustomBlockElement {
-    type Element = Self;
 
-    fn into_element(self) -> Self {
-        self
-    }
-}
 
 impl Element for CustomBlockElement {
     type RequestLayoutState = ();
@@ -1759,7 +1753,8 @@ impl std::fmt::Debug for TableColumnWidthsCache {
 }
 
 struct TableColumnWidths {
-    text_system: Weak<gpui::WindowTextSystem>,
+    /// PERCH: identity only; 0.3.13 hands out `Rc<WindowTextSystem>`, which is not `Sync`.
+    text_system: usize,
     /// The styles the header row and the body rows render with.
     text_styles: TableTextStyles,
     rem_size: Pixels,
@@ -2986,8 +2981,7 @@ fn measure_table_columns(
                     && cached.inline_code == inline_code
                     && cached
                         .text_system
-                        .upgrade()
-                        .is_some_and(|system| Arc::ptr_eq(&system, window.text_system()))
+                        == std::rc::Rc::as_ptr(window.text_system()) as usize
             })
             .cloned()
     });
@@ -2995,7 +2989,7 @@ fn measure_table_columns(
         let (widths, custom_cells) =
             measure_table_text_columns(table, col_count, &text_styles, node_cx, window, cx);
         let measured = Arc::new(TableColumnWidths {
-            text_system: Arc::downgrade(window.text_system()),
+            text_system: std::rc::Rc::as_ptr(window.text_system()) as usize,
             text_styles: text_styles.clone(),
             rem_size,
             mono_family,

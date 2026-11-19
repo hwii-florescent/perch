@@ -98,13 +98,6 @@ pub(crate) struct Probe {
     element: AnyElement,
 }
 
-impl IntoElement for Probe {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
 
 impl Element for Probe {
     type RequestLayoutState = ();

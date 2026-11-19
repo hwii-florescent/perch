@@ -4,7 +4,7 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     AnyElement, App, Bounds, Element, ElementId, GlobalElementId, Hitbox, HitboxBehavior,
-    InspectorElementId, IntoElement, LayoutId, LongPressEvent, MouseMoveEvent, Pixels, Point, Size,
+    InspectorElementId, LayoutId, LongPressEvent, MouseMoveEvent, Pixels, Point, Size,
     Style, TouchPhase, Window,
 };
 
@@ -46,13 +46,7 @@ impl<P: Plot + 'static> PlotElement<P> {
     }
 }
 
-impl<P: Plot + 'static> IntoElement for PlotElement<P> {
-    type Element = Self;
 
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
 
 impl<P: Plot + 'static> Element for PlotElement<P> {
     type RequestLayoutState = ();
