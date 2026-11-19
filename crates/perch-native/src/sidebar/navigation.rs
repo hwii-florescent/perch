@@ -144,10 +144,6 @@ pub struct SessionInfo {
     pub workspace_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
-    /// The branch of the separate checkout it runs in, when that is not its workspace's folder (a
-    /// sub-session started with `perch spawn --worktree`, which stays with its lead).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub checkout: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     /// `AgentState`: blocked, working, done or idle.
@@ -816,23 +812,6 @@ impl<'a> Builder<'a> {
         (shown >= 2).then(|| non_empty(&own.branch).unwrap_or_else(|| own.name.clone()))
     }
 
-    /// The branch of the other checkout `session` runs in (navigation.ts `checkout`).
-    fn checkout(&self, session: &SessionSummary) -> Option<String> {
-        session.workspace_id.as_ref()?;
-        let other = self.store.workspaces.iter().find(|w| {
-            session.workspace_id.as_deref() != Some(w.id.as_str())
-                && w.host_id == session.host_id
-                && w.path == session.cwd
-        })?;
-        non_empty(&other.branch)
-            .or_else(|| (!other.name.is_empty()).then(|| other.name.clone()))
-            .or_else(|| {
-                std::path::Path::new(&other.path)
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-            })
-    }
-
     fn info(&self, session: &SessionSummary) -> SessionInfo {
         let section = self.facts.section(session);
         let need_reason = (section == Attention::NeedsYou).then(|| {
@@ -862,7 +841,6 @@ impl<'a> Builder<'a> {
             workspace_id: session.workspace_id.clone(),
             workspace_label: self.workspace_label(session),
             parent_id: session.parent_session_id.clone(),
-            checkout: self.checkout(session),
             provider: provider_of(session).map(str::to_string),
             state: dot_word(dot(session)),
             section: section_key(section),

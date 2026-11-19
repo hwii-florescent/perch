@@ -121,12 +121,6 @@ export function useNavigation(options?: { showTerminals?: boolean; sortByAttenti
     if (!own || workspacesForProject(workspaces, own.projectId).filter((w) => !w.hidden).length < 2) return undefined;
     return own.branch || own.name;
   };
-  /** The branch of the other checkout a session runs in (a sub-session started with `--worktree`). */
-  const checkout = (session: SessionSummary): string | undefined => {
-    const host = session.hostId ?? "local";
-    const other = workspaces.find((w) => w.id !== session.workspaceId && w.hostId === host && w.path === session.cwd);
-    return other ? other.branch || other.name || basename(other.path) : undefined;
-  };
   const infos = new Map<string, Sdk.SessionInfo>();
   const info = (session: SessionSummary): Sdk.SessionInfo => {
     const known = infos.get(session.id);
@@ -138,7 +132,6 @@ export function useNavigation(options?: { showTerminals?: boolean; sortByAttenti
       id: session.id, title: session.title ?? "", hostId: session.hostId ?? "local", cwd: session.cwd, createdAt: session.createdAt,
       status: session.status, branch: session.currentBranch, projectId: session.projectId, projectName: owner && projectName(owner),
       workspaceId: session.workspaceId, workspaceLabel: workspaceLabel(session), parentId: session.parentSessionId,
-      checkout: session.workspaceId ? checkout(session) : undefined,
       provider: session.currentProviderId ?? remembered[session.id] ?? session.cliProviderId, state: sessionDotState(session), section,
       needReason: section === "needs" ? (need ? [reasonLabel(need), certaintyNote(need)].filter(Boolean).join(" · ") : "Waiting for you") : undefined,
       blocked: !!session.blocked, unseen: !!session.unseen, active: session.id === sessionId,

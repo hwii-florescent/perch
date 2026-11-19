@@ -47,8 +47,9 @@ Replaces the separate worktree row for sub-sessions started with `perch spawn --
 
 - Every sub-session nests under its lead in the sidebar and sits right after it (and its earlier
   sub-sessions) in the tab strip, whatever checkout it runs in (in its lead's stack: see "One order" above).
-- A `--worktree` sub-session keeps its own checkout and folder; its sidebar row carries the checkout's
-  branch, small and muted, with the linked-checkout glyph. The checkout is not a separate Workspace row
+- A `--worktree` sub-session keeps its own checkout and folder; its sidebar row looks like any other
+  sub-session's, with no worktree mark (owner, 2026-11-19: the status bar already shows the tab's branch
+  and folder). The checkout is not a separate Workspace row
   while it only hosts sub-sessions; it shows again when a person shows it on its own.
 - A spawned checkout and its branch are named from `--name` (slugged), not the task's first words.
 - The status bar's folder and branch are the active tab's (a file or review tab: its workspace's or

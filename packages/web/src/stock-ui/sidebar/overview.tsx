@@ -901,11 +901,6 @@ const SessionRow = memo(function SessionRow({ session, siblings: siblingIds, gro
       </> : <>
         <SessionDot plain id={session.id} className="h-[18px] w-[18px]" />
         <span className={cn(SESSION_TITLE, lead && "flex-initial")}>{title}</span>
-        {/* A sub-session in its own checkout says which, quietly: it stays with its lead, not under that checkout. */}
-        {session.checkout && <span className="flex min-w-0 max-w-[40%] shrink items-center gap-1 text-[0.62rem] text-subtext-0" title={`Worktree ${session.checkout}`} data-testid={`session-checkout-${session.id}`}>
-          <CheckoutIcon linked />
-          <span className="min-w-0 truncate">{session.checkout}</span>
-        </span>}
         {variant === "list" && session.projectName && <span className="min-w-0 max-w-[35%] truncate text-[0.62rem] text-subtext-0" title={session.projectName}>{session.projectName}</span>}
         {!lead && badge}
       </>}

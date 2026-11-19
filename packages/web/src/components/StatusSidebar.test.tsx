@@ -393,7 +393,7 @@ it("lists chats in the core's order inside a section", () => {
   expect(ids).toEqual(["b", "a", "c"]); // the core's order, mirrored: newest first on screen
 });
 
-it("a sub-session running in its own checkout nests under its lead in the tree and names that checkout's branch", () => {
+it("a sub-session running in its own checkout nests under its lead in the tree, with no worktree mark", () => {
   storage.set("perch.sidebar.organize", "tree");
   const checkout = { ...workspace, id: "wt", path: "/tmp/wt/review", name: "review", branch: "review-shared-tabs", parentWorkspaceId: "w", hidden: true };
   const other = { ...workspace, id: "w2", path: "/tmp/other", name: "other", branch: "other" };
@@ -406,9 +406,7 @@ it("a sub-session running in its own checkout nests under its lead in the tree a
   expect(rows.indexOf("kid")).toBe(rows.indexOf("lead") + 1);
   expect(rows.indexOf("plain")).toBe(rows.indexOf("lead") + 2);
   expect(get("workspace-session-kid")!.parentElement!.hasAttribute("data-sub-session")).toBe(true);
-  expect(get("session-checkout-kid")?.textContent).toBe("review-shared-tabs");
-  expect(get("session-checkout-plain")).toBeNull();
-  expect(get("session-checkout-lead")).toBeNull();
+  expect(get("workspace-session-kid")!.textContent).not.toContain("review-shared-tabs");
 });
 
 it("the status bar shows the focused tab's own folder and follows a tab switch", async () => {

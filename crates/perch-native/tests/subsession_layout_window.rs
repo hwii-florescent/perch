@@ -1,7 +1,7 @@
 //! A lead's sub-sessions sit with it, whatever checkout they run in: a real core starts one plain
 //! sub-session and one with `--worktree`, and the window's strip lists both right after the lead,
 //! the sidebar's navigation lists them in that order under the lead's workspace, the worktree child
-//! names its checkout's branch, and the checkout is no separate row. The status bar shows the folder
+//! carries no worktree mark, and the checkout is no separate row. The status bar shows the folder
 //! of the tab on screen and follows a tab switch.
 //!
 //! The agent is a stand-in `claude` that only sleeps, found on a PATH of the scratch folder and the
@@ -185,7 +185,7 @@ fn window(rig: &mut Rig) {
     });
 
     // The sidebar: the same order in the lead's workspace, each child naming its lead; the worktree
-    // child names its checkout's branch, and the checkout has no row of its own.
+    // child carries no worktree mark, and the checkout has no row of its own.
     let call = |h: &mut Harness, name: &str, args: Vec<Value>| {
         h.cx.update(|cx| {
             let perch = cx.global::<WindowMods>().perch.clone();
@@ -218,8 +218,7 @@ fn window(rig: &mut Rig) {
     let row = |id: &str| rows.iter().find(|s| s["id"] == json!(id)).unwrap();
     assert_eq!(row(&plain)["parentId"], json!(lead));
     assert_eq!(row(&review)["parentId"], json!(lead));
-    assert_eq!(row(&review)["checkout"], json!("review-shared-tabs"));
-    assert!(row(&plain).get("checkout").is_none());
+    assert!(row(&review).get("checkout").is_none());
     let hidden = project["hidden"].as_array().unwrap();
     assert_eq!(hidden.len(), 1, "the checkout waits in the hidden list");
     let checkout = hidden[0]["path"].as_str().unwrap().to_string();
