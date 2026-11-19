@@ -68,7 +68,10 @@ use std::{
     cell::{Cell, RefCell},
     collections::{BTreeMap, btree_map},
     ffi::c_void,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{
+        Arc, Mutex, MutexGuard, PoisonError,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+    },
     time::Duration,
 };
 
@@ -404,6 +407,17 @@ impl WindowFrameSource {
         })
     }
 
+    /// PERCH: whether the source is subscribed to a display link now.
+    pub fn is_running(&self) -> bool {
+        self.registration.is_some()
+    }
+
+    /// PERCH: the dispatch source that delivers frame requests, so a waker can deliver one while
+    /// the link is paused (`merge_data` runs the callback on the main queue).
+    pub fn requests(&self) -> DispatchRetained<DispatchSource> {
+        self.frame_requests.clone()
+    }
+
     pub fn take_signal(&self) -> Option<(Instant, FrameRequestSource)> {
         self.signal.take()
     }
@@ -413,6 +427,58 @@ impl WindowFrameSource {
             unsubscribe(display_id, subscriber_id);
         }
         self.signal.take();
+    }
+}
+
+/// PERCH: when a window's `CVDisplayLink` pauses (macOS 12 and 13; from macOS 14 upstream's
+/// [`MetalFrames`] pauses a `CAMetalDisplayLink` itself). Upstream runs this link (and wakes the main
+/// thread on every vsync) for as long as the window is visible, even with nothing to draw. GPUI's core already tells a platform when a window wants
+/// a frame (`PlatformWindow::frame_waker`), so the link pauses after [`Self::IDLE_FRAMES`]
+/// requests that nothing wanted, and the waker delivers the next request itself and restarts it.
+#[derive(Default)]
+pub struct FrameDemand {
+    demanded: AtomicBool,
+    paused: AtomicBool,
+    idle_frames: AtomicU32,
+}
+
+impl FrameDemand {
+    /// Vsyncs with nothing to draw before the link pauses: long enough that steady output (a
+    /// terminal streaming, an animation) keeps it running, short enough to cost nothing at rest.
+    pub const IDLE_FRAMES: u32 = 8;
+
+    /// Something wants a frame. True when the link is paused, so the caller must deliver a frame
+    /// request itself.
+    pub fn demand(&self) -> bool {
+        self.demanded.store(true, Ordering::SeqCst);
+        self.paused.load(Ordering::SeqCst)
+    }
+
+    /// A frame request is being served. True when it came while the link was paused, so the
+    /// caller restarts the link.
+    pub fn begin_frame(&self) -> bool {
+        self.demanded.store(false, Ordering::SeqCst);
+        self.paused.swap(false, Ordering::SeqCst)
+    }
+
+    /// The request was served. True when the link should pause now.
+    pub fn end_frame(&self) -> bool {
+        if self.demanded.load(Ordering::SeqCst) {
+            self.idle_frames.store(0, Ordering::SeqCst);
+            return false;
+        }
+        if self.idle_frames.fetch_add(1, Ordering::SeqCst) + 1 < Self::IDLE_FRAMES {
+            return false;
+        }
+        self.idle_frames.store(0, Ordering::SeqCst);
+        self.paused.store(true, Ordering::SeqCst);
+        true
+    }
+
+    /// The link was (re)started for another reason (visibility, resize, a new screen).
+    pub fn reset(&self) {
+        self.paused.store(false, Ordering::SeqCst);
+        self.idle_frames.store(0, Ordering::SeqCst);
     }
 }
 
@@ -700,6 +766,37 @@ mod tests {
                 received_at,
             );
         }
+    }
+
+    // PERCH: the idle pause.
+    #[test]
+    fn a_link_with_nothing_to_draw_pauses_and_a_demand_resumes_it() {
+        let demand = FrameDemand::default();
+        assert!(!demand.demand(), "a running link delivers the request");
+        assert!(!demand.begin_frame());
+        demand.demand(); // the frame draws
+        assert!(!demand.end_frame(), "this frame was wanted");
+        for _ in 1..FrameDemand::IDLE_FRAMES {
+            assert!(!demand.begin_frame());
+            assert!(!demand.end_frame());
+        }
+        assert!(!demand.begin_frame());
+        assert!(demand.end_frame(), "idle vsyncs pause the link");
+        assert!(demand.demand(), "a paused link needs the request delivered");
+        assert!(demand.begin_frame(), "the request restarts the link");
+        assert!(!demand.end_frame());
+    }
+
+    #[test]
+    fn demand_during_a_frame_keeps_the_link_running() {
+        let demand = FrameDemand::default();
+        for _ in 0..FrameDemand::IDLE_FRAMES * 3 {
+            demand.begin_frame();
+            demand.demand();
+            assert!(!demand.end_frame());
+        }
+        demand.reset();
+        assert!(!demand.demand());
     }
 
     fn timestamp(host_time: u64) -> sys::CVTimeStamp {

@@ -161,6 +161,23 @@ impl HeadlessAppContext {
         app.update_window(window, f)
     }
 
+    /// Delivers a frame request to a window, as a display would: the window draws if it needs to and
+    /// presents through the headless renderer into its reused target, with no read-back. For measuring
+    /// what a shown window costs where no display gives frames.
+    pub fn present(&mut self, window: AnyWindowHandle) -> Result<()> {
+        let test_window = self
+            .app
+            .borrow_mut()
+            .update_window(window, |_, window, _| {
+                window.platform_window.as_test().cloned()
+            })?
+            .ok_or_else(|| anyhow::anyhow!("not a headless window"))?;
+        // PERCH: a display's tick, which presents only after a draw. Forcing a present every frame
+        // keeps the GPU busy, and its driver then holds about 116 MB a real window frees at rest.
+        test_window.simulate_frame_request(crate::RequestFrameOptions::default());
+        Ok(())
+    }
+
     /// Captures a screenshot from a window.
     ///
     /// Requires that the context was created with a renderer factory that

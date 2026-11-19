@@ -1,8 +1,8 @@
 use crate::{
-    BoolExt, MacDisplay, MetalFrames, NSRange, NSStringExt, TISCopyCurrentKeyboardInputSource,
-    TISGetInputSourceProperty, WindowFrameSource, events::platform_input_from_native,
-    kTISPropertyInputSourceIsASCIICapable, kTISPropertyInputSourceType, kTISTypeKeyboardInputMode,
-    ns_string, renderer,
+    BoolExt, FrameDemand, MacDisplay, MetalFrames, NSRange, NSStringExt,
+    TISCopyCurrentKeyboardInputSource, TISGetInputSourceProperty, WindowFrameSource,
+    events::platform_input_from_native, kTISPropertyInputSourceIsASCIICapable,
+    kTISPropertyInputSourceType, kTISTypeKeyboardInputMode, ns_string, renderer,
 };
 use anyhow::Result;
 use block2::RcBlock;
@@ -662,6 +662,8 @@ struct MacWindowState {
     cursor_style: CursorStyle,
     cursor_visible: Arc<AtomicBool>,
     frame_source: FrameSource,
+    // PERCH: pauses a `CVDisplayLink` `frame_source` while nothing wants a frame (see `FrameDemand`).
+    frame_demand: Arc<FrameDemand>,
     renderer: renderer::Renderer,
     request_frame_callback: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     event_callback: Option<Box<dyn FnMut(PlatformInput) -> gpui::DispatchEventResult>>,
@@ -877,6 +879,7 @@ impl MacWindowState {
     /// weakly to deliver frames.
     fn start_display_link(&mut self, window_state: &Rc<Mutex<MacWindowState>>) {
         self.stop_display_link();
+        self.frame_demand.reset();
         if !self
             .native_window()
             .occlusionState()
@@ -942,7 +945,8 @@ impl MacWindowState {
         let screen_frame = self
             .native_window()
             .screen()
-            .map_or_default(|screen| screen.visibleFrame());
+            // PERCH: upstream's `map_or_default` is unstable on stable Rust 1.97.
+            .map_or_else(Default::default, |screen| screen.visibleFrame());
         bounds.size == rect_to_size(screen_frame)
     }
 
@@ -1003,7 +1007,8 @@ impl MacWindowState {
         let NSSize { width, height } = self
             .native_window()
             .contentView()
-            .map_or_default(|view| view.frame().size);
+            // PERCH: upstream's `map_or_default` is unstable on stable Rust 1.97.
+            .map_or_else(Default::default, |view| view.frame().size);
         size(px(width as f32), px(height as f32))
     }
 
@@ -1031,6 +1036,25 @@ pub(crate) struct MacWindow(
 );
 
 impl MacWindow {
+    /// PERCH: when the window wants a frame while its `CVDisplayLink` is paused, delivers the request
+    /// through the frame source (which restarts the link). `None` for a `CAMetalDisplayLink` window.
+    fn display_link_waker(&self) -> Option<impl Fn() + 'static> {
+        let mut lock = self.0.as_ref().lock();
+        let data = lock.native_view.as_ptr() as *mut c_void;
+        let demand = lock.frame_demand.clone();
+        let FrameSource::DisplayLink(frame_source) = &mut lock.frame_source else {
+            return None;
+        };
+        let requests = frame_source
+            .get_or_insert_with(|| WindowFrameSource::new(data, step))
+            .requests();
+        Some(move || {
+            if demand.demand() {
+                requests.merge_data(1);
+            }
+        })
+    }
+
     pub fn open(
         handle: AnyWindowHandle,
         WindowParams {
@@ -1114,7 +1138,8 @@ impl MacWindow {
             let target_screen = target_screen.or_else(|| NSScreen::mainScreen(marker));
             let screen_frame = target_screen
                 .as_ref()
-                .map_or_default(|screen| screen.frame());
+                // PERCH: upstream's `map_or_default` is unstable on stable Rust 1.97.
+                .map_or_else(Default::default, |screen| screen.frame());
 
             let window_rect = NSRect::new(
                 NSPoint::new(
@@ -1172,6 +1197,7 @@ impl MacWindow {
                     Some(metal_frames) => FrameSource::Metal(metal_frames.clone()),
                     None => FrameSource::DisplayLink(None),
                 },
+                frame_demand: Arc::default(),
                 renderer,
                 request_frame_callback: None,
                 event_callback: None,
@@ -2201,6 +2227,8 @@ impl PlatformWindow for MacWindow {
 
     fn draw(&self, scene: &gpui::Scene) {
         let mut this = self.0.lock();
+        // PERCH: a drawn frame (a forced one too) counts as wanted.
+        this.frame_demand.demand();
         this.renderer.draw(scene);
     }
 
@@ -2209,11 +2237,20 @@ impl PlatformWindow for MacWindow {
     fn schedule_frame(&self) {
         if let Some(metal_frames) = &self.2 {
             metal_frames.wake();
+        } else if let Some(wake) = self.display_link_waker() {
+            // PERCH: a paused `CVDisplayLink` must resume here too.
+            wake();
         }
     }
 
     fn frame_waker(&self) -> Option<Rc<dyn Fn()>> {
-        let metal_frames = Rc::downgrade(self.2.as_ref()?);
+        let Some(metal_frames) = self.2.as_ref() else {
+            // PERCH: GPUI's core wakes a `CVDisplayLink` window through this too (see `FrameDemand`).
+            return self
+                .display_link_waker()
+                .map(|wake| Rc::new(wake) as Rc<dyn Fn()>);
+        };
+        let metal_frames = Rc::downgrade(metal_frames);
         Some(Rc::new(move || {
             if let Some(metal_frames) = metal_frames.upgrade() {
                 metal_frames.wake();
@@ -3517,6 +3554,16 @@ extern "C" fn step(view: *mut c_void) {
     let window_state = unsafe { get_window_state(&*view) };
     let mut lock = window_state.lock();
 
+    // PERCH: a request the frame waker delivered while the link was paused restarts the link;
+    // one that cannot start (the window is covered) is dropped, as vsyncs are while covered.
+    if lock.frame_demand.begin_frame() {
+        lock.start_display_link(&window_state);
+        if !matches!(&lock.frame_source, FrameSource::DisplayLink(Some(source)) if source.is_running())
+        {
+            return;
+        }
+    }
+
     if let Some(mut callback) = lock.request_frame_callback.take() {
         let signal = match &lock.frame_source {
             FrameSource::DisplayLink(Some(frame_source)) => frame_source.take_signal(),
@@ -3532,7 +3579,12 @@ extern "C" fn step(view: *mut c_void) {
             signal_source,
             ..Default::default()
         });
-        window_state.lock().request_frame_callback = Some(callback);
+        let mut lock = window_state.lock();
+        lock.request_frame_callback = Some(callback);
+        // PERCH: nothing wanted the last few vsyncs: pause until something does.
+        if lock.frame_demand.end_frame() {
+            lock.stop_display_link();
+        }
     }
 }
 

@@ -212,6 +212,8 @@ fn native_activation_policy(policy: ActivationPolicy) -> NSApplicationActivation
     match policy {
         ActivationPolicy::Regular => NSApplicationActivationPolicy::Regular,
         ActivationPolicy::Accessory => NSApplicationActivationPolicy::Accessory,
+        // PERCH: from herdr-app (4c8c622), the variant gpui-shell's `check` host uses.
+        ActivationPolicy::Prohibited => NSApplicationActivationPolicy::Prohibited,
     }
 }
 

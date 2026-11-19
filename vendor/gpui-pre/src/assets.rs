@@ -14,6 +14,13 @@ pub trait AssetSource: 'static + Send + Sync {
     /// Load the given asset from the source path.
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>>;
 
+    /// Normalize a resource's identity without changing how it is read.
+    // PERCH: herdr-app's (4c8c622) trait method, taken alone so gpui-shell's `AppAssets`
+    // compiles; nothing in this copy calls it, so the default identity is what applies.
+    fn image_resource(&self, resource: &crate::Resource) -> crate::Resource {
+        resource.clone()
+    }
+
     /// List the assets at the given path.
     fn list(&self, path: &str) -> Result<Vec<SharedString>>;
 }
