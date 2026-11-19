@@ -135,6 +135,7 @@ pub fn run_core(scratch: &Path) {
     std::env::set_var("PERCHD_IDLE_EXIT_SECS", "1");
     std::env::set_var("PERCH_CLEANUP_OWNER", cleanup_owner(scratch));
     std::env::remove_var("PERCH_LOCAL_TOKEN");
+    isolate_from_outer_perch();
     // Records the owner so every runtime this core starts is released by name afterwards.
     perch_core::daemon::run_if_requested();
 
@@ -168,6 +169,40 @@ pub fn run_core(scratch: &Path) {
         }
         let _ = boot.await;
     });
+}
+
+/// A test run from a Perch terminal inherits that session's shell integration. Left in place,
+/// `PERCH_USER_ZDOTDIR` makes the test's shells source the person's real `.zshrc` under the
+/// scratch `HOME` (Homebrew then downloads into it and leaves a process in a group of its own),
+/// and perchd rightly halts cleanup on that detached group.
+pub fn isolate_from_outer_perch() {
+    for name in [
+        "ZDOTDIR",
+        "PERCH_USER_ZDOTDIR",
+        "PERCH_SESSION",
+        "PERCH_SHELL",
+        "PERCH_TOKEN",
+        "PERCH_PORT",
+        "TERM_PROGRAM",
+    ] {
+        std::env::remove_var(name);
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        let kept = std::env::split_paths(&path).filter(|dir| !is_perch_shell_bin(dir));
+        std::env::set_var("PATH", std::env::join_paths(kept).unwrap());
+    }
+}
+
+/// A Perch shell-integration `bin` directory: `…/perch-native-<uid>/<hash>.shell/bin`.
+pub fn is_perch_shell_bin(dir: &Path) -> bool {
+    dir.ends_with("bin")
+        && dir.parent().is_some_and(|shell| {
+            shell.extension().is_some_and(|e| e == "shell")
+                && shell
+                    .parent()
+                    .and_then(Path::file_name)
+                    .is_some_and(|n| n.to_string_lossy().starts_with("perch-native-"))
+        })
 }
 
 fn scratch_dir() -> PathBuf {
