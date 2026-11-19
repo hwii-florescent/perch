@@ -488,19 +488,31 @@ pub(super) fn handle_agent_control_acquire(
                     .unwrap()
                     .insert(lifecycle_control_key(&key, channel), lease.clone());
             }
+            let status = state
+                .app
+                .agent_runtime
+                .snapshot(&key)
+                .ok()
+                .map(lifecycle_status_to_wire);
             let _ = state.out_tx.send(ServerMessage::AgentControl {
                 request_id,
                 session_id,
                 agent_id,
                 channel,
                 lease: lease.as_ref().map(control_lease_to_wire),
-                status: state
-                    .app
-                    .agent_runtime
-                    .snapshot(&key)
-                    .ok()
-                    .map(lifecycle_status_to_wire),
+                status: status.clone(),
             });
+            // The view that held the lease learns now that it no longer does, not at the next
+            // lifecycle pass: until then it would still answer terminal queries as the size's holder.
+            if let Some(status) = status.filter(|_| lease.is_some()) {
+                super::broadcast_foundation(
+                    &state.app,
+                    ServerMessage::AgentLifecycleChanged {
+                        host_id: "local".to_string(),
+                        status,
+                    },
+                );
+            }
         }
         Err(error) => {
             fail(

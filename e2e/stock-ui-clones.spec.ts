@@ -1921,9 +1921,10 @@ async function openDevices(page: Page) {
   await expect(page.getByTestId("settings-devices")).toBeVisible({ timeout: 10000 });
 }
 
-/** A phone paired from `page`'s Settings > Devices: a phone-sized context with no local cookie, past its pairing gate. */
+/** A phone paired from `page`'s Settings > Devices: a phone-sized touch context with no local cookie, past its pairing
+ * gate. Touch makes it a phone (`isTouchPhone`): it takes the size of the terminal it shows. */
 async function pairPhone(page: Page, browser: Browser, name: string) {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: { cookies: [], origins: [] } });
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, storageState: { cookies: [], origins: [] } });
   await context.addInitScript(() => localStorage.setItem("perch.onboarding.seen", "1"));
   const phone = await context.newPage();
   phone.on("pageerror", (error) => console.log("PHONE PAGEERROR", error.message));
@@ -1982,12 +1983,12 @@ test("the phone-size notice runs from its stock package; a clone in its place ta
     await expect(mobile).toHaveAttribute("data-terminal-id", terminalId, { timeout: 30000 });
     await stockThenClones(page, [{
       name: "phone-size", root: "phone-size-notice",
-      open: async () => {
-        // The phone fits the terminal to itself on opening; after a take-back, with Fit here.
-        await expect(async () => {
-          if (!(await mobile.getAttribute("data-controlling"))) await mobile.getByRole("button", { name: "Fit here", exact: true }).click({ timeout: 2000 });
-          await expect(mobile).toHaveAttribute("data-controlling", "true", { timeout: 2000 });
-        }).toPass({ timeout: 20000 });
+      open: async (p) => {
+        // The phone takes the terminal's size as it shows it, with no typing and no Fit here: opening the tab again
+        // after a take-back is enough, and the computer offers the size back.
+        await showOnPhone(phone, sessionId);
+        await expect(mobile).toHaveAttribute("data-terminal-id", terminalId, { timeout: 30000 });
+        await expect(p.getByTestId("phone-size-notice")).toBeVisible({ timeout: 15000 });
       },
       close: async (p) => {
         await p.getByTestId("phone-size-notice").getByRole("button", { name: "Take back this tab", exact: true }).click();

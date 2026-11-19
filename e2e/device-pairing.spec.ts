@@ -137,9 +137,10 @@ test("a phone pairs over the network, drives the session, and loses access when 
     core = null;
   }
 
-  // The phone is a phone-sized context with its own storage and cookie jar,
-  // pointed at the LAN origin.
-  const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  // The phone is a phone-sized touch context with its own storage and cookie jar,
+  // pointed at the LAN origin. Touch makes it a phone (`isTouchPhone`): it takes
+  // the size of the terminal it shows and gives it back when it stops showing it.
+  const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   await phoneContext.addInitScript(() => {
     if (location.protocol !== "http:") return;
     localStorage.setItem("perch.onboarding.seen", "1");
@@ -155,18 +156,23 @@ test("a phone pairs over the network, drives the session, and loses access when 
   let agentState: string | undefined;
   let inputDevice: string | undefined;
   let resizeDevice: string | undefined;
-  let trackPhoneResizes = false;
-  const sizeFrames: string[] = [];
   let phoneSize: { cols: number; rows: number } | undefined;
   const queryReplies = { phone: 0, desktop: 0 };
-  page.on("websocket", (socket) => socket.on("framesent", ({ payload }) => {
-    const message = JSON.parse(String(payload));
-    if (message.type === "terminal.input" && /^\x1b\[\d+;\d+R$/.test(message.data)) queryReplies.desktop++;
-  }));
+  // Who holds the size, as the laptop is told.
+  let laptopSeesResize: string | undefined;
+  page.on("websocket", (socket) => {
+    socket.on("framesent", ({ payload }) => {
+      const message = JSON.parse(String(payload));
+      if (message.type === "terminal.input" && /^\x1b\[\d+;\d+R$/.test(message.data)) queryReplies.desktop++;
+    });
+    socket.on("framereceived", ({ payload }) => {
+      const frame = JSON.parse(String(payload));
+      if (frame.type === "agent.lifecycle.changed" && frame.status.key.agentId === "phonebot") laptopSeesResize = frame.status.resizeOwner?.deviceId;
+    });
+  });
   phone.on("websocket", (socket) => {
     socket.on("framesent", ({ payload }) => {
       const message = JSON.parse(String(payload));
-      if (trackPhoneResizes && message.type === "terminal.resize") sizeFrames.push(String(payload));
       if (message.type === "terminal.resize") phoneSize = { cols: message.cols, rows: message.rows };
       if (message.type === "terminal.input" && /^\x1b\[\d+;\d+R$/.test(message.data)) queryReplies.phone++;
     });
@@ -247,36 +253,54 @@ test("a phone pairs over the network, drives the session, and loses access when 
     await expect(desktop).toHaveAttribute("data-controlling", "true");
     await expect(terminal).toHaveAttribute("data-writable", "true");
     await expect(terminal).not.toHaveAttribute("data-controlling", "true");
-    trackPhoneResizes = true;
+    // The size goes where a person types (2026-11-19): typing on the phone takes it, the keyboard stays the laptop's.
     await input.pressSequentially("while-laptop-open", { delay: 10 });
     await phone.getByTestId("mobile-key-bar").getByRole("button", { name: "Enter", exact: true }).click();
     await expect(desktop.locator(".xterm-rows")).toContainText("phonebot_reply while-laptop-open");
+    await expect.poll(() => laptopSeesResize).toBe(pairedId);
     await expect(desktop).toHaveAttribute("data-controlling", "true");
     await expect.poll(() => inputDevice, { message: "shared phone typing must not take the laptop lease" }).toBe("local");
+    // Typing on the laptop takes it back, and the phone is told at once.
     await desktop.locator(".xterm-helper-textarea").pressSequentially("from-desktop", { delay: 10 });
     await desktop.locator(".xterm-helper-textarea").press("Enter");
     await expect(terminal.locator(".xterm-rows")).toContainText("phonebot_reply from-desktop");
-    await input.pressSequentially("probe-query", { delay: 10 });
-    await input.press("Enter");
+    await expect.poll(() => laptopSeesResize).toBe("local");
+    await expect.poll(() => resizeDevice).toBe("local");
+    await desktop.locator(".xterm-helper-textarea").pressSequentially("probe-query", { delay: 10 });
+    await desktop.locator(".xterm-helper-textarea").press("Enter");
     await expect.poll(() => queryReplies.desktop).toBe(1);
     expect(queryReplies.phone, "only the resize owner answers live terminal queries").toBe(0);
     await desktop.locator(".xterm-helper-textarea").press("Control+u"); // Clear the fixture's echoed query reply.
     await page.screenshot({ path: testInfo.outputPath("shared-desktop.png") });
     await phone.screenshot({ path: testInfo.outputPath("shared-phone.png") });
 
-    // 5. Reload remains writable even while the laptop still holds both leases.
+    // 5. A reload opens the tab again: the phone takes its size with no typing, and stays writable.
     await phone.reload({ waitUntil: "networkidle" });
     await expect(terminal).toHaveAttribute("data-writable", "true");
     await expect(terminal.locator(".xterm-rows")).toContainText("phonebot_reply from-the-phone", { timeout: 30_000 });
+    await expect.poll(() => resizeDevice).toBe(pairedId);
+    await expect(desktop.getByTestId("phone-size-notice")).toBeVisible();
+    // Owning the size, the phone sizes the PTY to its own grid, not the laptop's (~150 columns).
+    await expect.poll(async () => phoneSize?.rows === await terminal.locator(".xterm-rows > div").count()).toBe(true);
+    expect(phoneSize!.cols).toBeLessThanOrEqual(100);
     await input.pressSequentially("after-phone-reload", { delay: 10 });
     await input.press("Enter");
     await expect(desktop.locator(".xterm-rows")).toContainText("phonebot_reply after-phone-reload");
-    expect(sizeFrames, "phone typing/reloading must not resize the laptop's PTY").toEqual([]);
     expect(queryReplies, "reload must not answer historical queries").toEqual({ desktop: 1, phone: 0 });
     await expect(desktop).toHaveAttribute("data-controlling", "true");
 
-    // Closing the sizing view leaves the phone able to answer fresh queries.
-    trackPhoneResizes = false;
+    // The phone stops showing it (it leaves the page): the laptop has the size back at once, with no take-back.
+    await phone.goto("about:blank");
+    await expect.poll(() => laptopSeesResize).toBe("local");
+    await expect(desktop.getByTestId("phone-size-notice")).toHaveCount(0);
+    // Shown again, the phone takes it again.
+    resizeDevice = undefined;
+    await phone.goto(phoneUrl, { waitUntil: "networkidle" });
+    await expect(terminal).toHaveAttribute("data-writable", "true", { timeout: 30_000 });
+    await expect.poll(() => resizeDevice).toBe(pairedId);
+    await expect(desktop.getByTestId("phone-size-notice")).toBeVisible();
+
+    // Closing the laptop's view leaves the phone, which holds the size, able to answer fresh queries.
     await page.goto("about:blank");
     await expect.poll(() => resizeDevice).toBe(pairedId);
     // Owning the size, the phone sizes the PTY to its own grid, not the laptop's (~150 columns).

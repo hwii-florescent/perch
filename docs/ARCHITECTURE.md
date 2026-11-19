@@ -226,7 +226,9 @@ Terminal-specific contracts:
   (`AgentRuntimeAdapter::give_size_back`); the view adopts a lease naming its
   own client id (web `agentTerminals.ts`, native `Terminal::follow_owners`).
   `terminal.resize` checks the runtime's current lease, not one cached per
-  connection. Leases are per terminal, so other tabs never move.
+  connection. A lease taken or handed back is broadcast at once, so the view
+  that lost it stops answering terminal queries. Leases are per terminal, so
+  other tabs never move.
   Shared CLI input does not acquire stop authority. Only the resize
   owner answers terminal queries; replay must not replay live side effects.
 - Agent and ordinary shell terminals accept user-dropped files/images up to 1 GiB per file on

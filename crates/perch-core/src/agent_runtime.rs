@@ -3557,6 +3557,24 @@ mod tests {
         // Tab B never moved: same lease, same size.
         assert_eq!(owner(&tab_b), laptop_b);
         assert_eq!(size(&tab_b), Some((132, 40)));
+
+        // A tab whose size nobody holds: showing it, the phone takes it all the same, and gives
+        // back nothing, as nobody had it.
+        let tab_c = key();
+        attach(&tab_c, &laptop, 132, 40);
+        attach(&tab_c, &phone, 40, 20);
+        assert!(adapter.snapshot(&tab_c).unwrap().resize_owner.is_none());
+        let taken = adapter
+            .acquire_control(&tab_c, ControlChannel::Resize, phone.clone(), 8)
+            .unwrap();
+        adapter.resize(&tab_c, &taken, 40, 20, 8).unwrap();
+        assert_eq!(owner(&tab_c).client, phone);
+        assert_eq!(size(&tab_c), Some((40, 20)));
+        adapter
+            .release_control(&tab_c, ControlChannel::Resize, &phone, taken.generation)
+            .unwrap();
+        assert!(adapter.snapshot(&tab_c).unwrap().resize_owner.is_none());
+        adapter.terminals.kill(&terminal_key(&tab_c));
     }
 
     #[test]

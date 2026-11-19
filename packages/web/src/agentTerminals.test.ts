@@ -179,6 +179,23 @@ it("the size moves to the view a person types into, once, and a drag resizes the
   binding.release();
 });
 
+it.each([
+  ["a desktop window holds it", { clientId: "laptop", deviceId: "local", generation: 3, acquiredAtMs: 0, lastActivityMs: 0 }],
+  ["nobody holds it", undefined],
+] as const)("a phone showing a tab takes its size when %s", async (_, holder) => {
+  const binding = openAgentTerminal("session", "claude", 40, 20, () => {}, () => {}, () => {}, () => ({ cols: 40, rows: 20 }), true);
+  const leave = binding.showOnPhone();
+  const reply = opened(0, "shown-tab");
+  handleAgentTerminalMessage({ ...reply, status: { ...reply.status, ...(holder ? { resizeOwner: holder } : {}) } });
+  await binding.ready;
+  const acquires = () => transport.send.mock.calls.map(([m]) => m).filter((m) => m.type === "agent.control.acquire" && m.channel === "resize");
+  await vi.waitFor(() => expect(acquires()).toHaveLength(1));
+  // One rule: an explicit take, never the "only if vacant" claim.
+  expect(acquires()[0].ifUnowned).toBeUndefined();
+  leave();
+  binding.release();
+});
+
 it("a phone takes the size of the tab it shows, once, and gives it back when it leaves it or goes to the background", async () => {
   let hidden = false;
   Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
