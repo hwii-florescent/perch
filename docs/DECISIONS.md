@@ -7,6 +7,19 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-19 — A terminal's size follows typing, not window focus; resizes are coalesced (owner)
+
+- **The size goes where a person types.** A terminal's PTY size (the resize lease) moves to a window or the phone
+  when a person types into it, or presses Fit here, Take control or Take back. Activating or focusing a window
+  never moves it, so switching between two Perch windows of different widths resizes nothing. This amends the
+  rule that the active window takes the size (commit 524d76f8, native `TerminalView::window_active`). The view
+  that holds the size still resizes the PTY for its own layout changes (window, sidebar, drawer, split).
+- **Resizes are coalesced.** The native and web views tell the core a new size only after it has held still for
+  25 ms, as Ghostty does, so a drag or an animation is one resize.
+- **Why:** every PTY resize makes Claude Code repaint over its reflowed screen, which leaves duplicated lines and
+  blocks cut or wrapped at an older width in its history. Perch draws this exactly as Ghostty does for the same
+  bytes (study: `plans/261118-1429-mobile-route/task-12-study.md`); the fix is fewer resizes.
+
 ## 2026-11-18 — Quickchat is a plain terminal at home; the phone leaves browser tabs out (owner)
 
 - **Quickchat is not a project.** It behaves like a plain terminal started at the home folder (`~`):

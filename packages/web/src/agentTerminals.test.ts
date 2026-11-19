@@ -6,7 +6,7 @@ import type { AgentControlLease, AgentLifecycleStatus, AgentTerminalOpenedMessag
 const transport = vi.hoisted(() => ({ send: vi.fn(), connection: (_: boolean) => {} }));
 vi.mock("./ws", () => ({ socket: { send: transport.send, onConnectionChange: (handler: (connected: boolean) => void) => { transport.connection = handler; } } }));
 import { emitTerminalData } from "./terminalBus";
-import { handleAgentTerminalMessage, openAgentTerminal, sendAgentTerminalInput, resizeAgentTerminal, canStopAgent } from "./agentTerminals";
+import { handleAgentTerminalMessage, openAgentTerminal, sendAgentTerminalInput, resizeAgentTerminal, canStopAgent, RESIZE_QUIET_MS } from "./agentTerminals";
 
 beforeEach(() => transport.send.mockClear());
 afterEach(() => { transport.connection(false); vi.useRealTimers(); });
@@ -62,7 +62,7 @@ it("keeps new lease replies ahead of old status pushes, then revokes input on tr
   size.rows = 33;
   reply(resize, { ...snapshot("claude", 3), inputOwner: input, resizeOwner: resize });
   await taking;
-  expect(transport.send).toHaveBeenLastCalledWith({ type: "terminal.resize", terminalId: "controlled", cols: 130, rows: 33, generation: 8 });
+  await vi.waitFor(() => expect(transport.send).toHaveBeenLastCalledWith({ type: "terminal.resize", terminalId: "controlled", cols: 130, rows: 33, generation: 8 }));
   handleAgentTerminalMessage({ type: "agent.lifecycle.changed", hostId: "local", status: snapshot("claude", 1) });
   sendAgentTerminalInput("controlled", "still-owned");
   expect(transport.send).toHaveBeenLastCalledWith({ type: "terminal.input", terminalId: "controlled", data: "still-owned", generation: 7 });
@@ -142,4 +142,39 @@ it("releases a view whose open timed out, again when its reply turns up late", a
   transport.send.mockClear();
   expect(handleAgentTerminalMessage(late)).toBe(true);
   expect(transport.send).toHaveBeenCalledExactlyOnceWith(release);
+});
+
+it("the size moves to the view a person types into, once, and a drag resizes the PTY once", async () => {
+  const size = { cols: 80, rows: 24 };
+  const binding = openAgentTerminal("session", "claude", 80, 24, () => {}, () => {}, () => {}, () => size, true);
+  handleAgentTerminalMessage(opened(0, "typed"));
+  await binding.ready;
+  // Another window holds the size; this one is merely shown: nothing is asked.
+  const other: AgentControlLease = { clientId: "other-window", deviceId: "local", generation: 3, acquiredAtMs: 0, lastActivityMs: 0 };
+  handleAgentTerminalMessage({ type: "agent.lifecycle.changed", hostId: "local", status: { ...snapshot("claude", 2), resizeOwner: other } });
+  const acquires = () => transport.send.mock.calls.filter(([m]) => m.type === "agent.control.acquire" && m.channel === "resize");
+  expect(acquires()).toHaveLength(0);
+  // Typing takes it from whoever holds it, once while the answer is on its way.
+  const first = binding.typed();
+  void binding.typed();
+  expect(acquires()).toHaveLength(1);
+  expect(acquires()[0][0].ifUnowned).toBeUndefined();
+  const lease = { ...other, clientId: "this-window", generation: 4 };
+  handleAgentTerminalMessage({ type: "agent.control", requestId: acquires()[0][0].requestId, sessionId: "session", agentId: "claude", channel: "resize", lease, status: { ...snapshot("claude", 3), resizeOwner: lease } });
+  await first;
+  await binding.typed();
+  expect(acquires()).toHaveLength(1);
+
+  // A 20-step drag, a frame every 10 ms: one resize, at the size it settled on.
+  vi.useFakeTimers();
+  await vi.advanceTimersByTimeAsync(RESIZE_QUIET_MS);
+  transport.send.mockClear();
+  for (let step = 1; step <= 20; step++) {
+    resizeAgentTerminal("typed", 80 + step, 24);
+    await vi.advanceTimersByTimeAsync(10);
+  }
+  await vi.advanceTimersByTimeAsync(RESIZE_QUIET_MS);
+  const resizes = transport.send.mock.calls.filter(([m]) => m.type === "terminal.resize");
+  expect(resizes).toEqual([[{ type: "terminal.resize", terminalId: "typed", cols: 100, rows: 24, generation: 4 }]]);
+  binding.release();
 });

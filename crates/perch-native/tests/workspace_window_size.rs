@@ -1,7 +1,7 @@
 //! Two windows of this computer on one shell, against a real perch-core: the other window (the Tauri app, here a
-//! second plain client) takes the shell's size and sizes it wider than this window's pane; this window becoming
-//! active takes the size back, and the shell itself (`stty size`, not only the grid this window draws) is then the
-//! pane's. Going inactive gives the size up, and the other window sizes the shell again.
+//! second plain client) takes the shell's size and sizes it wider than this window's pane. Showing this window
+//! moves nothing; typing in it takes the size back, and the shell itself (`stty size`, not only the grid this
+//! window draws) is then the pane's. The size stays here until someone types elsewhere.
 //!
 //! Everything else is `common`'s: the core is a child of this test, private to a scratch directory, and stopped and
 //! checked gone by PID.
@@ -84,17 +84,19 @@ fn window(rig: &mut Rig) {
             .expect("size the shell");
         (other, held)
     });
-    // This window is told it is not the active one, so it leaves the size where it is.
-    h.view(&shell, |v| v.window_active(false));
-    h.wait("the other window's size here", |h| h.grid(&shell) == wide);
-    assert_eq!(
-        stty(&mut h, &shell, "wide"),
-        Some(wide),
-        "the shell is the other window's size"
-    );
+    // Shown and drawn, this window leaves the size where it is.
+    h.wait("the other window's size here", |h| {
+        h.grid(&shell) == wide && h.view(&shell, |v| v.holds_size()) == Some(false)
+    });
+    // Drawn again and again, as switching windows does, it still takes nothing.
+    for _ in 0..5 {
+        h.wait("a draw", |_| true);
+    }
+    assert_eq!(h.view(&shell, |v| v.holds_size()), Some(false));
+    assert_eq!(h.grid(&shell), wide);
 
-    // This window becomes active: it takes the size, and the shell is the pane's again.
-    h.view(&shell, |v| v.window_active(true));
+    // A person types here: the size comes back, and the shell is the pane's again.
+    h.type_text("true");
     h.wait("the size back in this window", |h| {
         h.grid(&shell) == own && h.view(&shell, |v| v.holds_size()) == Some(true)
     });
@@ -146,11 +148,9 @@ fn window(rig: &mut Rig) {
         );
     });
 
-    // Inactive again: the size is given up, so the other window may take it as the web does when nobody holds it.
-    h.view(&shell, |v| v.window_active(false));
-    h.wait("the size given up", |h| {
-        h.view(&shell, |v| v.holds_size()) == Some(false)
-    });
+    // Nothing but typing elsewhere moves it on.
+    h.wait("a few more draws", |_| true);
+    assert_eq!(h.view(&shell, |v| v.holds_size()), Some(true));
 
     runtime.block_on(async {
         other.release_terminal(&held).await.unwrap();

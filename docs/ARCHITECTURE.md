@@ -214,7 +214,11 @@ Terminal-specific contracts:
 - A terminal outlives its mounted pane; switching parks it. Do not let caches
   retain disposed xterm/view callbacks.
 - One resize lease owns the PTY dimensions. Other views follow, never fit.
-  Shared CLI input does not acquire resize/stop authority. Only the resize
+  The lease moves to the view a person types into (or that presses Fit here,
+  Take control or Take back), never on window focus; its holder sends a size
+  only after 25 ms without change (`RESIZE_QUIET` in the native view,
+  `RESIZE_QUIET_MS` in `agentTerminals.ts`). Every resize makes a TUI repaint.
+  Shared CLI input does not acquire stop authority. Only the resize
   owner answers terminal queries; replay must not replay live side effects.
 - Agent and ordinary shell terminals accept user-dropped files/images up to 1 GiB per file on
   direct connections (64 MiB through the buffered phone relay). Core authorizes

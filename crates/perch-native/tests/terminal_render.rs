@@ -168,8 +168,11 @@ impl Harness {
         self.say(FromCore::Output(text.into()));
     }
 
-    /// Everything the view has sent the core so far.
+    /// Everything the view has sent the core so far, a size included once it held still.
     fn sent(&mut self) -> Vec<ToCore> {
+        self.cx
+            .advance_clock(perch_native::terminal::view::RESIZE_QUIET);
+        self.cx.run_until_parked();
         let mut sent = Vec::new();
         while let Ok(message) = self.to_core.try_recv() {
             sent.push(message);
@@ -416,6 +419,10 @@ fn main() {
     run(
         "x10_mouse_reports_past_the_text_range",
         x10_mouse_reports_past_the_text_range,
+    );
+    run(
+        "a_claude_like_stream_draws_as_libghostty_does",
+        a_claude_like_stream_draws_as_libghostty_does,
     );
     println!("terminal_render: ok");
 }
@@ -2918,4 +2925,149 @@ fn context_bridge_offer() {
         "Shift-right-click always asks for the pane menu"
     );
     assert_eq!(h.sent(), vec![], "offering and capturing sent nothing");
+}
+
+/// A stream shaped like Claude Code's: a live region redrawn in place (cursor up, erase line), in
+/// and out of synchronised updates, a highlighted block erased in its background colour, lines
+/// committed above it, and resizes in the middle, each followed by the repaint Claude Code 2.1
+/// makes on SIGWINCH (home, every row erased, the screen drawn again). `\x1b[8;rows;colst` is the
+/// core's size marker, where the PTY was resized.
+fn claude_like_stream() -> Vec<String> {
+    let sizes = [(100u16, 30u16), (64, 30), (100, 24), (80, 30)];
+    let mut parts = vec!["\x1b[8;30;100t\x1b[?2004h\x1b[?1004h".to_string()];
+    let mut committed = 0;
+    let live = |n: usize, cols: u16| {
+        let mut s = String::new();
+        s.push_str(&format!(
+            "\x1b[48;2;55;55;55m\x1b[38;2;153;153;153m> \x1b[38;2;255;255;255mreport {n}: "
+        ));
+        s.push_str(&"word ".repeat(usize::from(cols) / 4));
+        s.push_str("\x1b[39m\x1b[K\x1b[49m\r\n");
+        s.push_str(&format!(
+            "\x1b[38;2;215;119;87m* Cooking... {n}s\x1b[39m\x1b[K\r\n"
+        ));
+        s.push_str(&format!(
+            "\x1b[38;2;136;136;136m{}\x1b[39m\r\n",
+            "-".repeat(usize::from(cols))
+        ));
+        s.push_str("\x1b[K> \r\n\x1b[2m  ? for shortcuts (ctrl+o to expand)\x1b[22m\x1b[K");
+        s
+    };
+    // The live region is 5 rows; the cursor ends on its last row.
+    let mut cols = 100;
+    parts.push(live(0, cols));
+    for step in 1..60 {
+        let mut s = String::new();
+        let sync = step % 3 == 0;
+        if sync {
+            s.push_str("\x1b[?2026h");
+        }
+        // Back to the top of the live region, the way Ink erases its last frame.
+        s.push_str("\r\x1b[2K");
+        for _ in 0..4 {
+            s.push_str("\x1b[1A\x1b[2K");
+        }
+        if step % 4 == 0 {
+            committed += 1;
+            s.push_str(&format!(
+                "\x1b[38;2;78;186;101m*\x1b[39m \x1b[1mBash\x1b[22m(git status --short | grep -v {committed})\r\n  L  crates/perch-core/src/server/native_ui.rs +{committed} more\r\n\r\n"
+            ));
+        }
+        s.push_str(&live(step, cols));
+        if sync {
+            s.push_str("\x1b[?2026l");
+        }
+        parts.push(s);
+        if step % 15 == 7 {
+            let (c, r) = sizes[(step / 15) % sizes.len()];
+            cols = c;
+            parts.push(format!("\x1b[8;{r};{c}t"));
+            let mut repaint = String::from("\x1b[?25l\x1b[H");
+            for _ in 0..r {
+                repaint.push_str("\x1b[2K\x1b[1B");
+            }
+            repaint.push_str("\x1b[H");
+            repaint.push_str(&live(step, cols));
+            parts.push(repaint);
+        }
+    }
+    parts
+}
+
+/// What a terminal shows, cell by cell: text, colours and the row's text, for comparing.
+fn screen_of(frame: &perch_native::terminal::vt::Frame) -> Vec<String> {
+    (0..frame.rows.len())
+        .map(|y| {
+            let colours: Vec<_> = frame.rows[y].iter().map(|c| (c.fg, c.bg)).collect();
+            format!("{:?} {colours:?}", frame.row_text(y))
+        })
+        .collect()
+}
+
+/// The reference: plain libghostty fed the same bytes in one go, resized where the core's
+/// markers say, as Ghostty's own app applies a resize between reads.
+fn reference_screen(stream: &str) -> (Vec<String>, (u16, u16)) {
+    use perch_native::terminal::attach::{split_size_markers, Piece};
+    use perch_native::terminal::vt::Vt;
+    let mut vt = Vt::new(100, 30);
+    for piece in split_size_markers(stream) {
+        match piece {
+            Piece::Text(text) => vt.write(text.as_bytes()),
+            Piece::Size { cols, rows } => vt.resize(cols, rows, (8, 16)),
+        }
+    }
+    vt.reread_all_rows = true;
+    (screen_of(&vt.frame()), vt.size())
+}
+
+/// The view draws a redrawing agent's output exactly as libghostty does for the same bytes and
+/// sizes: when output arrives in pieces between frames (rows reused), across resizes, and when it
+/// attaches in the middle of the stream from the daemon's repaint and carries on live.
+fn a_claude_like_stream_draws_as_libghostty_does() {
+    use perch_native::terminal::attach::{split_size_markers, Piece};
+    let parts = claude_like_stream();
+    let whole: String = parts.concat();
+    let (want, size) = reference_screen(&whole);
+
+    // Live from the start, a frame drawn after every piece the core sends.
+    let mut h = Harness::open(900., 420.);
+    h.attach_as(true, false, 100, 30, "");
+    for part in &parts {
+        h.output(part);
+        h.draw();
+    }
+    assert_eq!(h.view(|v, _| v.grid_size()), size);
+    let got = h.view(|v, _| screen_of(&v.frame()));
+    assert_eq!(got, want, "the live view differs from libghostty");
+
+    // Attached part-way: the daemon's screen repaints what came before, as the core sends it
+    // (its size marker first), and the rest arrives live.
+    for cut in [parts.len() / 3, parts.len() / 2, parts.len() * 4 / 5] {
+        let mut screen = perchd::screen::Screen::new(100, 30).unwrap();
+        let mut marker = String::new();
+        for piece in split_size_markers(&parts[..cut].concat()) {
+            match piece {
+                Piece::Text(text) => screen.process(text.as_bytes()),
+                Piece::Size { cols, rows } => {
+                    screen.set_size(cols, rows);
+                    marker = format!("\x1b[8;{rows};{cols}t");
+                }
+            }
+        }
+        let repaint = String::from_utf8_lossy(&screen.restore_bytes()).into_owned();
+        let mut h = Harness::open(900., 420.);
+        h.say(FromCore::Attached {
+            replay: marker + &repaint,
+            input: true,
+            resize: false,
+            agent: None,
+        });
+        h.draw();
+        for part in &parts[cut..] {
+            h.output(part);
+            h.draw();
+        }
+        let got = h.view(|v, _| screen_of(&v.frame()));
+        assert_eq!(got, want, "attached after part {cut}, the view differs");
+    }
 }

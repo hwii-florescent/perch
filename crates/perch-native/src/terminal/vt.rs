@@ -2232,6 +2232,33 @@ mod tests {
     }
 
     #[test]
+    fn a_resize_ends_a_held_block_at_once_as_in_ghostty() {
+        // A resize turns synchronised output off, as Ghostty's own app does; libghostty's handler
+        // reports that as the end of the hold, so the view never keeps the old frame, at the old
+        // width, until the deadline.
+        let mut vt = fed(20, 2, "old");
+        assert_eq!(vt.frame().row_text(0), "old");
+        vt.write(b"\x1b[?2026h\x1b[H\x1b[2Jnew");
+        assert!(vt.held());
+        vt.resize(30, 2, (8, 16));
+        assert!(!vt.held(), "the resize ended the block");
+        assert!(vt.needs_draw());
+        let frame = vt.frame();
+        assert_eq!(
+            frame.rows[0].len(),
+            30,
+            "the frame is read at the new width"
+        );
+        assert_eq!(frame.row_text(0), "new");
+        // A block begun after the resize holds again.
+        vt.write(b"\x1b[?2026h\x1b[Hnext");
+        assert!(vt.held());
+        assert_eq!(vt.frame().row_text(0), "new");
+        vt.write(b"\x1b[?2026l");
+        assert_eq!(vt.frame().row_text(0), "next");
+    }
+
+    #[test]
     fn a_block_the_program_never_ends_is_shown_after_the_deadline() {
         let mut vt = fed(20, 2, "old\x1b[?2026h\x1b[H\x1b[2Jnew");
         assert_eq!(vt.frame().row_text(0), "old");

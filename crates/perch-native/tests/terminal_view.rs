@@ -16,6 +16,7 @@ use perch_native::client::Core;
 use perch_native::sidebar::Provider;
 use perch_native::terminal::actions::Action;
 use perch_native::terminal::attach::FromCore;
+use perch_native::terminal::view::RESIZE_QUIET;
 use perch_native::terminal::{Status, TerminalView};
 use perch_native::ui::OpenSession;
 use perchd::proto::SessionInfo;
@@ -432,6 +433,98 @@ fn view(core_process: &mut Child, scratch: &Path) {
     );
     h.wait("the shell to hear nothing", |h| h.rows() == screen_before);
 
+    // Two windows of different widths on one core. The size stays with the window a person
+    // types into: switching between them sends nothing, typing in the other moves it once, and
+    // a drag of that window's edge resizes the shell once, after it holds still.
+    let resizes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    {
+        // A watcher counts the size markers the core puts in the stream, one per PTY resize.
+        let (resizes, core, session_id) = (resizes.clone(), other_core.clone(), session_id.clone());
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let mut connection = core.connect().await.expect("connect");
+                let terminal = connection
+                    .open_terminal(&session_id, 80, 24)
+                    .await
+                    .expect("open terminal");
+                let _ = ready_tx.send(());
+                while let Ok(message) = connection.next().await {
+                    if let perch_core::protocol::ServerMessage::TerminalData { terminal_id, data } =
+                        message
+                    {
+                        if terminal_id == terminal.id {
+                            resizes.fetch_add(
+                                data.matches("\x1b[8;").count(),
+                                std::sync::atomic::Ordering::SeqCst,
+                            );
+                        }
+                    }
+                }
+            });
+        });
+        ready_rx
+            .recv_timeout(TIMEOUT)
+            .expect("the watcher attached");
+    }
+    let count = || resizes.load(std::sync::atomic::Ordering::SeqCst);
+    let mut narrow = Harness::open(other_core.clone(), &session_id, 600., 420.);
+    narrow.wait("the second window to attach", |w| {
+        w.status() == Status::Live
+    });
+    assert!(
+        h.view(|v, _| v.holds_size()),
+        "the first window still sizes the shell"
+    );
+    assert!(!narrow.view(|v, _| v.holds_size()));
+    let settled = count();
+    for _ in 0..3 {
+        // Each window drawn in turn, as switching between them redraws it.
+        narrow.wait("a draw", |_| true);
+        h.wait("a draw", |_| true);
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(count(), settled, "switching windows resized nothing");
+    assert!(h.view(|v, _| v.holds_size()));
+
+    narrow.type_text("echo typed-in-the-narrow-one");
+    narrow.wait("the size to follow the typing", |w| {
+        w.view(|v, _| v.holds_size())
+    });
+    let (cols, rows) = narrow.fitted().unwrap();
+    narrow.type_text("stty size");
+    let want = format!("{rows} {cols}");
+    narrow.wait("the shell to have the narrow window's size", |w| {
+        w.rows().contains(&want)
+    });
+    h.wait("the first window to hear it lost the size", |h| {
+        !h.view(|v, _| v.holds_size())
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(count(), settled + 1, "typing moved the size once");
+
+    // A 20-step drag of the narrow window's edge, a frame every 10 ms.
+    for step in 1..=20 {
+        narrow.resize(600. - 10. * step as f32, 420.);
+        narrow.draw();
+        narrow.cx.advance_clock(Duration::from_millis(10));
+        narrow.cx.run_until_parked();
+    }
+    narrow.wait("the drag's fit", |w| w.fitted() != Some((cols, rows)));
+    let (cols, rows) = narrow.fitted().unwrap();
+    narrow.type_text("stty size");
+    let want = format!("{rows} {cols}");
+    narrow.wait("the shell to have the dragged size", |w| {
+        w.rows().contains(&want)
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(count(), settled + 2, "the drag resized the shell once");
+    narrow.close();
+
     // Dropping the view lets go of the shell without ending it.
     h.close();
 
@@ -524,6 +617,9 @@ impl Harness {
     fn wait(&mut self, what: &str, done: impl Fn(&mut Self) -> bool) {
         let deadline = Instant::now() + TIMEOUT;
         loop {
+            self.cx.run_until_parked();
+            // GPUI's test clock only moves when told: let a size that held still be sent.
+            self.cx.advance_clock(RESIZE_QUIET);
             self.cx.run_until_parked();
             self.draw();
             if done(self) {

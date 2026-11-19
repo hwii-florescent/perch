@@ -87,6 +87,9 @@ class AgentView extends KeptTerminal<ViewState> {
     };
     const input = onTerminalInput(created.term, (data, user) => {
       if (this.inputId && (!sharedInput || user || ownsResize)) usePerchStore.getState().sendTerminalInput(this.inputId, data);
+      // The size goes where a person types (from another window or a phone), never where a
+      // window is merely looked at: each resize makes the agent repaint over its history.
+      if (this.inputId && user && !exited) opened.typed().catch((reason: Error) => { if (!this.disposed) this.set({ error: reason.message }); });
       // Only fresh query replies may wait for a response-owner lease. Never
       // send replies to history replay, or let passive views answer twice.
       else if (replayDone && !user && (initialControl || claimingResize || (sharedInput && !this.state.status?.resizeOwner)) && !exited && responses.length + data.length <= 2048) responses += data;
