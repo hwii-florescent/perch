@@ -15,7 +15,8 @@ conventions, not automatic approval. AGENTS is only a brief contributor entry po
   in the core and are shared by every device (replaces the 2026-11-03 per-viewer rule for tabs).
 - Per device stay only view settings such as UI or CLI mode (a phone in UI mode never changes the
   desktop) and which session each device shows: no device follows another's focus.
-- Plan: `plans/261118-1429-mobile-route/plan.md`.
+- Plan: `plans/261118-1429-mobile-route/plan.md`. This replaces "kept on this device" for tabs, their
+  order and splits in the native parity entry below; the active tab stays per device.
 
 ## 2026-11-18 — Review comments inline, per-file sideways scroll; native tabs follow the web (owner)
 

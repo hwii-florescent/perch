@@ -43,6 +43,7 @@ pub mod review;
 pub mod server;
 pub mod session_search;
 pub mod settings;
+pub mod shared_tabs;
 mod shell_integration;
 pub mod source_control;
 pub mod ssh;

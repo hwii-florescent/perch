@@ -2410,6 +2410,11 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
         mod_formats: Mutex::new(Vec::new()),
     });
 
+    // Subscribed before the snapshots below are read: a change made between the
+    // two then arrives as its broadcast instead of being missed (`workspace.order`,
+    // `workspace.tabs`). The task that forwards these starts further down.
+    let mut hub_rx = app.hub.subscribe_events();
+
     // Send initial status.update and server.info once per connection.
     let initial_status = get_status(&state.app.default_cwd, None);
     let _ = state.out_tx.send(status_message(initial_status));
@@ -2438,6 +2443,9 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
     let _ = state
         .out_tx
         .send(workspace::order_message(&state.app, None));
+    for msg in workspace::tabs_messages(&state.app) {
+        let _ = state.out_tx.send(msg);
+    }
     for msg in state.app.hub.snapshot_remote_orders() {
         let _ = state.out_tx.send(msg);
     }
@@ -2550,7 +2558,6 @@ async fn handle_socket(socket: WebSocket, app: AppState, device_id: Option<Strin
 
     // Spawn a task that forwards hub broadcast events (host.info, remote
     // session.list / session.updated, relayed chat frames, …) to this connection.
-    let mut hub_rx = app.hub.subscribe_events();
     let hub_out_tx = state.out_tx.clone();
     let hub_app = app.clone();
     let hub_conn_id = conn_id.clone();
@@ -2711,6 +2718,7 @@ fn foundation_capabilities() -> Vec<String> {
         "worktree.delete",
         "workspace.pin",
         "workspace.order.v1",
+        "workspace.tabs.v1",
         "workspace.nest",
         "workspace.visibility",
         "agent.manifest.list",

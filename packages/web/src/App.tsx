@@ -30,6 +30,7 @@ import { MAC_DESKTOP, StockWindow, useWindowChrome, useWindowWidths } from "./co
 import { isRelayMode } from "./relay/transport";
 import { setPhoneMods } from "./phoneMods";
 import "./surfaceSync";
+import "./sharedTabs";
 import "./workspaceCleanup";
 // `@perch/sdk`, before anything renders a package (stock screens, clones, other mods); see main.tsx.
 import "./sdk";
@@ -199,7 +200,7 @@ export default function App() {
         // window edge, a 44px head row (`stock:mobile-header`) over the session (`stock:mobile-panes`).
         <div className="flex min-h-0 flex-1 pt-[max(0.5rem,env(safe-area-inset-top))] pr-[max(0.5rem,env(safe-area-inset-right))] pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] [--radius:var(--radius-pane)]">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[12px] bg-[var(--card-bg)]" data-testid="mobile-card">
-            <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} onOpenTools={openTools} />
+            <MobileHeader onOpenSwitcher={() => setMobileSwitcherOpen(true)} onOpenTools={openTools} onShowPane={setMobilePane} />
             <main className="dock-area relative flex min-h-0 min-w-0 flex-1">
               <MobilePaneShell
                 activePane={mobilePane}

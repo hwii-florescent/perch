@@ -1588,6 +1588,7 @@ impl HubManager {
             | ServerMessage::ProjectDeleted { .. }
             | ServerMessage::WorkspaceSnapshot { .. }
             | ServerMessage::WorkspaceOrder { .. }
+            | ServerMessage::WorkspaceTabs { .. }
             | ServerMessage::WorkspaceUpdated { .. }
             | ServerMessage::WorkspaceFocus { .. }
             | ServerMessage::FsTreeResult { .. }

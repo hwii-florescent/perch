@@ -21,6 +21,7 @@ use perch_core::protocol::{
     AttentionEvent, ProjectSummary, ServerMessage, SessionStatus, SessionSummary, SshHostEntry,
     WorkspaceState, WorkspaceSummary, WorktreeJob,
 };
+use perch_core::shared_tabs::SharedTabs;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -328,6 +329,10 @@ pub struct State {
     listed: bool,
     /// Per computer, the core's order of project ids and session ids.
     order: HashMap<String, (Vec<String>, Vec<String>)>,
+    /// Each local workspace's shared tabs as the core last sent them (`workspace.tabs`).
+    shared_tabs: HashMap<String, SharedTabs>,
+    /// Counts connects and `workspace.tabs` answers (`Store::tabs_heard`).
+    tabs_heard: u64,
     needs: HashSet<String>,
     needs_events: Vec<AttentionEvent>,
     providers: HashMap<String, Vec<Provider>>,
@@ -468,6 +473,9 @@ impl State {
         self.agent_lists.clear();
         // A change seen against a list from before the drop would be a guess.
         self.listed = false;
+        // The core sends every workspace's shared tabs again on connect.
+        self.shared_tabs.clear();
+        self.tabs_heard += 1;
         self.revision += 1;
     }
 
@@ -698,6 +706,24 @@ impl State {
             } => {
                 self.order
                     .insert(host_id.clone(), (projects.clone(), sessions.clone()));
+            }
+            ServerMessage::WorkspaceTabs {
+                workspace_id,
+                revision,
+                strip,
+                sets,
+                ..
+            } => {
+                self.tabs_heard += 1;
+                self.shared_tabs.insert(
+                    workspace_id.clone(),
+                    SharedTabs {
+                        workspace_id: workspace_id.clone(),
+                        revision: *revision,
+                        strip: strip.clone(),
+                        sets: sets.clone(),
+                    },
+                );
             }
             ServerMessage::AttentionSnapshot { events } => {
                 self.needs = needing(events);
@@ -966,6 +992,8 @@ impl State {
             workspaces: self.workspaces.clone(),
             sessions: self.sessions.clone(),
             order: self.order.clone(),
+            shared_tabs: self.shared_tabs.clone(),
+            tabs_heard: self.tabs_heard,
             needs_events: self.needs_events.clone(),
             viewing: self.viewing.clone(),
             held: self.held.clone(),
@@ -1454,6 +1482,22 @@ mod tests {
             .iter()
             .map(|s| (s.id.clone(), s.attention))
             .collect()
+    }
+
+    #[test]
+    fn counts_each_connect_and_shared_tabs_answer() {
+        let mut state = state();
+        let before = state.model().store.tabs_heard;
+        let tabs = message(
+            json!({"type": "workspace.tabs", "workspaceId": "w", "revision": 3,
+            "strip": ["a"], "sets": []}),
+        );
+        // The same revision again (an answer to a write the core found unchanged) still counts.
+        state.apply(&tabs);
+        state.apply(&tabs);
+        assert_eq!(state.model().store.tabs_heard, before + 2);
+        state.connect();
+        assert_eq!(state.model().store.tabs_heard, before + 3);
     }
 
     #[test]

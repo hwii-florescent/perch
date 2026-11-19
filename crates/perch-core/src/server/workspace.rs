@@ -873,6 +873,52 @@ pub(super) fn order_message(app: &AppState, request_id: Option<String>) -> Serve
     }
 }
 
+/// Every local workspace's shared tabs, for a new connection.
+pub(super) fn tabs_messages(app: &AppState) -> Vec<ServerMessage> {
+    crate::shared_tabs::all(&app.db)
+        .unwrap_or_else(|err| {
+            tracing::warn!("shared tabs unreadable: {err:#}");
+            Vec::new()
+        })
+        .into_iter()
+        .map(|tabs| tabs.message(None, false))
+        .collect()
+}
+
+/// `workspace.tabs.set`: store the workspace's shared tabs and tell every
+/// viewer; an unchanged or stale write is answered to the writer alone. The
+/// foundation lock keeps writes and their broadcasts in one order.
+pub(super) fn handle_workspace_tabs_set(
+    state: &Arc<ConnState>,
+    request_id: String,
+    workspace_id: String,
+    base_revision: Option<u64>,
+    strip: Vec<String>,
+    sets: Vec<serde_json::Value>,
+) {
+    use crate::shared_tabs::Written;
+    let _foundation_guard = state.app.foundation_lock.lock().unwrap();
+    let answer = |tabs: crate::shared_tabs::SharedTabs, conflict| {
+        tabs.message(Some(request_id.clone()), conflict)
+    };
+    match crate::shared_tabs::set(&state.app.db, &workspace_id, base_revision, &strip, &sets) {
+        Ok(Written::Changed(tabs)) => broadcast_foundation(&state.app, answer(tabs, false)),
+        Ok(Written::Unchanged(tabs)) => {
+            let _ = state.out_tx.send(answer(tabs, false));
+        }
+        Ok(Written::Conflict(tabs)) => {
+            let _ = state.out_tx.send(answer(tabs, true));
+        }
+        Err(err) => fail(
+            &state.out_tx,
+            request_id,
+            "workspace_tabs_invalid",
+            err.to_string(),
+            false,
+        ),
+    }
+}
+
 /// `workspace.order.set`: replace the present lists, then broadcast the
 /// result to every viewer (the broadcast also answers the request). The
 /// foundation lock keeps concurrent writes and their broadcasts in one order.
