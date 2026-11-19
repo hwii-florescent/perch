@@ -173,6 +173,11 @@ path = "tests/tab_order_window.rs"
 harness = false
 
 [[test]]
+name = "sidebar_click_window"
+path = "tests/sidebar_click_window.rs"
+harness = false
+
+[[test]]
 name = "mods_chrome_capture"
 path = "tests/mods_chrome_capture.rs"
 harness = false

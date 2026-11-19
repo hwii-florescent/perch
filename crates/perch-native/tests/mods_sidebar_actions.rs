@@ -323,10 +323,13 @@ fn row_drag(rig: &mut Rig, elsewhere: AnyWindowHandle) {
 
     // Bravo dragged below charlie: under a few pixels it is still a press; past them it follows
     // the pointer (kept inside the list) and charlie slides up into its place.
+    // Those few pixels are not even forwarded: the web's drag ignores them, and each forward
+    // re-renders the whole sidebar.
     rig.asked();
+    let pressed = rig.forwarded();
     rig.down(bravo);
     rig.moved((bravo.0, bravo.1 + 2.), true);
-    assert_eq!(rig.forwarded()["phase"], "move", "the press is followed");
+    assert_eq!(rig.forwarded(), pressed, "a few pixels are not forwarded");
     assert!(in_place(rig), "a few pixels move nothing");
     rig.moved((below.0, below.1 - 1.), true);
     rig.moved(below, true);

@@ -309,9 +309,9 @@ pub struct Workspace {
     held_focus: Option<gpui::WeakFocusHandle>,
     /// A press on a tab of the strip, which may become a drag (`tab.beginDrag`).
     drag: Option<TabDrag>,
-    /// A press a mod follows (`pointer.follow`): its token while the press lasts, and the
-    /// pointer last forwarded for it (`pointerFollow()`), which stays after the press ends.
-    follow: Option<String>,
+    /// A press a mod follows (`pointer.follow`) while it lasts, and the pointer last forwarded
+    /// for it (`pointerFollow()`), which stays after the press ends.
+    follow: Option<Follow>,
     pointer: Value,
     /// Where the strip and each pane on screen were last drawn, for where a drag would drop.
     drop_boxes: Rc<RefCell<DropBoxes>>,
@@ -342,6 +342,20 @@ enum Column {
 }
 
 /// A resize handle held: where the pointer was and how wide the column was.
+/// How far a followed press moves before it is forwarded: the web's `DRAG_START_PX`
+/// (`slideDrag.ts`), under which its drag ignores the pointer.
+const FOLLOW_SLOP: f32 = 5.;
+
+/// A press a mod follows (`pointer.follow`).
+struct Follow {
+    token: String,
+    /// Where it was pressed, and where the pointer is now.
+    from: Point<Pixels>,
+    at: Point<Pixels>,
+    /// Whether it has moved past [`FOLLOW_SLOP`], after which every move is forwarded.
+    moved: bool,
+}
+
 struct ColumnDrag {
     column: Column,
     from: f32,
@@ -1623,11 +1637,28 @@ impl Workspace {
     /// Forwards the pointer to the mod following the press: `move` while it lasts, then `up`
     /// where it was let go or `cancel`, after which nothing more is forwarded. False when no
     /// press is followed.
+    ///
+    /// Each forward re-renders the following mod's whole screen (a sidebar is tens of ms), so a
+    /// press is not forwarded until it moves [`FOLLOW_SLOP`] (the web's drag ignores less), and
+    /// a press let go before that, a click, ends with the window's next flush: one re-render
+    /// with what the click changed, not one before it.
     fn forward_pointer(&mut self, phase: &str, at: Point<Pixels>, cx: &mut Context<Self>) -> bool {
-        let Some(token) = self.follow.clone() else {
+        let Some(follow) = self.follow.as_mut() else {
             return false;
         };
-        if phase != "move" {
+        follow.at = at;
+        let still = !follow.moved;
+        let token = follow.token.clone();
+        if phase == "move" {
+            let (dx, dy) = (
+                f32::from(at.x - follow.from.x),
+                f32::from(at.y - follow.from.y),
+            );
+            if still && dx.hypot(dy) < FOLLOW_SLOP {
+                return true;
+            }
+            follow.moved = true;
+        } else {
             self.follow = None;
         }
         let seq = self.pointer["seq"].as_u64().map_or(0, |n| n + 1);
@@ -1642,7 +1673,11 @@ impl Workspace {
         // follow of the pointer, which it draws.
         if let Some((_, perch)) = screens::mods(cx) {
             perch.set_drag(self.tab_slide(), self.pointer.clone());
-            perch.flush(cx);
+            if still {
+                cx.defer(move |cx| perch.flush(cx));
+            } else {
+                perch.flush(cx);
+            }
         }
         if phase != "move" {
             cx.notify();
@@ -1653,10 +1688,9 @@ impl Workspace {
     /// A followed press ends with nothing changed (Escape, the window losing focus), where the
     /// pointer last was.
     fn cancel_follow(&mut self, cx: &mut Context<Self>) -> bool {
-        let at = point(
-            px(self.pointer["x"].as_f64().unwrap_or(0.) as f32),
-            px(self.pointer["y"].as_f64().unwrap_or(0.) as f32),
-        );
+        let Some(at) = self.follow.as_ref().map(|f| f.at) else {
+            return false;
+        };
         self.forward_pointer("cancel", at, cx)
     }
 
@@ -3319,8 +3353,14 @@ impl Workspace {
                 if self.follow.is_some() || self.drag.is_some() {
                     return Err("The pointer is already followed for another press.".into());
                 }
-                self.follow = Some(token);
-                self.forward_pointer("move", point(px(x as f32), px(y as f32)), cx);
+                // Nothing is forwarded for the press itself: the mod knows where it was.
+                let at = point(px(x as f32), px(y as f32));
+                self.follow = Some(Follow {
+                    token,
+                    from: at,
+                    at,
+                    moved: false,
+                });
                 // The window follows the pointer from its next draw.
                 cx.notify();
             }
