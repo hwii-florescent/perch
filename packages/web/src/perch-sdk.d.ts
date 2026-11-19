@@ -449,6 +449,9 @@ declare module "@perch/sdk" {
     workspaceLabel?: string;
     /** A sub-session's lead (`nestSessions` puts it under its lead). */
     parentId?: string;
+    /** The branch of the separate checkout it runs in, when that is not its workspace's folder (a
+     * sub-session started with `perch spawn --worktree`, which stays with its lead). */
+    checkout?: string;
     /** Its agent (`claude`, `codex`, `terminal`, …). */
     provider?: string;
     state: AgentState;

@@ -309,6 +309,31 @@ pub fn set(
     })
 }
 
+/// Place a new sub-session's tab after its lead and the lead's earlier children
+/// (`sub_sessions::place_after_lead`) in `workspace_id`'s strip, as a new revision. `None` when
+/// there is no strip, the lead is not in it, or the child already is: nothing is created.
+pub fn place_child(
+    db: &HistoryDb,
+    workspace_id: &str,
+    lead: &str,
+    child: &str,
+    is_sibling: impl Fn(&str) -> bool,
+) -> anyhow::Result<Option<SharedTabs>> {
+    db.with_connection(|conn| {
+        let tx = conn.transaction()?;
+        let mut current = read(&tx, workspace_id)?;
+        if current.revision == 0
+            || !crate::sub_sessions::place_after_lead(&mut current.strip, lead, child, is_sibling)
+        {
+            return Ok(None);
+        }
+        current.revision += 1;
+        store(&tx, &current)?;
+        tx.commit()?;
+        Ok(Some(current))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

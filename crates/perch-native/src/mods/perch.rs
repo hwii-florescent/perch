@@ -2066,8 +2066,11 @@ impl Perch {
         json!(self.keymap().help())
     }
 
-    /// `useStatusLine`: what the core's `status.update` says about the focused session, else the
-    /// session's folder, else the shown workspace's (folder and branch).
+    /// `useStatusLine`: the folder and branch of the tab on screen: a file, review or browser tab's
+    /// workspace; else the focused session's own (where its shell is now, else where it started, with
+    /// that folder's branch); else the shown workspace's. The core's `status.update` describes the
+    /// last session created or resumed on the connection, not the tab on screen, so it only fills in
+    /// for a session not known yet.
     fn status_line(&self) -> Value {
         let host_id = self.host_id();
         let store = self.store();
@@ -2085,14 +2088,45 @@ impl Perch {
             .and_then(|id| store.workspaces.iter().find(|w| w.id == *id));
         let status = store.status.as_ref();
         let some = |text: &str| (!text.is_empty()).then(|| text.to_string());
-        let cwd = status
-            .and_then(|(cwd, _)| some(cwd))
-            .or_else(|| session.and_then(|s| some(&s.cwd)))
-            .or_else(|| workspace.and_then(|w| some(&w.path)))
-            .unwrap_or_default();
-        let branch = match status {
-            Some((_, branch)) => Some(branch.clone()),
-            None => workspace.and_then(|w| w.branch.clone()),
+        let resource = data
+            .window
+            .active
+            .as_deref()
+            .and_then(|id| id.split_once('\n'))
+            .and_then(|(owner, _)| store.workspaces.iter().find(|w| w.id == owner));
+        let own = session.and_then(|s| {
+            s.current_cwd
+                .as_deref()
+                .and_then(some)
+                .or_else(|| some(&s.cwd))
+        });
+        let (cwd, branch) = if let Some(w) = resource {
+            (w.path.clone(), w.branch.clone())
+        } else if let (Some(s), Some(cwd)) = (session, own) {
+            let branch = s.current_branch.clone().or_else(|| {
+                store
+                    .workspaces
+                    .iter()
+                    .find(|w| w.path == cwd && w.host_id == s.host_id)
+                    .or_else(|| {
+                        store
+                            .workspaces
+                            .iter()
+                            .find(|w| s.workspace_id.as_deref() == Some(w.id.as_str()))
+                    })
+                    .and_then(|w| w.branch.clone())
+            });
+            (cwd, branch)
+        } else {
+            let cwd = status
+                .and_then(|(cwd, _)| some(cwd))
+                .or_else(|| workspace.and_then(|w| some(&w.path)))
+                .unwrap_or_default();
+            let branch = match status {
+                Some((_, branch)) => Some(branch.clone()),
+                None => workspace.and_then(|w| w.branch.clone()),
+            };
+            (cwd, branch)
         };
         let mut line = json!({
             "connected": store.connected,

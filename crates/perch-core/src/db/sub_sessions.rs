@@ -250,22 +250,24 @@ impl HistoryDb {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
-    /// Put a just-reserved child in a checkout made for it (`perch spawn --worktree`).
-    pub fn move_child_to_workspace(
+    /// Run a just-reserved child in a checkout made for it (`perch spawn --worktree`): its session
+    /// stays in the lead's Workspace (so it nests under the lead and joins the lead's tabs) and
+    /// starts in the checkout; its record names the checkout's Workspace.
+    pub fn run_child_in_checkout(
         &self,
         child_session_id: &str,
-        workspace: &WorkspaceRow,
+        checkout: &WorkspaceRow,
         cwd: &str,
     ) -> anyhow::Result<()> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
         tx.execute(
-            "UPDATE sessions SET cwd = ?2, project_id = ?3, workspace_id = ?4 WHERE id = ?1",
-            params![child_session_id, cwd, workspace.project_id, workspace.id],
+            "UPDATE sessions SET cwd = ?2 WHERE id = ?1",
+            params![child_session_id, cwd],
         )?;
         tx.execute(
             "UPDATE sub_sessions SET workspace_id = ?2 WHERE child_session_id = ?1",
-            params![child_session_id, workspace.id],
+            params![child_session_id, checkout.id],
         )?;
         tx.commit()?;
         Ok(())

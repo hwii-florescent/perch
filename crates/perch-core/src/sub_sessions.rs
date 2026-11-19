@@ -243,6 +243,29 @@ pub fn check_model(model: &str) -> Result<&str, String> {
 /// The longest name a sub-session is given: the width of the sidebar's own auto-title.
 const NAME_MAX_CHARS: usize = 40;
 
+/// `list` (a chat order or a tab strip) with `child` placed right after `lead` and the lead's
+/// children already following it (`is_sibling`), as the sidebar nests them. Only when `lead` is
+/// listed and `child` is not; `false` when nothing changed. A person may move it afterwards.
+pub fn place_after_lead(
+    list: &mut Vec<String>,
+    lead: &str,
+    child: &str,
+    is_sibling: impl Fn(&str) -> bool,
+) -> bool {
+    let Some(at) = list.iter().position(|id| id == lead) else {
+        return false;
+    };
+    if list.iter().any(|id| id == child) {
+        return false;
+    }
+    let mut at = at + 1;
+    while list.get(at).is_some_and(|id| is_sibling(id)) {
+        at += 1;
+    }
+    list.insert(at, child.to_string());
+    true
+}
+
 /// The name a spawned sub-session shows in the sidebar, its tab, `perch list` and its lead's notes:
 /// the `--name` it was given, else the first sentence of its task. One line, at most about
 /// [`NAME_MAX_CHARS`] characters, cut at a word where that keeps half of it.
@@ -432,6 +455,21 @@ pub fn fallback_report(last_message: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_new_child_goes_after_its_lead_and_earlier_children() {
+        let ids = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let kids = |id: &str| id.starts_with("kid");
+        let mut list = ids(&["lead", "kid1", "terminal", "other"]);
+        assert!(place_after_lead(&mut list, "lead", "kid2", kids));
+        assert_eq!(list, ids(&["lead", "kid1", "kid2", "terminal", "other"]));
+        // Already placed, or a lead that is not listed: unchanged.
+        assert!(!place_after_lead(&mut list, "lead", "kid2", kids));
+        assert!(!place_after_lead(&mut list, "absent", "kid3", kids));
+        let mut last = ids(&["terminal", "lead"]);
+        assert!(place_after_lead(&mut last, "lead", "kid1", kids));
+        assert_eq!(last, ids(&["terminal", "lead", "kid1"]));
+    }
+
     use super::*;
 
     #[test]
