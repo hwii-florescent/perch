@@ -13,7 +13,7 @@ import { unstable_recoverFromCut } from "scheduler";
 import { ConcurrentRoot, DefaultEventPriority, DiscreteEventPriority, NoEventPriority } from "react-reconciler/constants";
 import { createElement } from "react";
 import { HostElement, HostText, fromMarkup, installGlobals, isTextField, submits } from "./dom.mjs";
-import { describe } from "./describe.mjs";
+import { describe, documentEvents } from "./describe.mjs";
 import { styleSheet } from "./sheet.mjs";
 
 let currentPriority = NoEventPriority;
@@ -231,8 +231,8 @@ export function mount(perch, Component, options = {}) {
     perch.render?.(description);
     return description;
   };
-  /** Runs pending effects; describes again when they changed what the source listens for on document/window
-   * (a menu's outside-press listener), which the description tells the engine. */
+  /** Runs pending effects; when they changed what the source listens for on document/window (a menu's outside-press
+   * listener), the description's `document_events` follows. */
   fresh();
   const born = generation;
   /** Whether this tree's React is the current one (`fresh`); a dead tree takes no more calls. */
@@ -241,7 +241,12 @@ export function mount(perch, Component, options = {}) {
     if (!alive()) return;
     reconciler.flushPassiveEffects();
     reconciler.flushSyncWork();
-    if (listening() !== described) render();
+    // Only the description's `document_events` reads them: the tree is not described again. A row's drag adds and
+    // removes window listeners on every press and release, and describing a sidebar is tens of milliseconds.
+    if (listening() !== described) {
+      described = listening();
+      description.document_events = documentEvents(document);
+    }
   };
   document.afterCommit = render;
   const report = (error) => { errors.push(error); perch.error?.(error); };
