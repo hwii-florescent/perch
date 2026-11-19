@@ -42,13 +42,14 @@ class AgentView extends KeptTerminal<ViewState> {
   readonly created: PerchTerminal;
   /** The terminal id while this view may type into it. */
   inputId: string | null = null;
-  /** A phone fits the PTY to itself once, on opening; after that "Fit here" is the user's call. */
-  autoFitted = false;
+  /** A phone fits the PTY to itself once per terminal, on first opening; after that "Fit here" is the user's call. */
+  autoFitted: boolean;
   private binding: ReturnType<typeof openAgentTerminal>;
   private stop: () => void;
 
   constructor(sessionId: string, agent: string, container: HTMLElement) {
     super(OPENING, container);
+    this.autoFitted = fittedHere(sessionId, agent);
     let attachedId: string | null = null;
     let replayDone = false;
     let ownsInput = false;
@@ -118,6 +119,7 @@ class AgentView extends KeptTerminal<ViewState> {
         if (this.disposed) return;
         ownsInput = owned;
         ownsResize = resizing;
+        if (resizing && !this.autoFitted) { this.autoFitted = true; markFittedHere(sessionId, agent); }
         this.set({ status: snapshot, controlling: owned, resizing });
         updateInput();
         if (ownsResize) created.fit();
@@ -183,6 +185,16 @@ class AgentView extends KeptTerminal<ViewState> {
 
 const keyOf = (sessionId: string, agent: string) => `agent\0${sessionId}\0${agent}`;
 
+// Whether this tab has already sized (or auto-fitted) a terminal survives a reload, so a reopened phone
+// view never takes the size back from the laptop that took it over: only "Fit here" or a vacant lease does.
+const fittedKey = (sessionId: string, agent: string) => `perch.fitted\0${sessionId}\0${agent}`;
+function fittedHere(sessionId: string, agent: string): boolean {
+  try { return sessionStorage.getItem(fittedKey(sessionId, agent)) === "1"; } catch { return false; }
+}
+function markFittedHere(sessionId: string, agent: string) {
+  try { sessionStorage.setItem(fittedKey(sessionId, agent), "1"); } catch { /* a reload then fits once more */ }
+}
+
 export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }: {
   sessionId: string; agent: string; cliError?: string | null; onClose?: () => void;
 }) {
@@ -203,8 +215,9 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
   useEffect(() => {
     if (!fitOnOpen || !view) return;
     view.autoFitted = true;
+    markFittedHere(sessionId, agent);
     void view.takeControl();
-  }, [fitOnOpen, view]);
+  }, [fitOnOpen, view, sessionId, agent]);
 
   useEffect(() => {
     if (!connected || !container.current) return;

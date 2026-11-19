@@ -157,6 +157,7 @@ test("a phone pairs over the network, drives the session, and loses access when 
   let resizeDevice: string | undefined;
   let trackPhoneResizes = false;
   const sizeFrames: string[] = [];
+  let phoneSize: { cols: number; rows: number } | undefined;
   const queryReplies = { phone: 0, desktop: 0 };
   page.on("websocket", (socket) => socket.on("framesent", ({ payload }) => {
     const message = JSON.parse(String(payload));
@@ -166,6 +167,7 @@ test("a phone pairs over the network, drives the session, and loses access when 
     socket.on("framesent", ({ payload }) => {
       const message = JSON.parse(String(payload));
       if (trackPhoneResizes && message.type === "terminal.resize") sizeFrames.push(String(payload));
+      if (message.type === "terminal.resize") phoneSize = { cols: message.cols, rows: message.rows };
       if (message.type === "terminal.input" && /^\x1b\[\d+;\d+R$/.test(message.data)) queryReplies.phone++;
     });
     socket.on("framereceived", ({ payload }) => {
@@ -277,6 +279,9 @@ test("a phone pairs over the network, drives the session, and loses access when 
     trackPhoneResizes = false;
     await page.goto("about:blank");
     await expect.poll(() => resizeDevice).toBe(pairedId);
+    // Owning the size, the phone sizes the PTY to its own grid, not the laptop's (~150 columns).
+    await expect.poll(async () => phoneSize?.rows === await terminal.locator(".xterm-rows > div").count()).toBe(true);
+    expect(phoneSize!.cols).toBeLessThanOrEqual(100);
     await input.pressSequentially("probe-query", { delay: 10 });
     await input.press("Enter");
     await expect.poll(() => queryReplies.phone).toBe(1);
@@ -298,6 +303,8 @@ test("a phone pairs over the network, drives the session, and loses access when 
     await choose(phone.getByTestId("git-diff-target"), "workspaceStart");
     await expect(phone.getByTestId("git-diff")).toContainText("committed line");
     await expect(phone.getByTestId("git-diff")).toContainText("PHONE_SEES_THIS");
+    // The Files and Git drawer covers the header; close it before switching.
+    await phone.getByTestId("mobile-tools-close").click();
     await phone.getByTestId("mobile-switch").click();
     await holdRow(phone, phone.getByTestId("mobile-switcher").getByTestId(`workspace-entry-${workspaceId}`));
     await phone.getByTestId(`workspace-menu-files-${workspaceId}`).click();
