@@ -1,14 +1,16 @@
 /**
  * MobileTabRow.tsx — the phone's tab row under its header: the shown workspace's tabs as the desktop's strip has them
- * (sessions, files, review, browser pages; the core shares them, `sharedTabs.ts`), scrolling sideways. A tap shows the
- * tab on this phone only: the session, a file in the Files sheet, the review in the Git pane, a page in the browser.
+ * (sessions, files, review; the core shares them, `sharedTabs.ts`), scrolling sideways. Browser tabs are left out for
+ * now: the phone has no browser pane, so one is never shown here nor kept as the phone's active tab (the desktop keeps
+ * them in the shared tabs). A tap shows the tab on this phone only: the session, a file in the Files sheet, the review
+ * in the Git pane.
  * Nothing it does on a tap reaches another device. Holding a tab offers its close, which is shared as the desktop's ×
  * is (a session's close goes through the same guard, `closeGuard.ts`). Drawn only with two tabs or more.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MobilePaneKind } from "@perch/sdk";
 import { usePerchStore } from "../store";
-import { fileTabKey, isBlankBrowser, useFileTabs } from "../fileTabs";
+import { fileTabKey, useFileTabs } from "../fileTabs";
 import { useTabOrderVersion } from "../tabOrder";
 import { activeTabId, entryLabel, workspaceTabs, type TabEntry } from "../workspaceTabs";
 import { requestCloseSession } from "../closeGuard";
@@ -31,11 +33,7 @@ export function showOnPhone(entry: TabEntry, onPane: (pane: MobilePaneKind) => v
     files.showSession();
     return onPane("gitReview");
   }
-  if (tab.kind === "browser") {
-    // ponytail: a phone has no browser pane; a page opens in the phone's own browser, a blank one does nothing.
-    if (!isBlankBrowser(tab)) window.open(tab.path, "_blank", "noopener");
-    return;
-  }
+  if (tab.kind === "browser") return;
   files.open(tab.workspaceId, tab.path, tab.kind, tab.scope);
   onPane("files");
 }
@@ -59,7 +57,10 @@ export function MobileTabRow({ onPane }: { onPane: (pane: MobilePaneKind) => voi
   const [armed, setArmed] = useState<string | null>(null);
   const hold = useRef<{ timer: ReturnType<typeof setTimeout>; held: boolean } | null>(null);
   const state = usePerchStore.getState();
-  const entries = workspaceTabs(state, tabs);
+  const entries = workspaceTabs(state, tabs).filter((entry) => entry.kind === "session" || entry.tab.kind !== "browser");
+  // A browser tab never stays the phone's active tab (shared tabs, or the last session closing, can select one).
+  const browserActive = tabs.some((tab) => tab.kind === "browser" && fileTabKey(tab) === active);
+  useEffect(() => { if (browserActive) useFileTabs.getState().showSession(); }, [browserActive]);
   if (entries.length < 2) return null;
   const shown = activeTabId(state.sessionId, active);
 
