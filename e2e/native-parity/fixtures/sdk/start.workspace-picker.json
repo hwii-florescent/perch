@@ -29,12 +29,6 @@
         "path": "/Users/dev/code/scratch-site"
       },
       {
-        "key": "/Users/dev/.perch/scratch",
-        "label": "Quickchat",
-        "name": "Quickchat",
-        "path": "/Users/dev/.perch/scratch"
-      },
-      {
         "key": "~",
         "label": "No project (Quickchat)",
         "name": "Quickchat",

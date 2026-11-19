@@ -22,7 +22,7 @@
       "divider": true
     },
     {
-      "testId": null,
+      "testId": "tab-menu-empty",
       "text": "No other open tab available"
     },
     {

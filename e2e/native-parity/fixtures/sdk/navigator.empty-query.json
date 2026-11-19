@@ -53,7 +53,7 @@
       {
         "id": "s-chat-1",
         "title": "Explain git rebase",
-        "cwd": "/Users/dev/.perch/scratch",
+        "cwd": "/Users/dev",
         "hostId": "local",
         "createdAt": 1767243600000,
         "state": "idle"
@@ -61,7 +61,7 @@
       {
         "id": "s-chat-2",
         "title": "Regex for ISO dates",
-        "cwd": "/Users/dev/.perch/scratch",
+        "cwd": "/Users/dev",
         "hostId": "local",
         "createdAt": 1767240000000,
         "state": "done"
