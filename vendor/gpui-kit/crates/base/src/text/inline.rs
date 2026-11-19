@@ -10,7 +10,7 @@ use std::{
 
 use gpui::{
     App, BorderStyle, Bounds, ClickEvent, CursorStyle, Edges, Element, ElementId, GlobalElementId,
-    Half, HighlightStyle, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId,
+    Half, HighlightStyle, Hitbox, HitboxBehavior, Hsla, InspectorElementId, LayoutId,
     MouseButton, MouseClickEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
     SharedString, StyledText, TextAlign, TextLayout, TextRun, TextStyle, Window, point, px, quad,
     size,
@@ -853,13 +853,7 @@ impl Inline {
     }
 }
 
-impl IntoElement for Inline {
-    type Element = Self;
 
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
 
 impl Element for Inline {
     type RequestLayoutState = ();

@@ -46,9 +46,9 @@ opt-level = 2
 # and must share the shell's quickjs-jit VM, as gpui-kit's own workspace does.
 [patch.crates-io]
 rquickjs = { path = "vendor/gpui-kit/crates/shell/rquickjs-compat" }
-# GPUI stays at 0.3.8; these copies add only the herdr-app API gpui-shell names
-# (`AssetSource::image_resource`, `Application::with_activation_policy`,
-# `ActivationPolicy::Prohibited`), each marked `PERCH:`.
+# GPUI 0.3.13 (the release with gpui-pre-ios); these copies add the herdr-app API gpui-shell
+# names (`AssetSource::image_resource`, `Application::with_activation_policy`,
+# `ActivationPolicy::Prohibited`) and Perch's own changes, each marked `PERCH:`.
 gpui-pre = { path = "vendor/gpui-pre" }
 gpui-pre-macos = { path = "vendor/gpui-pre-macos" }
 

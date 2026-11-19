@@ -10,7 +10,7 @@ use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use gpui::{
     point, px, size, AppContext, Bounds, EntityInputHandler, HeadlessAppContext, KeyDownEvent,
     Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ScrollDelta,
-    ScrollWheelEvent, TouchPhase, Window, WindowHandle,
+    ScrollEvent, TouchPhase, Window, WindowHandle,
 };
 use perch_native::terminal::attach::{FromCore, ToCore};
 use perch_native::terminal::clipboard::MemoryClipboard;
@@ -319,7 +319,7 @@ impl Harness {
 }
 
 fn key(text: &str, key_char: Option<&str>) -> KeyDownEvent {
-    let mut keystroke = Keystroke::parse(text).unwrap();
+    let mut keystroke = Keystroke::parse_with_os(text, gpui::OperatingSystem::Mac).unwrap();
     keystroke.key_char = key_char.map(Into::into);
     KeyDownEvent {
         keystroke,
@@ -328,8 +328,9 @@ fn key(text: &str, key_char: Option<&str>) -> KeyDownEvent {
     }
 }
 
-fn wheel(lines: f32) -> ScrollWheelEvent {
-    ScrollWheelEvent {
+fn wheel(lines: f32) -> ScrollEvent {
+    ScrollEvent {
+        source: gpui::ScrollSource::Pointer,
         position: point(px(100.), px(100.)),
         delta: ScrollDelta::Lines(point(0., lines)),
         modifiers: Modifiers::default(),

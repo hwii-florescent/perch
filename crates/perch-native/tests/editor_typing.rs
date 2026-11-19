@@ -182,14 +182,16 @@ impl Rig {
     /// Types `key`: a single character as typed text, else a key name GPUI parses (`enter`, `cmd-z`).
     fn key(&mut self, key: &str) {
         let keystroke = match key {
-            "backspace" | "enter" | "tab" | "escape" => Keystroke::parse(key).unwrap(),
+            "backspace" | "enter" | "tab" | "escape" => {
+                Keystroke::parse_with_os(key, gpui::OperatingSystem::Mac).unwrap()
+            }
             "undo" => Keystroke::parse("cmd-z").unwrap(),
             _ if key.chars().count() == 1 => Keystroke {
                 modifiers: Modifiers::default(),
                 key: key.to_string(),
                 key_char: Some(key.to_string()),
             },
-            _ => Keystroke::parse(key).unwrap(),
+            _ => Keystroke::parse_with_os(key, gpui::OperatingSystem::Mac).unwrap(),
         };
         self.win(|window, cx| {
             window.dispatch_keystroke(keystroke, cx);

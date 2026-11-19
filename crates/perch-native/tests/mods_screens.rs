@@ -13,8 +13,8 @@
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 use gpui::{
     point, px, size, AppContext as _, Focusable as _, HeadlessAppContext, Keystroke, Modifiers,
-    MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, ScrollDelta, ScrollWheelEvent,
-    TouchPhase, Window, WindowHandle,
+    MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, ScrollDelta, ScrollEvent, TouchPhase,
+    Window, WindowHandle,
 };
 use gpui_shell::probe::{self, ProbeRecord};
 use gpui_shell::{HostArguments, HostValue};
@@ -296,7 +296,8 @@ impl Rig {
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {
                 window.dispatch_event(
-                    PlatformInput::ScrollWheel(ScrollWheelEvent {
+                    PlatformInput::Scroll(ScrollEvent {
+                        source: gpui::ScrollSource::Pointer,
                         position: point(px(x), px(y)),
                         delta: ScrollDelta::Lines(point(0., lines)),
                         modifiers: Modifiers::default(),
@@ -322,7 +323,7 @@ impl Rig {
     }
 
     fn press(&mut self, spec: &str) {
-        let keystroke = Keystroke::parse(spec).unwrap();
+        let keystroke = Keystroke::parse_with_os(spec, gpui::OperatingSystem::Mac).unwrap();
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {
                 window.dispatch_keystroke(keystroke, cx)

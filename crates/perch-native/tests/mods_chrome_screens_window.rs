@@ -264,7 +264,8 @@ impl Rig {
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {
                 window.dispatch_event(
-                    PlatformInput::ScrollWheel(gpui::ScrollWheelEvent {
+                    PlatformInput::Scroll(gpui::ScrollEvent {
+                        source: gpui::ScrollSource::Pointer,
                         position: point(px(x), px(y)),
                         delta: gpui::ScrollDelta::Lines(point(0., lines)),
                         modifiers: Modifiers::default(),
@@ -287,7 +288,7 @@ impl Rig {
     }
 
     fn press(&mut self, spec: &str) {
-        let keystroke = Keystroke::parse(spec).unwrap();
+        let keystroke = Keystroke::parse_with_os(spec, gpui::OperatingSystem::Mac).unwrap();
         self.cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {
                 window.dispatch_keystroke(keystroke, cx)

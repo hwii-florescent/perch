@@ -101,7 +101,7 @@ impl Rig {
     }
 
     fn key(&mut self, key: &str) {
-        let key = gpui::Keystroke::parse(key).unwrap();
+        let key = gpui::Keystroke::parse_with_os(key, gpui::OperatingSystem::Mac).unwrap();
         self.win(|window, cx| {
             window.dispatch_keystroke(key, cx);
         });

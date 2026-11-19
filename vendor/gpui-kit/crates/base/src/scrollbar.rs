@@ -10,8 +10,8 @@ use crate::{
 use gpui::{
     Anchor, App, Axis, Background, BorderStyle, Bounds, ContentMask, CursorStyle, Edges, Element,
     ElementId, EntityId, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId,
-    IntoElement, IsZero, LayoutId, ListState, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    PaintQuad, Pixels, Point, Position, ScrollHandle, ScrollWheelEvent, Size, Style,
+    IsZero, LayoutId, ListState, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    PaintQuad, Pixels, Point, Position, ScrollHandle, ScrollEvent, Size, Style,
     TouchDragEvent, TouchPhase, UniformListScrollHandle, Window, fill, point,
     prelude::FluentBuilder, px, relative, size,
 };
@@ -1152,13 +1152,7 @@ impl Scrollbar {
     }
 }
 
-impl IntoElement for Scrollbar {
-    type Element = Self;
 
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
 
 #[doc(hidden)]
 pub struct PrepaintState {
@@ -1607,7 +1601,7 @@ impl Element for Scrollbar {
 
                     window.set_cursor_style(CursorStyle::default(), &state.bar_hitbox);
 
-                    window.paint_layer(hitbox_bounds, |cx| {
+                    { let _ = hitbox_bounds; window.paint_layer(|cx| {
                         cx.paint_quad(fill(painted_bounds, painted_track_bg));
 
                         cx.paint_quad(PaintQuad {
@@ -1636,13 +1630,13 @@ impl Element for Scrollbar {
                         cx.paint_quad(
                             fill(painted_thumb_bounds, painted_thumb_bg).corner_radii(radius),
                         );
-                    });
+                    }); }
 
                     window.on_mouse_event({
                         let state = scrollbar_state.clone();
                         let scroll_handle = self.scroll_handle.clone();
 
-                        move |event: &ScrollWheelEvent, phase, _, cx| {
+                        move |event: &ScrollEvent, phase, _, cx| {
                             if phase.bubble() && hitbox_bounds.contains(&event.position) {
                                 if scroll_handle.offset() != state.get().last_scroll_offset {
                                     state.set(state.get().with_last_scroll(

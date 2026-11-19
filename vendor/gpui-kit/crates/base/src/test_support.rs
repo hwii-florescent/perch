@@ -274,12 +274,7 @@ impl<E: Element> Observed<E> {
         Self { inner, focus: None }
     }
 }
-impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> IntoElement for Observed<E> {
-    type Element = Self;
-    fn into_element(self) -> Self {
-        self
-    }
-}
+
 impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element for Observed<E> {
     type RequestLayoutState = E::RequestLayoutState;
     type PrepaintState = (Option<Hitbox>, Rc<Registration>);

@@ -19,6 +19,10 @@ behave the same. Agents: start with [`crates/perch-native/AGENTS.md`](../crates/
   fast-changing data (pointer, drag geometry) in its own part, or the whole window re-renders.
 - **User mods:** `<data dir>/native-mods/<id>/` replaces the stock screen of that id (hot reload).
   `docs/MOD-SDK.md` is the API.
+- **GPUI:** pinned at `gpui-pre =0.3.13` (the release that publishes `gpui-pre-ios`) in perch-native and
+  vendored gpui-kit, with `vendor/gpui-pre*` patched where marked `PERCH:` (herdr's API gpui-shell names,
+  the idle display-link pause on macOS 12/13, `PERCH_NATIVE_PERF` frame logs); see `THIRD_PARTY_NOTICES.md`.
+  Moving the pin moves every `gpui-pre-*` crate and `Cargo.lock` together.
 
 ## Performance budgets
 

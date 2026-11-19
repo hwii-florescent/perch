@@ -123,7 +123,7 @@ impl Rig {
 
     /// A key through the window's dispatch; true when the window took it.
     fn press(&mut self, spec: &str) -> bool {
-        let keystroke = Keystroke::parse(spec).unwrap();
+        let keystroke = Keystroke::parse_with_os(spec, gpui::OperatingSystem::Mac).unwrap();
         let taken = self
             .cx
             .update_window(self.window.into(), |_, window: &mut Window, cx| {

@@ -4,7 +4,7 @@ use crate::{OngoingScrollExt as _, ScrollbarHandle};
 use gpui::{
     AnyElement, App, Bounds, ContentMask, DispatchPhase, Element, ElementId, GlobalElementId,
     Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId, OngoingScroll, Pixels,
-    ScrollDelta, ScrollWheelEvent, TouchPhase, Window, point, px,
+    ScrollDelta, ScrollEvent, TouchPhase, Window, point, px,
 };
 #[cfg(not(target_family = "wasm"))]
 use std::time::Instant;
@@ -186,12 +186,7 @@ pub struct ScrollBouncePrepaintState {
     hitbox: Hitbox,
 }
 
-impl IntoElement for ScrollBounce {
-    type Element = Self;
-    fn into_element(self) -> Self {
-        self
-    }
-}
+
 
 impl Element for ScrollBounce {
     type RequestLayoutState = ();
@@ -273,7 +268,7 @@ impl Element for ScrollBounce {
             let on_scroll = self.on_scroll.clone();
             let mut before = 0.;
             let mut allow_end_bounce = false;
-            window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+            window.on_mouse_event(move |event: &ScrollEvent, phase, window, cx| {
                 let ScrollDelta::Pixels(mut delta) = event.delta else {
                     return;
                 };
@@ -531,7 +526,7 @@ mod tests {
     }
 
     fn scroll(cx: &mut VisualTestContext, delta: f32, phase: TouchPhase) {
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: point(px(100.), px(100.)),
             delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
             touch_phase: phase,
@@ -588,7 +583,7 @@ mod tests {
         cx.update(|window, cx| {
             for (delta, phase) in [(-30., TouchPhase::Started), (0., TouchPhase::Ended)] {
                 window.dispatch_event(
-                    gpui::PlatformInput::ScrollWheel(ScrollWheelEvent {
+                    gpui::PlatformInput::ScrollWheel(ScrollEvent {
                         position: point(px(100.), px(100.)),
                         delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
                         touch_phase: phase,
@@ -619,7 +614,7 @@ mod tests {
         cx.update(|window, cx| {
             for (delta, phase) in [(-30., TouchPhase::Started), (5., TouchPhase::Moved)] {
                 window.dispatch_event(
-                    gpui::PlatformInput::ScrollWheel(ScrollWheelEvent {
+                    gpui::PlatformInput::ScrollWheel(ScrollEvent {
                         position: point(px(100.), px(100.)),
                         delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
                         touch_phase: phase,
@@ -908,7 +903,7 @@ mod tests {
         cx.update(|window, cx| {
             for delta in [point(px(30.), px(-20.)), point(px(0.), px(-20.))] {
                 window.dispatch_event(
-                    gpui::PlatformInput::ScrollWheel(ScrollWheelEvent {
+                    gpui::PlatformInput::ScrollWheel(ScrollEvent {
                         position: point(px(100.), px(100.)),
                         delta: ScrollDelta::Pixels(delta),
                         touch_phase: TouchPhase::Moved,

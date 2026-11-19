@@ -353,22 +353,41 @@ it from its upstreams. Each copy keeps its upstream licence file and herdr's
   (c) 2025 Rquickjs Contributors). Perch only quiets its unused-code warnings
   (`vendor/quickjs-jit-runtime/Cargo.toml`).
 - `vendor/gpui-pre/` and `vendor/gpui-pre-macos/`: the crates.io `gpui-pre` and
-  `gpui-pre-macos` 0.3.8 (Zed's GPUI, Apache-2.0, Copyright 2022 - 2025 Zed Industries,
-  Inc.), unchanged except for three of herdr's additions the shell names, each marked
-  `PERCH:`: `AssetSource::image_resource` (a default method; nothing in this copy calls
-  it; `vendor/gpui-pre/src/assets.rs`), `Application::with_activation_policy` and
+  `gpui-pre-macos` 0.3.13 (Zed's GPUI, Apache-2.0, Copyright 2022 - 2025 Zed Industries,
+  Inc.; the release that publishes `gpui-pre-ios`), unchanged except for three of herdr's
+  additions the shell names and upstream lacks, each marked `PERCH:`:
+  `AssetSource::image_resource` (a default method; nothing in this copy calls it;
+  `vendor/gpui-pre/src/assets.rs`), `Application::with_activation_policy` and
   `ActivationPolicy::Prohibited` (`vendor/gpui-pre/src/app.rs`,
   `vendor/gpui-pre/src/platform.rs`, with its AppKit mapping in
   `vendor/gpui-pre-macos/src/platform.rs`). `vendor/gpui-pre/Cargo.toml` and
   `vendor/gpui-pre-macos/Cargo.toml` say so in a header, and the latter quiets lints. Herdr's
   other GPUI patches (idle wake, frame capture, terminal metrics, image cache) are not taken.
-  Perch's own changes, also marked `PERCH:`: the macOS display link pauses after a few vsyncs
-  with nothing to draw and the window's `frame_waker` restarts it
-  (`vendor/gpui-pre-macos/src/display_link.rs` `FrameDemand`, and `step`, `draw` and
-  `frame_waker` in `vendor/gpui-pre-macos/src/window.rs`); `PERCH_NATIVE_PERF=1` logs each
-  frame request on stderr (`perf_log` in `vendor/gpui-pre/src/window.rs`); and
-  `HeadlessAppContext::present` (`vendor/gpui-pre/src/app/headless_app_context.rs`), for the
-  offscreen measuring example, presents only after a draw, as a display tick does.
+  Perch's own changes, also marked `PERCH:`: on macOS 12 and 13 the `CVDisplayLink` pauses
+  after a few vsyncs with nothing to draw and the window's `frame_waker` and `schedule_frame`
+  restart it (`vendor/gpui-pre-macos/src/display_link.rs` `FrameDemand`, and `step`, `draw`,
+  `display_link_waker`, `schedule_frame` and `frame_waker` in
+  `vendor/gpui-pre-macos/src/window.rs`; from macOS 14 upstream's own `CAMetalDisplayLink`
+  pause applies); three `map_or_default` calls, unstable on stable Rust, written as
+  `map_or_else` (`vendor/gpui-pre-macos/src/window.rs`); the window forgets the pointer when it
+  leaves with no button held, so hover styles clear (`vendor/gpui-pre/src/window.rs`);
+  `PERCH_NATIVE_PERF=1` logs each frame request on stderr (`perf_log` in
+  `vendor/gpui-pre/src/window.rs`); and `HeadlessAppContext::present`
+  (`vendor/gpui-pre/src/app/headless_app_context.rs`), for the offscreen measuring example,
+  presents only after a draw, as a display tick does.
+- gpui-kit on GPUI 0.3.13: gpui-kit 0.7.1 was published against 0.3.8, so its pins move to
+  0.3.13, its optional `gpui-fast` backend (which pins 0.3.8) is removed, and its code follows
+  0.3.13's API unmarked where the change is mechanical (`IntoElement` now blanket-implemented,
+  the opaque `Path`, `Modifiers::secondary(cx)`, `paint_layer` without bounds, `secondary-enter`
+  bindings written `cmd-enter`). Marked `PERCH:` where behaviour had to be rebuilt: a plot's
+  cached path is built again when its origin moves, as a built `Path` can no longer be moved
+  (`vendor/gpui-kit/crates/base/src/plot/path_cache.rs`, with its callers
+  `vendor/gpui-kit/crates/base/src/plot/shape/line.rs`,
+  `vendor/gpui-kit/crates/base/src/plot/shape/area.rs` and
+  `vendor/gpui-kit/crates/base/src/plot/shape/arc.rs`); a table's column widths remember the
+  window's text system by address (`vendor/gpui-kit/crates/base/src/text/node.rs`); and a
+  script's key bindings go through `KeyBinding::load`
+  (`vendor/gpui-kit/crates/shell/src/engine/quickjs/window_api.rs`).
 
 The shell also pulls `quickjs-jit` (MIT, with QuickJS-ng's MIT C sources) and
 [LLRT](https://github.com/awslabs/llrt) modules (Apache-2.0) from git at the revisions

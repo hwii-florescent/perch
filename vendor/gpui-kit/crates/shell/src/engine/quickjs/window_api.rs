@@ -206,39 +206,51 @@ fn bind_keys(ctx: Ctx<'_>, bindings: Vec<Object<'_>>) -> JsResult<u32> {
             ));
         }
         let context: Option<String> = binding.get("context").ok();
-        // `KeyBinding::new` panics on a bad keystroke or a bad predicate, and a
-        // script typo must not take the process down, so both are parsed here
-        // where the failure is a thrown error naming the entry.
-        for source in keystroke.split_whitespace() {
-            gpui::Keystroke::parse(source).map_err(|error| {
-                Exception::throw_type(
-                    &ctx,
-                    &format!("binding {index} has an unparsable keystroke `{source}`: {error:?}"),
-                )
-            })?;
-        }
+        // A script typo must not take the process down, so the predicate is
+        // parsed here where the failure is a thrown error naming the entry, and
+        // the keystrokes where they are bound (below).
         if keystroke.split_whitespace().next().is_none() {
             return Err(Exception::throw_type(
                 &ctx,
                 &format!("binding {index} has an empty `keystroke`"),
             ));
         }
-        if let Some(context) = context.as_deref() {
-            gpui::KeyBindingContextPredicate::parse(context).map_err(|error| {
-                Exception::throw_type(
-                    &ctx,
-                    &format!("binding {index} has an unparsable `context` `{context}`: {error}"),
-                )
-            })?;
-        }
+        let context = match context.as_deref() {
+            Some(context) => Some(std::rc::Rc::new(
+                gpui::KeyBindingContextPredicate::parse(context).map_err(|error| {
+                    Exception::throw_type(
+                        &ctx,
+                        &format!(
+                            "binding {index} has an unparsable `context` `{context}`: {error}"
+                        ),
+                    )
+                })?,
+            )),
+            None => None,
+        };
         parsed.push((keystroke, action, context));
     }
 
     let installed = parsed.len() as u32;
-    scope::with_current(|_, app| {
-        app.bind_keys(parsed.into_iter().map(|(keystroke, action, context)| {
-            gpui::KeyBinding::new(&keystroke, ShellAction::new(action), context.as_deref())
-        }));
+    // PERCH: GPUI 0.3.13's `KeyBinding::new` takes only `&'static str` keystrokes;
+    // `load` parses a script's own string (and `secondary-` for this OS).
+    let bound = scope::with_current(|_, app| {
+        let bindings = parsed
+            .into_iter()
+            .enumerate()
+            .map(|(index, (keystroke, action, context))| {
+                let action = Box::new(ShellAction::new(action));
+                gpui::KeyBinding::load(&keystroke, action, context, false, None, app).map_err(
+                    |error| {
+                        format!(
+                            "binding {index} has an unparsable keystroke `{keystroke}`: {error:?}"
+                        )
+                    },
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        app.bind_keys(bindings);
+        Ok::<_, String>(())
     })
     .ok_or_else(|| {
         Exception::throw_type(
@@ -247,6 +259,7 @@ fn bind_keys(ctx: Ctx<'_>, bindings: Vec<Object<'_>>) -> JsResult<u32> {
              handler or a task",
         )
     })?;
+    bound.map_err(|message| Exception::throw_type(&ctx, &message))?;
     Ok(installed)
 }
 

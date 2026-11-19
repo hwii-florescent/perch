@@ -212,7 +212,7 @@ impl Rig {
 
     /// Types `key` into the focused editor and draws; returns how long that took.
     fn key(&mut self, key: &str) -> Duration {
-        let key = gpui::Keystroke::parse(key).unwrap();
+        let key = gpui::Keystroke::parse_with_os(key, gpui::OperatingSystem::Mac).unwrap();
         let started = Instant::now();
         self.win(|window, cx| {
             window.dispatch_keystroke(key, cx);

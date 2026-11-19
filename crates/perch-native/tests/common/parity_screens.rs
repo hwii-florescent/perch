@@ -726,7 +726,8 @@ fn scroll_over(cx: &mut HeadlessAppContext, window: gpui::AnyWindowHandle, name:
     );
     cx.update_window(window, |_, window: &mut Window, cx| {
         window.dispatch_event(
-            PlatformInput::ScrollWheel(gpui::ScrollWheelEvent {
+            PlatformInput::Scroll(gpui::ScrollEvent {
+                source: gpui::ScrollSource::Pointer,
                 position,
                 delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-y))),
                 modifiers: Modifiers::default(),
@@ -803,7 +804,11 @@ fn run_steps(
             } else {
                 "ctrl-a"
             };
-            press(cx, window, Keystroke::parse(all).unwrap());
+            press(
+                cx,
+                window,
+                Keystroke::parse_with_os(all, gpui::OperatingSystem::Mac).unwrap(),
+            );
             for c in typed["text"].as_str().unwrap_or_default().chars() {
                 let key = if c == ' ' {
                     "space".to_string()
@@ -826,7 +831,11 @@ fn run_steps(
             }
         } else if let Some(key) = step.get("key") {
             let spec = web_key(key["key"].as_str().unwrap_or_default());
-            press(cx, window, Keystroke::parse(&spec).unwrap());
+            press(
+                cx,
+                window,
+                Keystroke::parse_with_os(&spec, gpui::OperatingSystem::Mac).unwrap(),
+            );
         } else if let Some(selector) = step.get("click").and_then(Value::as_str) {
             click(cx, window, &named(screen, selector));
         } else if let Some(scroll) = step.get("scroll") {

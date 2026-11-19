@@ -17,7 +17,7 @@
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 use gpui::{
     point, px, size, AppContext as _, Focusable as _, HeadlessAppContext, Modifiers, PlatformInput,
-    ScrollDelta, ScrollWheelEvent, TouchPhase, Window, WindowHandle,
+    ScrollDelta, ScrollEvent, TouchPhase, Window, WindowHandle,
 };
 use gpui_shell::probe::{self, ProbeRecord};
 use perch_core::protocol::ServerMessage;
@@ -149,7 +149,8 @@ impl Rig {
     fn wheel(&mut self, at: gpui::Point<gpui::Pixels>) {
         self.win(|window, cx| {
             window.dispatch_event(
-                PlatformInput::ScrollWheel(ScrollWheelEvent {
+                PlatformInput::Scroll(ScrollEvent {
+                    source: gpui::ScrollSource::Pointer,
                     position: at,
                     delta: ScrollDelta::Lines(point(0., -3.)),
                     modifiers: Modifiers::default(),

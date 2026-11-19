@@ -19,7 +19,7 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("down", SelectDown, Some(CONTEXT)),
         KeyBinding::new("enter", Confirm { secondary: false }, Some(CONTEXT)),
         KeyBinding::new(
-            "secondary-enter",
+            "cmd-enter",
             Confirm { secondary: true },
             Some(CONTEXT),
         ),

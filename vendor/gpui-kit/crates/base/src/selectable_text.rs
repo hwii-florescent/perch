@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use gpui::{
     App, BorderStyle, Bounds, Corners, Edges, Element, ElementId, GlobalElementId, Hitbox,
-    HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels, Point,
+    HitboxBehavior, Hsla, InspectorElementId, LayoutId, PaintQuad, Pixels, Point,
     SharedString, StyledText, TextStyleRefinement, Window, transparent_black,
 };
 
@@ -127,13 +127,7 @@ fn selection_quad_bounds(
     quads
 }
 
-impl IntoElement for SelectableText {
-    type Element = Self;
 
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
 
 impl Element for SelectableText {
     type RequestLayoutState = TextSelectionHandle;

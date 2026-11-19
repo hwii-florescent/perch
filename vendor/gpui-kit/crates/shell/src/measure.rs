@@ -116,13 +116,6 @@ pub(crate) struct Measure {
     element: AnyElement,
 }
 
-impl IntoElement for Measure {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
 
 impl Element for Measure {
     type RequestLayoutState = ();
@@ -185,13 +178,6 @@ struct Observe {
     element: AnyElement,
 }
 
-impl IntoElement for Observe {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
 
 impl Element for Observe {
     type RequestLayoutState = ();

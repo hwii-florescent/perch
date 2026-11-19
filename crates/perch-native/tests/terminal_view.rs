@@ -9,7 +9,7 @@
 
 use gpui::{
     point, px, size, AppContext, HeadlessAppContext, KeyDownEvent, Keystroke, Modifiers,
-    ScrollDelta, ScrollWheelEvent, TouchPhase, Window, WindowHandle,
+    ScrollDelta, ScrollEvent, TouchPhase, Window, WindowHandle,
 };
 use perch_core::server::CliArgs;
 use perch_native::client::Core;
@@ -587,14 +587,15 @@ impl Harness {
             let key = if c == '\n' {
                 Keystroke::parse("enter").unwrap()
             } else {
-                let mut key = Keystroke::parse(&c.to_string()).unwrap_or_else(|_| {
-                    // Keys GPUI's parser has no name for (space, punctuation) are typed as text.
-                    Keystroke {
-                        modifiers: Modifiers::default(),
-                        key: c.to_string(),
-                        key_char: None,
-                    }
-                });
+                let mut key = Keystroke::parse_with_os(&c.to_string(), gpui::OperatingSystem::Mac)
+                    .unwrap_or_else(|_| {
+                        // Keys GPUI's parser has no name for (space, punctuation) are typed as text.
+                        Keystroke {
+                            modifiers: Modifiers::default(),
+                            key: c.to_string(),
+                            key_char: None,
+                        }
+                    });
                 key.key_char = Some(c.to_string());
                 key
             };
@@ -611,7 +612,8 @@ impl Harness {
     }
 
     fn wheel(&mut self, lines: f32) {
-        let event = ScrollWheelEvent {
+        let event = ScrollEvent {
+            source: gpui::ScrollSource::Pointer,
             position: point(px(100.), px(100.)),
             delta: ScrollDelta::Lines(point(0., lines)),
             modifiers: Modifiers::default(),

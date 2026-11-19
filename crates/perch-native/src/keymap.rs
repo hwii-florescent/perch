@@ -1451,7 +1451,7 @@ mod tests {
     use serde_json::json;
 
     fn press(spec: &str) -> Keystroke {
-        Keystroke::parse(spec).unwrap()
+        Keystroke::parse_with_os(spec, gpui::OperatingSystem::Mac).unwrap()
     }
 
     fn keymap(chosen: &[(&str, &str)], file: Option<Value>) -> Keymap {

@@ -411,13 +411,7 @@ fn visible_range(origins: &[Pixels], sizes: &[Pixels], viewport: Range<Pixels>) 
     first..last.max(first)
 }
 
-impl IntoElement for VirtualList {
-    type Element = Self;
 
-    fn into_element(self) -> Self::Element {
-        self
-    }
-}
 
 impl Element for VirtualList {
     type RequestLayoutState = VirtualListFrameState;
