@@ -2383,10 +2383,18 @@ impl Workspace {
             store.deleted.iter().any(|d| d == id) || put_away.contains(id) || ended.contains(id)
         };
         // A session the core lists elsewhere moved; one it does not list is gone, unless it has a
-        // terminal here: a session just launched is opened before the core's list holds it.
+        // terminal here (a session just launched is opened before the core's list holds it) or
+        // the core's shared tabs of this workspace hold it (one the core just placed, whose
+        // session the list has not caught up with, keeps that place, as on the web).
         let panes = &self.panes;
-        let left = |id: &str| {
-            known && (store.sessions.iter().any(|s| s.id == id) || !panes.contains_key(id))
+        let left = |key: &str, id: &str| {
+            let listed = store.sessions.iter().any(|s| s.id == id);
+            let placed = !store.deleted.iter().any(|d| d == id)
+                && store
+                    .shared_tabs
+                    .get(key)
+                    .is_some_and(|t| t.strip.iter().any(|s| s == id));
+            known && (listed || (!panes.contains_key(id) && !placed))
         };
         let mut gone = Vec::new();
         let strips = std::iter::once((&self.tabs_of, &mut self.tabs))
@@ -2396,7 +2404,8 @@ impl Workspace {
                 continue;
             }
             let live = navigation::sessions_of_workspace(&store, key);
-            gone.extend(tabs.sync_sessions(&live, left, away));
+            let ordered = navigation::has_session_order(&store, key);
+            gone.extend(tabs.sync_sessions(&live, ordered, |id| left(key, id), away));
         }
         for id in gone {
             if !self.every_tabs().any(|tabs| tabs.contains(&id)) {

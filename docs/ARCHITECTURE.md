@@ -518,9 +518,15 @@ the core, not the agent, decides:
   own remain as ordinary sessions without a parent. Deleting a child drops its record.
   **Esc in the chat is not a stop:** it interrupts the lead's own turn (a keystroke into its prompt), and
   its children keep running; only a terminal kill, a delete and `perch stop` stop them.
-- *`--worktree`*: after the child is recorded, the core makes a new checkout of the lead's repository,
-  registers it as a Nest under the lead's Workspace in the same Project and moves the child's session and
-  record there before launching; any failure discards the child, which never started.
+- *`--worktree`*: after the child is recorded, the core makes a new checkout of the lead's repository
+  (checkout and branch named from `--name`, else the task's first line), registers it under the lead's
+  Workspace in the same Project, **hidden** (no sidebar row while it only hosts the sub-session; a person
+  can show it), points the child's record at it and starts the child there. The child's session stays in
+  the lead's Workspace, so it nests under the lead and joins the lead's tabs like any sub-session; its
+  `cwd` is the checkout, which the sidebar marks with the branch. A worktree is not deleted while a
+  session runs in it. Any failure discards the child, which never started.
+- *Placement:* a new sub-session goes right after its lead and the lead's earlier children in the chat
+  order and in the lead Workspace's shared tabs, when those already list the lead; a person may move it.
 - *Reports are claims.* `perch list` returns lifecycle, whether the agent needs a person (Perch's own
   blocked state, never something the agent said), the dispatch record, and a report: the child's own
   `perch report` of its latest turn (kept per run, outliving it), else the running summary a cheap model

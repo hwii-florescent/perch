@@ -445,7 +445,9 @@ pub fn same_workspace(a: &SessionSummary, b: &SessionSummary) -> bool {
 /// them in it): oldest first, then the core's chat order over them.
 pub fn strip_of_workspace(store: &Store, session: &SessionSummary) -> Vec<String> {
     Builder::new(store, &View::default())
-        .strip_of(&session.host_id, |s| same_workspace(s, session))
+        .strip_of(&session.host_id, session.workspace_id.as_deref(), |s| {
+            same_workspace(s, session)
+        })
         .into_iter()
         .map(|s| s.id.clone())
         .collect()
@@ -484,6 +486,18 @@ pub fn sessions_of_workspace(store: &Store, key: &str) -> Vec<String> {
         .into_iter()
         .filter(|id| mine.contains(id.as_str()))
         .collect()
+}
+
+/// Whether the core keeps a chat order for the host of the workspace keyed `key`: only then does
+/// it order that workspace's session tabs (`applySessionOrder` changes nothing without one, so the
+/// strip's own order, the core's shared tabs, stands).
+pub fn has_session_order(store: &Store, key: &str) -> bool {
+    store
+        .sessions
+        .iter()
+        .find(|s| workspace_key(store, s) == key)
+        .and_then(|s| store.order.get(&s.host_id))
+        .is_some_and(|(_, sessions)| !sessions.is_empty())
 }
 
 /// `terminalScopeId`: the Files and Git scope of a terminal on this computer whose shell is
@@ -862,19 +876,28 @@ impl<'a> Builder<'a> {
     }
 
     /// `workspaceTabs` for `workspace`, sessions only: every session of the checkout (listed or
-    /// not) oldest first, then the core's chat order over them.
+    /// not) oldest first, then the workspace's shared tabs, then the core's chat order over them.
     fn strip(&self, workspace: &WorkspaceSummary) -> Vec<&'a SessionSummary> {
-        self.strip_of(&workspace.host_id, |s| in_workspace(s, workspace))
+        self.strip_of(&workspace.host_id, Some(&workspace.id), |s| {
+            in_workspace(s, workspace)
+        })
     }
 
-    /// [`Self::strip`] for the sessions `of` accepts, on computer `host_id`.
+    /// [`Self::strip`] for the sessions `of` accepts, on computer `host_id`, in the shared tabs of
+    /// workspace `workspace_id` when given.
     fn strip_of(
         &self,
         host_id: &str,
+        workspace_id: Option<&str>,
         of: impl Fn(&SessionSummary) -> bool,
     ) -> Vec<&'a SessionSummary> {
         let mut mine: Vec<&SessionSummary> = self.store.sessions.iter().filter(|s| of(s)).collect();
         mine.sort_by_key(|s| s.created_at);
+        // `applyStoredTabOrder`: the sessions the workspace's strip holds in its order, then the rest.
+        if let Some(stored) = workspace_id.and_then(|id| self.store.shared_tabs.get(id)) {
+            let at = |s: &SessionSummary| stored.strip.iter().position(|id| *id == s.id);
+            mine.sort_by_key(|s| at(s).unwrap_or(usize::MAX));
+        }
         let order = self.session_order(host_id);
         if order.is_empty() {
             return mine;

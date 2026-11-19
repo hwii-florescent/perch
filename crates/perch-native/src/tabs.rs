@@ -599,12 +599,15 @@ impl Tabs {
 
     /// The workspace's sessions are `live`, in its strip's order (the core's), as the web derives
     /// its strip from the core's list (`workspaceTabs`): each one not `away` (closed here without
-    /// ending) has a tab, the session tabs take `live`'s order in their own slots and every other
-    /// tab keeps its slot. A session tab `live` does not hold leaves when `left` says so (the
-    /// caller knows whether the core's list says it is gone). Returns the session tabs that left.
+    /// ending) has a tab and every other tab keeps its slot. With `ordered` (the core keeps a chat
+    /// order) the session tabs take `live`'s order in their own slots; without one the strip's own
+    /// order stands, as the web's `applySessionOrder` changes nothing then. A session tab `live`
+    /// does not hold leaves when `left` says so (the caller knows whether the core's list says it
+    /// is gone). Returns the session tabs that left.
     pub fn sync_sessions(
         &mut self,
         live: &[String],
+        ordered: bool,
         left: impl Fn(&str) -> bool,
         away: impl Fn(&str) -> bool,
     ) -> Vec<String> {
@@ -620,7 +623,9 @@ impl Tabs {
         for id in live.iter().filter(|id| !away(id)) {
             self.append(id);
         }
-        self.follow(live);
+        if ordered {
+            self.follow(live);
+        }
         gone
     }
 
@@ -1666,7 +1671,7 @@ mod tests {
     fn the_core_s_sessions_fill_the_strip_around_files_and_splits() {
         let mut t = Tabs::default();
         assert!(t
-            .sync_sessions(&ids(&["a1", "a2", "t1"]), |_| true, |_| false)
+            .sync_sessions(&ids(&["a1", "a2", "t1"]), true, |_| true, |_| false)
             .is_empty());
         assert_eq!(t.strip(), ["a1", "a2", "t1"]);
         assert_eq!(t.active(), None, "nothing takes the keyboard");
@@ -1675,15 +1680,26 @@ mod tests {
         t.show("a2");
         assert!(t.split("w\na.rs", Side::Right));
         // The core reorders, lists a new session and stops listing t1; one closed here stays out.
-        let gone = t.sync_sessions(&ids(&["a2", "a1", "a3", "a4"]), |_| true, |id| id == "a4");
+        let gone = t.sync_sessions(
+            &ids(&["a2", "a1", "a3", "a4"]),
+            true,
+            |_| true,
+            |id| id == "a4",
+        );
         assert_eq!(gone, ["t1"]);
         assert_eq!(t.strip(), ["a2", "a1", "w\na.rs", "a3"]);
         assert_eq!(t.active(), Some("w\na.rs"));
         assert!(t.in_split("a2") && t.in_split("w\na.rs"));
 
         // A tab the caller does not know to be gone stays.
-        assert!(t.sync_sessions(&[], |_| false, |_| false).is_empty());
+        assert!(t.sync_sessions(&[], true, |_| false, |_| false).is_empty());
         assert_eq!(t.strip().len(), 4);
+
+        // Without a chat order the strip's own order (the core's shared tabs) stands: a sub-session
+        // the core placed after its lead stays there, though it is the newest.
+        let mut t = tabs(&["lead", "kid", "term"]);
+        t.sync_sessions(&ids(&["lead", "term", "kid"]), false, |_| true, |_| false);
+        assert_eq!(t.strip(), ["lead", "kid", "term"]);
     }
 
     #[test]

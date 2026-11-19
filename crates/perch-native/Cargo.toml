@@ -311,3 +311,8 @@ harness = false
 name = "files_media"
 path = "tests/files_media.rs"
 harness = false
+
+[[test]]
+name = "subsession_layout_window"
+path = "tests/subsession_layout_window.rs"
+harness = false

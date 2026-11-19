@@ -1012,6 +1012,17 @@ const SessionRow = memo(function SessionRow({ session, siblings: siblingIds, gro
                 }), _jsx("span", {
                     className: cn(SESSION_TITLE, lead && "flex-initial"),
                     children: title
+                }), session.checkout && _jsxs("span", {
+                    className: "flex min-w-0 max-w-[40%] shrink items-center gap-1 text-[0.62rem] text-subtext-0",
+                    title: `Worktree ${session.checkout}`,
+                    "data-testid": `session-checkout-${session.id}`,
+                    children: [
+                        _jsx(CheckoutIcon, { linked: true }),
+                        _jsx("span", {
+                            className: "min-w-0 truncate",
+                            children: session.checkout
+                        })
+                    ]
                 }), variant === "list" && session.projectName && _jsx("span", {
                     className: "min-w-0 max-w-[35%] truncate text-[0.62rem] text-subtext-0",
                     title: session.projectName,

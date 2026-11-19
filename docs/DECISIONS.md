@@ -7,6 +7,20 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-18 — Sub-sessions sit with their lead everywhere; the status bar follows the tab (owner)
+
+Replaces the separate worktree row for sub-sessions started with `perch spawn --worktree`.
+
+- Every sub-session nests under its lead in the sidebar and sits right after it (and its earlier
+  sub-sessions) in the tab strip, whatever checkout it runs in. That is only the default place: a person
+  may still drag the tab anywhere.
+- A `--worktree` sub-session keeps its own checkout and folder; its sidebar row carries the checkout's
+  branch, small and muted, with the linked-checkout glyph. The checkout is not a separate Workspace row
+  while it only hosts sub-sessions; it shows again when a person shows it on its own.
+- A spawned checkout and its branch are named from `--name` (slugged), not the task's first words.
+- The status bar's folder and branch are the active tab's (a file or review tab: its workspace's or
+  folder's), and follow every tab switch.
+
 ## 2026-11-18 — One desktop app; the phone mirrors the desktop's tabs (owner)
 
 - `/Applications/perch.app` is the native client. It starts its bundled headless core when none runs,
