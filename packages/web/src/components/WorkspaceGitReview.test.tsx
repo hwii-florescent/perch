@@ -283,14 +283,14 @@ describe("WorkspaceGitReview interaction truthfulness", () => {
     Element.prototype.scrollIntoView = () => {};
     try {
       await replaceView(props(actions()));
-      expect(document.querySelector('[data-testid="git-status"]')).toBeNull();
+      expect(document.querySelector('[data-testid="git-status"]')?.getAttribute("aria-hidden")).toBe("true"); // kept mounted, hidden, so its scroll survives
       expect(document.querySelector('[data-testid="git-diff"]')).not.toBeNull();
       await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="git-rail-toggle"]')?.click());
-      expect(document.querySelector('[data-testid="git-status"]')).not.toBeNull();
+      expect(document.querySelector('[data-testid="git-status"]')?.hasAttribute("aria-hidden")).toBe(false);
       expect(document.querySelector('[data-testid="git-diff"]')).toBeNull();
       const file = document.querySelector<HTMLButtonElement>('[data-testid="git-status"] [role="treeitem"] button:not([aria-expanded])');
       await act(async () => file?.click());
-      expect(document.querySelector('[data-testid="git-status"]')).toBeNull();
+      expect(document.querySelector('[data-testid="git-status"]')?.getAttribute("aria-hidden")).toBe("true"); // kept mounted, hidden, so its scroll survives
       expect(document.querySelector('[data-testid="git-diff"]')).not.toBeNull();
     } finally {
       measure.mockRestore();
