@@ -3158,6 +3158,16 @@
           "description": "The rail of changed files beside the diff."
         },
         {
+          "name": "git-change",
+          "selector": "[data-testid^=\"git-change-\"]",
+          "description": "One changed file's row in the rail: a click shows its diff.",
+          "key": {
+            "self": true,
+            "attr": "data-testid",
+            "strip": "git-change-"
+          }
+        },
+        {
           "name": "git-diff",
           "selector": "[data-testid=\"git-diff\"]",
           "description": "The diff's scroll surface: on the native client, the DiffView engine slot by its box."

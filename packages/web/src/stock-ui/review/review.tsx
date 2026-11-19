@@ -312,6 +312,7 @@ const FileRow = memo(function FileRow({ row, active, checked, counts, act }: { r
         type="button"
         className={`${PATH_BUTTON} ${active ? PATH_BUTTON_ACTIVE : PATH_BUTTON_IDLE}`}
         style={{ paddingLeft: `${0.1 + row.depth * 0.8}rem` }}
+        data-testid={`git-change-${path}`}
         onClick={() => act.current.revealFile(path)}
       >
         <FileIcon name={row.name} />

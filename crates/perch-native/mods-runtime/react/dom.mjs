@@ -394,14 +394,18 @@ export class HostDocument extends Target {
     queueMicrotask(() => { this.restyling = false; this.afterCommit?.(); });
   }
   focus(element) {
-    if (this.activeElement && this.activeElement !== element) this.blur(this.activeElement);
-    this.activeElement = element;
-    element.state.focus = true;
-    element.state.pointerFocus = false;
-    touchChain(element);
-    // What `:focus` and a field's caret show changed: described again, though nothing was committed (a field the
-    // source focuses itself, in an effect).
-    this.restyled();
+    // Focusing the focused element changes nothing on screen, as in a browser: the tree is not described again (a
+    // file tree focuses itself on every press, and describing it cost each click a whole tree).
+    if (this.activeElement !== element || !element.state.focus) {
+      if (this.activeElement && this.activeElement !== element) this.blur(this.activeElement);
+      this.activeElement = element;
+      element.state.focus = true;
+      element.state.pointerFocus = false;
+      touchChain(element);
+      // What `:focus` and a field's caret show changed: described again, though nothing was committed (a field the
+      // source focuses itself, in an effect).
+      this.restyled();
+    }
     // The engine moves the keyboard onto the screen when the source focuses one of its elements.
     this.perch?.focused?.(element);
   }
