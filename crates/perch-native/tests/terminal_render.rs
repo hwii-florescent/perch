@@ -1510,9 +1510,10 @@ fn attributes(bg: [u8; 3], fg: [u8; 3]) {
 
 /// CJK, emoji and a combining mark take their cells and are drawn, with fallback fonts.
 /// A row's background fills exactly its cells, top to bottom edge, over the same rows as its
-/// glyphs: padded SGR rows, an erase to the end of the line, and a wide character. Rows printed at
-/// a width the terminal is later narrowed to wrap their overflow (background included) onto the
-/// next row, as xterm.js's reflow does for written cells; that is the grid, not the painting.
+/// glyphs: padded SGR rows, an erase to the end of the line, and a wide character. Narrowing the
+/// terminal reflows as xterm.js does: written cells past the new width wrap onto a row of their
+/// own, while the background an erase left is cut at the new width instead of wrapping (Ghostty
+/// alone wrapped it, which drew a diff as text rows between partly coloured ones).
 fn background_bands_match_their_rows(bg: [u8; 3]) {
     let green = rgb(u32::from(Theme::default().ansi[2].0) << 16
         | u32::from(Theme::default().ansi[2].1) << 8
@@ -1570,11 +1571,30 @@ fn background_bands_match_their_rows(bg: [u8; 3]) {
         "the cell after the wide one"
     );
 
-    // Narrowed to 20 columns, the 30-cell rows wrap their last 10 green cells onto a row of
-    // their own, which is the pattern of a diff drawn before its pane got narrower.
-    h.output("\x1b[8;8;20t");
+    // At 60 columns, an erased green row then a padded one, narrowed to 40.
+    let mut h = Harness::open(900., 420.);
+    h.attach(
+        60,
+        8,
+        &format!(
+            "\x1b[42m 1 erased\x1b[K\x1b[0m\r\n\x1b[42m{:<60}\x1b[0m\r\nend",
+            " 2 padded"
+        ),
+    );
+    h.output("\x1b[8;8;40t");
     let shot = h.draw();
-    assert!(near(shot.center(5, 1), green) && near(shot.center(12, 1), bg));
+    // The erased row is green to the new edge and nothing of it wraps: the padded row follows.
+    assert!(
+        near(shot.center(39, 0), green),
+        "the erase keeps the new width"
+    );
+    assert!(
+        shot.count(1, 1, 1, |p| differs(p, green)) > 4,
+        "the padded row's text is on the next row, not a wrapped band"
+    );
+    // The padded row's last 20 written cells wrap onto a row of their own.
+    assert!(near(shot.center(10, 2), green) && near(shot.center(25, 2), bg));
+    assert!(shot.ink(0, 3, 3, bg) > 4, "then the text after it");
 }
 
 fn wide_and_emoji(bg: [u8; 3]) {

@@ -13,6 +13,11 @@
 //! compile with one Zig minor version (its `minimum_zig_version`). Newer minors
 //! change the build API and fail deep inside Ghostty's `build.zig`, so this
 //! script checks the version first and says what to install.
+//!
+//! Perch's changes to Ghostty are the `patches/*.patch` files here, applied in
+//! name order to a copy of the submodule in `OUT_DIR`; the submodule itself
+//! stays at its pinned commit, untouched. A pin bump that a patch no longer
+//! applies to fails the build here, naming the patch.
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -83,6 +88,53 @@ fn zig_target() -> String {
     }
 }
 
+/// Copy `from` to `to`, leaving out Git's data and Zig's build output.
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let name = entry.file_name();
+        if [".git", ".zig-cache", "zig-out"].contains(&name.to_str().unwrap_or_default()) {
+            continue;
+        }
+        let (src, dst) = (entry.path(), to.join(&name));
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&src, &dst);
+        } else {
+            std::fs::copy(&src, &dst)
+                .unwrap_or_else(|e| panic!("cannot copy {}: {e}", src.display()));
+        }
+    }
+}
+
+/// The pinned Ghostty with Perch's patches applied, in a fresh copy under `out`.
+fn patched(ghostty: &Path, patches: &Path, out: &Path) -> PathBuf {
+    let tree = out.join("ghostty");
+    let _ = std::fs::remove_dir_all(&tree);
+    copy_tree(ghostty, &tree);
+    let mut files: Vec<PathBuf> = std::fs::read_dir(patches)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "patch"))
+        .collect();
+    files.sort();
+    for file in files {
+        let status = Command::new("patch")
+            .args(["-p1", "--forward", "--silent", "-d"])
+            .arg(&tree)
+            .arg("-i")
+            .arg(&file)
+            .status()
+            .unwrap_or_else(|e| panic!("cannot run patch: {e}"));
+        assert!(
+            status.success(),
+            "{} no longer applies to third_party/ghostty: update it for the new pin",
+            file.display()
+        );
+    }
+    tree
+}
+
 fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let ghostty = manifest.join("../../third_party/ghostty");
@@ -95,16 +147,19 @@ fn main() {
     for path in ["src", "include", "build.zig", "build.zig.zon", "pkg"] {
         println!("cargo:rerun-if-changed={}", ghostty.join(path).display());
     }
+    let patches = manifest.join("patches");
+    println!("cargo:rerun-if-changed={}", patches.display());
     println!("cargo:rerun-if-env-changed=ZIG");
 
     let zig = env::var("ZIG").unwrap_or_else(|_| "zig".into());
     check_zig(&zig, &ghostty);
+    let source = patched(&ghostty, &patches, &out);
 
     // Only the static library is wanted. Ghostty also builds its macOS
     // xcframework whenever it finds xcodebuild, which fails with only the
     // Command Line Tools installed.
     let status = Command::new(&zig)
-        .current_dir(&ghostty)
+        .current_dir(&source)
         .args([
             "build",
             "-Demit-lib-vt",
@@ -135,7 +190,7 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", lib.display());
     println!("cargo:rustc-link-lib=static=ghostty-vt");
 
-    let include = ghostty.join("include");
+    let include = source.join("include");
     let mut bindings = bindgen::Builder::default()
         .header(include.join("ghostty/vt.h").to_string_lossy())
         .clang_arg(format!("-I{}", include.display()));

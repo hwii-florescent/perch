@@ -1,0 +1,29 @@
+diff --git a/src/terminal/PageList.zig b/src/terminal/PageList.zig
+index ed1f41759..5304c66ff 100644
+--- a/src/terminal/PageList.zig
++++ b/src/terminal/PageList.zig
+@@ -1674,6 +1674,24 @@ const ReflowCursor = struct {
+             // If the row has a semantic prompt then the blank row is meaningful
+             // so we just consider pretend the first cell of the row isn't empty.
+             if (cols_len == 0 and src_row.semantic_prompt != .none) cols_len = 1;
++
++            // PERCH: cells an erase left holding only a background colour
++            // are not content, as in xterm.js: a row that no longer fits
++            // drops them past the new width instead of wrapping them onto
++            // a row of their own. A row that fits keeps them.
++            const dst_x = if (self.new_rows > 0 or self.pending_wrap) 0 else self.x;
++            const room = self.page.size.cols - dst_x;
++            if (cols_len > room) {
++                var text_len = cols_len;
++                while (text_len > 0) : (text_len -= 1) {
++                    const cell = cells[text_len - 1];
++                    switch (cell.content_tag) {
++                        .bg_color_palette, .bg_color_rgb => {},
++                        else => if (!cell.isEmpty()) break,
++                    }
++                }
++                cols_len = @max(text_len, room);
++            }
+         }
+ 
+         // Handle tracked pin adjustments. We also note whether any

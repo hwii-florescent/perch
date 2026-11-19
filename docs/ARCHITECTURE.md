@@ -178,7 +178,11 @@ days. History is bounded (8 MiB, compacted to its newest half), not an unlimited
 transcript or an fsync-per-write guarantee. Replay includes retained output and
 a repaint; gaps and storage failures are disclosed. The repaint
 (`perchd::screen`) comes from Ghostty's terminal engine (libghostty-vt, built
-by `crates/ghostty-sys` from the pinned `third_party/ghostty` submodule). It
+by `crates/ghostty-sys` from the pinned `third_party/ghostty` submodule, with
+Perch's changes from `crates/ghostty-sys/patches/` applied to a copy in the
+build output; the submodule stays clean, and a patch that stops applying after a
+pin bump fails the build). The one patch so far makes reflow treat cells an
+erase left with only a background as blank, as xterm.js does. It
 starts with a terminal reset and carries the scrollback the screen holds (up to
 10,000 lines or 10 MB; an attach sends at most 4 MiB and drops the oldest rows
 first), both screens, cursor, modes, keyboard stacks and a half-received escape
