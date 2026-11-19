@@ -3163,25 +3163,35 @@ mod tests {
             },
             &fake_git,
         );
-        let result = tokio::time::timeout(
-            Duration::from_secs(1),
-            service.status(&target(&root), StatusOptions::default()),
-        )
-        .await;
-        assert!(result.is_err(), "the caller should cancel before Git exits");
-
-        for _ in 0..100 {
-            if descendant_pid.exists() {
-                break;
+        // The caller gives up once the fake Git has recorded its descendant, not
+        // after a fixed delay: starting a shell can take seconds on a busy machine.
+        // The file can exist before its content does, so wait until it parses.
+        let recorded = async {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+            loop {
+                if let Some(pid) = fs::read_to_string(&descendant_pid)
+                    .ok()
+                    .and_then(|text| text.trim().parse::<libc::pid_t>().ok())
+                {
+                    break pid;
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "fake Git recorded its descendant"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        let pid = fs::read_to_string(&descendant_pid)
-            .expect("fake Git recorded its descendant")
-            .trim()
-            .parse::<libc::pid_t>()
-            .expect("valid descendant pid");
-        for _ in 0..100 {
+        };
+        let workspace = target(&root);
+        let mut status = Box::pin(service.status(&workspace, StatusOptions::default()));
+        let pid = tokio::select! {
+            result = &mut status => panic!("the caller should cancel before Git exits: {result:?}"),
+            pid = recorded => pid,
+        };
+        // Cancel the caller: dropping the call must stop the process group.
+        drop(status);
+        // Allow the kernel to release the killed descendant on a busy machine.
+        for _ in 0..1000 {
             if unsafe { libc::kill(pid, 0) } != 0 {
                 break;
             }
