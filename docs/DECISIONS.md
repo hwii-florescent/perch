@@ -35,9 +35,12 @@ Amends the shared-tabs entry below (the strip's session order) and the sub-sessi
 - Files, review and browser tabs keep the place a person gave them, after the session tab they followed
   (shared through `workspace.tabs`, whose session ids are now only those anchors); one opened since stays last.
 - A lead and its sub-sessions are a stack in the strip, Vivaldi-style. Folded: one tab (the lead, or the
-  member on screen) with an edge and a `+N` count; open: the members side by side on one quiet band, the
-  lead's count showing `−`. The count folds and opens it, and the fold is the sidebar's own (per device):
-  folding in either place folds both.
+  member on screen) with a `+N` count; open: the members side by side, the lead's count showing `−`. The
+  count folds and opens it, and the fold is the sidebar's own (per device): folding in either place folds both.
+  **Amended 2026-11-19 (owner):** a stack has no fill or edge of its own; only the focused tab is filled, and
+  separators stand between and around its members as between any tabs. Its only mark is a hairline bracket under
+  its members, ends turned up: muted at rest, the accent while a member has the keyboard. The count is quiet
+  text (hover fill only), and tab icons sit centred on the label's line.
 - A stack drags as one (by its lead, or folded). A tab dropped inside a stack lands beside the whole stack;
   files, review and browser tabs are never in a stack. A sub-session reorders only inside its lead's stack.
 
