@@ -20,7 +20,7 @@ Rust-only surfaces (Navigator, the terminal, the pane header) are compared by be
 
 | Area | Same | Different | Missing | Refused |
 |---|---|---|---|---|
-| Shortcut bindings (114 rows from the web registry, `keybinds.ts`) | 85 | 18 | 11 | 0 |
+| Shortcut bindings (114 rows from the web registry, `keybinds.ts`) | 86 | 18 | 10 | 0 |
 | Commands `runCommand` accepts (82 names, `modCommands.ts`) | 55 | 0 | 27 | 0 |
 | Mouse behaviours (9 listed below) | 4 | 1 | 1 | 0 (2 unresolved, 1 not on web) |
 
@@ -40,7 +40,7 @@ Web registry: `keybinds.ts`. Native: `keymap.rs` (`SHORTCUTS`, `leader_target`),
 | global.help | Cmd+/ | :107 | keymap.rs:112; workspace.rs:2103 | same |
 | global.helpPlain | Shift+/ outside inputs | :189 | keymap.rs:114 | same |
 | global.sidebar | Cmd+B | :108 | actions.rs:35; actions.rs:227 | same |
-| global.drawer | Cmd+Shift+B (Alt+Shift+B) | :109, toggles the right drawer (files and Git) | none; the fixture lists it (`nativeShortcutBindings.fixture.json`), the test skips it (keymap.rs:1592-1596) | **missing** |
+| global.drawer | Cmd+Shift+B (Alt+Shift+B) | :109, toggles the right drawer (files and Git) | keymap.rs `SHORTCUTS`; workspace.rs `run_command` toggles `shell.rs` `toggle_drawer`; Settings > Keyboard overrides it as other globals | same |
 | global.needsYou | Cmd+Shift+U | :110 | actions.rs:37; actions.rs:231 (native adds `global.needsYouPrev`, actions.rs:43, with no key) | same |
 | view.zoomIn / zoomInShift | Cmd+= / Cmd+Shift+= | :113-114 | keymap.rs:120, 122; workspace.rs:2611 | same |
 | view.zoomOut / zoomReset | Cmd+- / Cmd+0 | :115-116 | keymap.rs:126-127; workspace.rs:2612-2613 | same |
@@ -49,11 +49,11 @@ Web registry: `keybinds.ts`. Native: `keymap.rs` (`SHORTCUTS`, `leader_target`),
 
 | Binding | Keys (mac) | Web | Native | Verdict |
 |---|---|---|---|---|
-| tabs.new | Cmd+T | :119; `requestNewTab`; the "+" menu with Terminal, New browser, New file (`stock-ui/tabs/main.tsx:191-200`) | keymap.rs:129; workspace.rs:2629 bumps `new_tab_asks`; the tab mod's popover, which offers agents only (see R2) | **different** |
+| tabs.new | Cmd+T | :119; `requestNewTab`; the "+" menu with Terminal, New browser, New file (`stock-ui/tabs/main.tsx:191-200`) | keymap.rs:129; workspace.rs:2629 bumps `new_tab_asks`; the tab mod's popover, which offers agents only (see R2) | **same** after the fix run: Terminal, New browser, New file listed; the two this window has no view for are refused with the reason |
 | tabs.close | Cmd+W | :120; `closeCurrent`: browser, then file, then split terminal, then session (guarded) | keymap.rs:134; workspace.rs:2655 closes the shown tab only | **different** (no file or browser tabs natively) |
-| sessions.new | Cmd+Shift+T | :121; launcher with Terminal, New browser, New file | actions.rs:48; actions.rs:233; workspace.rs:2108 opens the launcher with agents only (see R2) | **different** |
-| tabs.keepOpen | Cmd+Alt+Enter | :122; pins the preview file tab | none; no preview tabs natively | **missing** |
-| tabs.jump1 to tabs.jump8 | Cmd+1..8 (Alt+1..8) | :128 | keymap.rs:138-145; workspace.rs:2764 | same (8 rows) |
+| sessions.new | Cmd+Shift+T | :121; launcher with Terminal, New browser, New file | actions.rs:48; actions.rs:233; workspace.rs:2108 opens the launcher with agents only (see R2) | **same** after the fix run (Terminal listed; New browser and New file refused with the reason) |
+| tabs.keepOpen | Cmd+Alt+Enter | :122; pins the preview file tab | none; no preview tabs natively | **missing** (decision: no preview tabs natively) |
+| tabs.jump1 to tabs.jump8 | Cmd+1..8 (Alt+1..8) | :128 | keymap.rs:138-145; workspace.rs:2764 | same (8 rows); fix run: past the last tab now jumps to the last, as the web's `Math.min`, instead of an error |
 | tabs.last | Cmd+9 | :130 | keymap.rs:146; workspace.rs:2644 | same |
 | tabs.next / tabs.prev | Cmd+Shift+] / [ (Ctrl+PageDown / PageUp) | :131-132 | keymap.rs:147-148; workspace.rs:2636, 2640 | same (2 rows) |
 | nav.back / nav.forward | Ctrl+- / Ctrl+Shift+- | :135-136 | keymap.rs:151, 156; workspace.rs:2473-2474 | same (2 rows) |
@@ -62,9 +62,9 @@ Web registry: `keybinds.ts`. Native: `keymap.rs` (`SHORTCUTS`, `leader_target`),
 
 | Binding | Keys (mac) | Web | Native | Verdict |
 |---|---|---|---|---|
-| nests.prev / nests.next | Ctrl+Shift+Up / Down | :139-140; `stepNest` (`workspaceNav.ts:76-85`) | actions.rs:54, 59; actions.rs:243-244; `step_workspace` actions.rs:349-368; `go_to` actions.rs:312-321 | **different** (R3) |
-| nests.jump1 to nests.jump9 | Ctrl+Shift+1..9 | :143; `jumpToNest` | actions.rs:64-104; actions.rs:246; `jump_workspace` actions.rs:371-377 | **different** (R3, 9 rows) |
-| nests.scratchpad | Cmd+Shift+N | :147; `newScratchpad` is silent when there is no Quickchat (`workspaceNav.ts:94-102`) | actions.rs:52, 238; workspace.rs:2422-2427 shows the error `There is no Quickchat on this computer.` | **different** (error text; shares R1's cause) |
+| nests.prev / nests.next | Ctrl+Shift+Up / Down | :139-140; `stepNest` (`workspaceNav.ts:76-85`) | actions.rs:54, 59; actions.rs:243-244; `step_workspace` actions.rs:349-368; `go_to` actions.rs:312-321 | **same** after the fix run (an empty workspace opens its start page) |
+| nests.jump1 to nests.jump9 | Ctrl+Shift+1..9 | :143; `jumpToNest` | actions.rs:64-104; actions.rs:246; `jump_workspace` actions.rs:371-377 | **same** after the fix run (R3, 9 rows) |
+| nests.scratchpad | Cmd+Shift+N | :147; `newScratchpad` is silent when there is no Quickchat (`workspaceNav.ts:94-102`) | actions.rs:52, 238; workspace.rs:2422-2427 shows the error `There is no Quickchat on this computer.` | fix run: opens the Quickchat start page before the first quickchat (R1). The web is silent there, but the web always has a Quickchat (its transport makes one on connect), so this is what the web shows in practice. **Decision** if silence is wanted |
 | nests.new | Cmd+N | :145; worktree menu on create | keymap.rs:103; workspace.rs:2478 | same |
 | nests.addBirdhouse | Cmd+O | :146 | keymap.rs:104; workspace.rs:2477 | same |
 
@@ -97,10 +97,10 @@ navigator.next, nextAlt, previous, previousAlt (`keybinds.ts:182-185`; `keymap.r
 | leader follow-ups navigator, help, sidebar, settings, nextTab, previousTab, splitRight, splitDown, zoom, nextPane, focus.h/j/k/l (14 rows) | g ? b s n p v Shift+- z o h j k l | `keybinds.ts:192-200` (table) | keymap.rs:259-309; `leader_target` keymap.rs:485-499 | same |
 | leader.close | x | :192-200 → `tabs.close` | keymap.rs:271; `leader_target` keymap.rs:491 → `tabs.close` | **different** (inherits tabs.close) |
 | leader.jump1 to jump8 | 1..8 | :203 | keymap.rs:314-321 → `tabs.jump` | same (8 rows) |
-| leader.jump9 | 9 | :203 → `jumpToNthWorkspaceTab(9)`: the 9th tab, or the last when there are fewer | keymap.rs:322; `leader_target` keymap.rs:516 `jump9 => tabs.last` | **different** (last tab, not the 9th) |
+| leader.jump9 | 9 | :203 → `jumpToNthWorkspaceTab(9)`: the 9th tab, or the last when there are fewer | keymap.rs:322; `leader_target` keymap.rs:516 `jump9 => tabs.last` | **same** after the fix run (`leader.jump9`: the 9th tab, or the last) |
 | leader.nextProject | w | :204 | keymap.rs:324; workspace.rs:2475 `next_project` | same (behaviour not compared in depth) |
 | leader.worktree | Shift+W | :205 | keymap.rs:330; workspace.rs:2478 | same |
-| leader.newSession | c | :206 → `newSessionInCurrentProject`: creates a session in the current project at once, no launcher | keymap.rs:336; `leader_target` keymap.rs:500 → `sessions.new` → launcher | **different** |
+| leader.newSession | c | :206 → `newSessionInCurrentProject`: creates a session in the current project at once, no launcher | keymap.rs:336; `leader_target` keymap.rs:500 → `sessions.new` → launcher | **same** after the fix run (a terminal in the project on screen, no launcher) |
 | leader.swapNext | Shift+] | :207 | keymap.rs:342; workspace.rs:2725 | same |
 | leader.grow / leader.shrink | Shift+= / - | :208-209 | keymap.rs:348, 354; workspace.rs:2471-2472 | same |
 | leader.swap.left/down/up/right | Shift+h/j/k/l | :211 | keymap.rs:360-378; `leader_target` keymap.rs:517-521 → `pane.swap:dir` (workspace.rs:2721) | same (4 rows) |
@@ -126,8 +126,8 @@ Of the 82 web command names, native handles 55 by name (`workspace.rs` `run_comm
 
 Native has no handler for 27. Each answers `No command <name>.`:
 
-- agent.next, agent.prev
-- app.help, key.bind
+- ~~agent.next, agent.prev~~ (fix run: handled)
+- ~~app.help, key.bind~~ (fix run: handled; key.bind refuses what the web's `bindableCombo` refuses)
 - layout.clone, float, hide, reset, resize, select, set, show, stack, switch, toggle (11). The layout system is not built natively (keymap.rs:1-20 says so).
 - mod.clone, mod.open. Mods on the native side are outside this run (brief: `perch mod` CLI support is out of scope).
 - project.home, tab.pin, terminal.open, terminal.order, terminal.pin
@@ -140,9 +140,9 @@ Native-only: pane.swapNext and the terminal.* names listed under "Native only" a
 
 | Behaviour | Web (file) | Native (file) | Verdict |
 |---|---|---|---|
-| Tab drag to reorder, from the focused tab | `tabDrag.ts` pointer drag; `stock-ui/tabs/main.tsx:135` `onPointerDown` on every tab | Left press reaches the React host (`runtime.mjs:14071`); the window owns the drag: `tab.beginDrag` (workspace.rs:2347), `drag_moved` (workspace.rs:1042), `drag_ended` (workspace.rs:1082) | **different**: only the focused tab drags (R4) |
+| Tab drag to reorder, from the focused tab | `tabDrag.ts` pointer drag; `stock-ui/tabs/main.tsx:135` `onPointerDown` on every tab | Left press reaches the React host (`runtime.mjs:14071`); the window owns the drag: `tab.beginDrag` (workspace.rs:2347), `drag_moved` (workspace.rs:1042), `drag_ended` (workspace.rs:1082) | **same** after the fix run: the strip owns the press (`app_owns_titlebar_drag`), any tab drags (R4) |
 | Tab drop on the strip (reorder) | `tabDrag.ts` `commit` | `drag_ended` → `Drop::Strip` (workspace.rs:1093) | same |
-| Tab drop on a pane's side (split) | `tabDrag.ts` `planDrop`, `dropTab` | `Drop::Pane` (workspace.rs:1061, 1096), `drop_beside` (tabs.rs:478), zone box in `tab-drag` mod; headless test `tests/mods_floating_window.rs` `tab_drag` (661-790) asserts `tab-drop-zone:right` and the split | **unresolved**: implemented and tested (R5) |
+| Tab drop on a pane's side (split) | `tabDrag.ts` `planDrop`, `dropTab` | `Drop::Pane` (workspace.rs:1061, 1096), `drop_beside` (tabs.rs:478), zone box in `tab-drag` mod; headless test `tests/mods_floating_window.rs` `tab_drag` (661-790) asserts `tab-drop-zone:right` and the split | **same**: implemented and tested; the fix run adds the left zone from an unfocused tab |
 | Context menu on a tab | `stock-ui/tabs/main.tsx:137` `onContextMenu` → `openMenu` | `runtime.mjs:14075` right press → `contextmenu`; `tab.menu` (workspace.rs:2389) | same |
 | Double-click to rename a tab | `stock-ui/tabs/main.tsx:141` `onDoubleClick` | `runtime.mjs:14081` dispatches `dblclick` when click count is 2 and the node listens for it | same (not reported; not run) |
 | Middle-click close on a tab | none on the web: the tab strip has no middle-click handler | the runtime maps only left and right presses (`runtime.mjs:14071-14079`) | **not on web** |
@@ -256,7 +256,7 @@ Settings column: "yes" means the fix or its check depends on the Settings port.
 | 9 | `leader.newSession` creates in the current project, as the web does | `keymap.rs:336, 500` | S | no | leader.newSession |
 | 10 | `leader.jump9` jumps to the 9th tab, or the last when fewer | `keymap.rs:322, 516` | S | no | leader.jump9 |
 | 11 | Fixture test fails on a missing id (today it skips them) | `keymap.rs:1592-1596` | S | no | test gap |
-| 12 | `global.drawer` (Cmd+Shift+B) when a drawer exists | none | M (needs the drawer) | yes: a default that Settings > Keyboard can change | global.drawer |
+| 12 | ~~`global.drawer` (Cmd+Shift+B) when a drawer exists~~ done | `keymap.rs`, `workspace.rs` | done | yes: a default that Settings > Keyboard can change | global.drawer |
 | 13 | `tabs.keepOpen` (Cmd+Alt+Enter) | none | decision: no preview tabs natively | yes: keyboard | tabs.keepOpen |
 | 14 | `agent.next`, `agent.prev`, `app.help` | `workspace.rs` `run_command` | S each | no | commands |
 | 15 | `key.bind` | `workspace.rs` `run_command` | S | yes: writes `settings.keybindings` | commands |
@@ -284,3 +284,11 @@ Not on the list: `window.*` (desktop controls, no native equivalent), editor key
   native sidebar draws the section only from an existing scratch project. Fix: draw the section always, as the web.
 - Side finding: the trial core's scratch folder is `~/.perch/scratch`, the installed app's, even with all four
   `PERCH_*` overrides. The scratch path does not follow the isolation variables.
+
+## Fix run, 2026-11-15 (`nm/fix-run`)
+
+Counts after the run: bindings 100 same, 3 different (tabs.close and leader.close: no file or browser tabs natively;
+nests.scratchpad: a decision), 11 missing (global.drawer and tabs.keepOpen, which the window has nothing for, and the
+9 editor keys, out of scope). Commands: 59 of 82 handled; the 23 left are layouts, mods, window controls, `workspace.files/git`,
+`project.home`, `tab.pin`, `terminal.open/order/pin` (not built, out of this run). Mouse: R4 and R5 same; wheel on the
+strip still not run.

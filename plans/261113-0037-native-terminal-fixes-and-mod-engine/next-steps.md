@@ -97,3 +97,11 @@ a 40-session sidebar takes about 550 ms to draw first in a release build.
 5. The terminal rows still open are in `terminal-parity-checklist.md`.
 
 Same rules as before for agents: `agent-rules.md`, contract `brief.md`, plan and status `plan.md`.
+
+## Files, editor, Git and review: agreed 2026-11-15
+
+The owner agreed to `editor-research.md`'s option C and its suggested answers: Files, Git and review stay React stock
+screens on the native mod engine; a native GPUI editor (vendored `gpui-base`, syntect) takes CodeMirror's host-owned
+slot; a web view only for browser panes, loaded when one opens; PDF, audio and video open in Quick Look or the default
+app until native viewers exist; the editor engine stays host-owned. First step: measure web view memory and a
+5,000-line diff through the React runtime.
