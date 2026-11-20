@@ -8,7 +8,8 @@
 
 use futures::StreamExt;
 use gpui::{
-    point, prelude::*, px, size, App, Bounds, TitlebarOptions, WindowBounds, WindowOptions,
+    actions, point, prelude::*, px, size, App, Bounds, KeyBinding, Menu, MenuItem, SystemMenuType,
+    TitlebarOptions, WindowBounds, WindowOptions,
 };
 use perch_native::client::{follow, Core, Update};
 use perch_native::sidebar::{Heard, Model, Toast};
@@ -17,6 +18,33 @@ use perch_native::{notify, shell, sound};
 use std::time::Duration;
 
 mod test_mode;
+
+actions!(perch_app, [OpenSettings, Quit, Hide, HideOthers, ShowAll]);
+
+/// The system menu bar's app menu (Settings, Services, Hide, Quit). Quit and Hide take their
+/// system keys here; Settings keeps no key of its own, as the keymap lets a person rebind it.
+fn app_menu(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("cmd-q", Quit, None),
+        KeyBinding::new("cmd-h", Hide, None),
+        KeyBinding::new("cmd-alt-h", HideOthers, None),
+    ]);
+    cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.on_action(|_: &Hide, cx| cx.hide());
+    cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
+    cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
+    cx.set_menus([Menu::new("Perch").items([
+        MenuItem::action("Settings…", OpenSettings),
+        MenuItem::separator(),
+        MenuItem::os_submenu("Services", SystemMenuType::Services),
+        MenuItem::separator(),
+        MenuItem::action("Hide Perch", Hide),
+        MenuItem::action("Hide Others", HideOthers),
+        MenuItem::action("Show All", ShowAll),
+        MenuItem::separator(),
+        MenuItem::action("Quit Perch", Quit),
+    ])]);
+}
 
 fn main() {
     let test = match test_mode::TestMode::from_env() {
@@ -91,6 +119,12 @@ fn main() {
             )
             .expect("could not open the window");
         let workspace = window.update(cx, |_, _, cx| cx.entity()).expect("window");
+        app_menu(cx);
+        cx.on_action(move |_: &OpenSettings, cx| {
+            let _ = window.update(cx, |workspace, window, cx| {
+                let _ = workspace.run_command("global.settings", None, window, cx);
+            });
+        });
         // Drafts not yet in the core's buffers go before the window or the app does.
         window
             .update(cx, |_, window, cx| {
