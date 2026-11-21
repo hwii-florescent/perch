@@ -671,7 +671,7 @@ test("switching workspace inside the save delay still saves the split left behin
 
 const viewerOf = (p: Page) => p.evaluate(() => sessionStorage.getItem("perch.viewerId"));
 
-test("two windows of one browser are two viewers with their own layouts", async ({ page, context }) => {
+test("two windows of one browser are two viewers: the strip and its splits are shared, the shown tab is each window's own", async ({ page, context }) => {
   const root = prepareFixture();
   try {
     const a = await openAll(page, root);
@@ -687,9 +687,13 @@ test("two windows of one browser are two viewers with their own layouts", async 
     await second.goto("/", { waitUntil: "domcontentloaded" });
     await expect.poll(() => viewerOf(second)).toBeTruthy();
     expect(await viewerOf(second)).not.toBe(await viewerOf(page));
-    // The other window has none of A's tabs or splits, and what it does leaves A alone.
-    await expect(second.getByTestId(a.fileTab)).toHaveCount(0);
-    await expect(second.getByTestId("split-canvas")).toHaveAttribute("data-split", "0");
+    // The strip and its splits are the core's (docs/DECISIONS.md, 2026-11-18): the other window draws
+    // A's tabs and split too. Which tab each window shows stays its own, so what it selects leaves A alone.
+    await expect(second.getByTestId(a.fileTab)).toBeVisible({ timeout: 20000 });
+    await expect(second.getByTestId("split-canvas")).toHaveAttribute("data-split", "2", { timeout: 20000 });
+    await second.getByTestId(a.fileTab).click();
+    await expect.poll(() => activeTab(second)).toBe(a.fileTab);
+    expect(await activeTab(page)).toBe(a.terminalTab);
 
     const before = await viewerOf(page);
     await page.reload({ waitUntil: "domcontentloaded" });

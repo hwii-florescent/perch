@@ -363,7 +363,7 @@ test("the status bar, tabs and pane headers run from stock packages; a clone cho
     expect(text).toContain(from);
     fs.writeFileSync(file, text.replace(from, to));
   };
-  edit("e2e-my-tabs", "tabs.map((tab, i) => {", "[...tabs].reverse().map((tab, i) => {");
+  edit("e2e-my-tabs", "stacked(tabs).map((item, i, items) => {", "[...stacked(tabs)].reverse().map((item, i, items) => {");
   edit("e2e-my-status", '"Connected"', '"Linked"');
   edit("e2e-my-pane", "export default function PaneHeader({ id, corner }) {", [
     "function MenuButton({ id }) {",
@@ -677,14 +677,15 @@ async function reviewWorks(page: Page, owner: string, body: string): Promise<str
   const view = page.locator(`[data-testid="mod-view-${owner}"]`);
   await expect(view.getByTestId("workspace-git-review")).toHaveCount(1, { timeout: 20000 });
   await expect(page.getByTestId("workspace-git-review")).toHaveCount(1);
-  await expect(view.getByTestId("git-status")).toBeVisible();
+  // The file rail is mounted whether shown or not: in a narrow review (the drawer's) it starts hidden behind the diff.
+  await expect(view.getByTestId("git-status")).toBeAttached();
   const line = view.locator('[data-testid="git-diff-line"][data-side="new"]').filter({ hasText: "WORKTREE_ANCHOR" }).first();
   await expect(line).toBeVisible({ timeout: 15000 });
   await line.getByTestId("git-comment-add").click();
   await view.getByTestId("git-comment-body").fill(body);
   await view.getByRole("button", { name: "Add comment", exact: true }).click();
   await expect(view.locator(".workspace-git__comment").filter({ hasText: body }).first()).toBeVisible({ timeout: 15000 });
-  return view.locator(".workspace-git__path-button").evaluateAll((buttons) => buttons.map((button) => button.getAttribute("title") ?? ""));
+  return view.locator(".workspace-git__path-button").evaluateAll((buttons) => buttons.map((button) => (button.getAttribute("data-testid") ?? "").replace(/^git-change-/, "")));
 }
 
 test("the review runs from its stock package; a clone in its place shows the same review, keeps the unsent commit message, a deep edit changes only the clone, and the phone keeps its own", async ({ page }) => {
@@ -707,7 +708,12 @@ test("the review runs from its stock package; a clone in its place shows the sam
 
     // An unsent commit message, typed in the stock copy.
     const commit = (owner: string) => page.locator(`[data-testid="mod-view-${owner}"] input[placeholder="Describe the change"]`);
+    // The commit field is in the file rail, which a narrow review (the drawer's) keeps behind the diff: show it, type, go back.
+    const toggle = page.locator('[data-testid="mod-view-stock:review"]').getByTestId("git-rail-toggle");
+    const railHidden = !(await commit("stock:review").isVisible());
+    if (railHidden) await toggle.click();
     await commit("stock:review").fill("Fix the anchor, not yet sent");
+    if (railHidden) await toggle.click();
 
     // The untouched clone, chosen in its place, shows the same review and the same unsent message.
     expect(await modsSet(page, { id: "stock:review", op: "clone", as: "e2e-my-review" })).toBeNull();

@@ -104,8 +104,10 @@ test("editor, file, diff and terminal captures reach the same ready agent only o
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
 
     await openWorkspaceTool(page, workspaceId, "gitReview");
-    await page.locator('.workspace-git__path-button[title="notes.txt"]').click();
-    await page.getByRole("button", { name: "Ask agent about diff…", exact: true }).first().click();
+    const review = page.getByTestId("workspace-git-review");
+    await expect(review.getByTestId("git-diff")).toContainText("changed on disk");
+    await choose(review.getByTestId("git-diff-file-select"), "notes.txt");
+    await review.getByRole("button", { name: "Ask agent about diff…", exact: true }).click();
     await expect(prepared).toHaveValue(/Captured Git diff: notes.txt[\s\S]*changed on disk/);
     await expect(prepared).not.toHaveValue(/unsaved bridge selection/);
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -228,6 +230,16 @@ test("editor, file, diff and terminal captures reach the same ready agent only o
     const shellRejected = await rpc({ type: "context.send", workspaceId, source: probeSource, instruction: "", digest: probe.packet.digest, targetSessionId, operationId: crypto.randomUUID() });
     expect(shellRejected.type).toBe("error");
     expect(fs.readFileSync(path.join(fixture, "notes.txt"), "utf8")).toBe("changed on disk\n");
+
+    // The CLI is gone, but its login shell still owns the tab.
+    const tab = page.getByTestId(`tab-${targetSessionId}`);
+    await expect(tab).toBeVisible();
+    await expect(page.locator(".terminal__exited")).toHaveCount(0);
+    await page.evaluate((id) => {
+      const socket = (window as unknown as { contextSockets: WebSocket[] }).contextSockets.find((candidate) => candidate.readyState === WebSocket.OPEN)!;
+      socket.send(JSON.stringify({ type: "session.delete", sessionId: id }));
+    }, targetSessionId);
+    await expect(tab).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally {
     if (core && core.exitCode === null && core.signalCode === null) { const child = core; await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); }); }
@@ -362,8 +374,11 @@ test("the Ask agent dialog runs from its stock package; a clone in its place pre
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
     expect(sends()).toBe(1);
     expect(fs.readFileSync(path.join(fixture, "notes.txt"), "utf8")).toBe("clone bridge line\n");
-    await terminal.locator(".xterm-helper-textarea").pressSequentially("/exit");
-    await terminal.locator(".xterm-helper-textarea").press("Enter");
+    const tab = page.getByTestId(`tab-${targetSessionId}`);
+    await tab.hover();
+    await page.getByTestId(`tab-close-${targetSessionId}`).click();
+    await page.getByTestId("confirm-accept").click();
+    await expect(tab).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally {
     if (core && core.exitCode === null && core.signalCode === null) { const child = core; await new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.kill("SIGKILL"); }); }

@@ -100,9 +100,9 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     const nativeId = await ui.getAttribute("data-native-session");
     expect(nativeId).not.toBe("");
     await openWorkspaceTool(page, workspaceId, "gitReview");
-    await expect(page.getByTestId("workspace-git-review")).toBeVisible();
-    await page.locator('.workspace-git__path-button[title="notes.txt"]').click();
-    await expect(page.getByTestId("git-diff")).toContainText("review_first");
+    const desktopReview = page.getByTestId("workspace-git-review");
+    await expect(desktopReview.getByTestId("git-diff")).toContainText("review_first");
+    await choose(desktopReview.getByTestId("git-diff-file-select"), "notes.txt");
     await addComment(page, "review_first", `First note ${token}`);
     await addComment(page, "review_second", `Second note ${token}`);
 
@@ -121,12 +121,13 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     // The phone shows the chat's workspace; its Git pane is the review (`MobilePaneShell`).
     await phone.getByTestId("mobile-tools").click();
     await phone.getByTestId("mobile-pane-git").click();
-    await expect(phone.getByTestId("workspace-git-review")).toBeVisible();
-    await phone.locator('.workspace-git__path-button[title="notes.txt"]').click();
-    await expect(phone.getByTestId("git-diff")).toContainText("review_first");
-    await expect(phone.locator(".workspace-git__comment").filter({ hasText: `First note ${token}` })).toBeVisible();
-    await choose(phone.getByLabel("Send to agent session", { exact: true }), nativeKey!.sessionId);
-    await expect(phone.getByLabel("Send to agent session", { exact: true }).locator("option:checked")).toContainText(provider);
+    const phoneReview = phone.getByTestId("workspace-git-review");
+    await expect(phoneReview.getByTestId("git-diff")).toContainText("review_first");
+    await choose(phoneReview.getByTestId("git-diff-file-select"), "notes.txt");
+    await expect(phoneReview.locator(".workspace-git__comment").filter({ hasText: `First note ${token}` })).toBeVisible();
+    const target = phoneReview.getByTestId("git-review-session");
+    await expect(target).toHaveAttribute("data-value", nativeKey!.sessionId);
+    await expect(target).toContainText(provider);
     await phone.getByLabel("Request", { exact: true }).fill(`Do not modify files or use tools. If both First note and Second note are present, reply exactly ACCEPTED_${token}.`);
     await phone.getByTestId("git-review-preview").click();
     await expect(phone.getByTestId("git-review-packet")).toContainText("2 anchored notes");
@@ -151,6 +152,11 @@ for (const provider of ["pi", "omp", "claude", "codex", "opencode"]) test(`${pro
     await page.screenshot({ path: path.join(shots, `native-review-${provider}-desktop-${testInfo.project.name}.png`) });
     await ui.getByRole("button", { name: "Take control", exact: true }).click();
     await expect(ui.getByTestId("native-cli-composer")).toBeEnabled();
+    const tab = page.getByTestId(`tab-${nativeKey!.sessionId}`);
+    await tab.hover();
+    await page.getByTestId(`tab-close-${nativeKey!.sessionId}`).click();
+    await page.getByTestId("confirm-accept").click();
+    await expect(tab).toHaveCount(0);
     expect(unexpectedErrors()).toEqual([]);
     completed = true;
   } finally {

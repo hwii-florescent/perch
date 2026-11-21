@@ -39,9 +39,16 @@ export async function cleanupFixtureRuntime(repoRoot: string, fixture: string): 
     { encoding: "utf8", timeout: 120_000, env: { ...process.env, PERCHD_DIR: undefined }, stdio: ["ignore", "pipe", "pipe"] });
   run("release", ["--owner", env.PERCH_CLEANUP_OWNER, "--reason", "fixture core exited; test teardown released its runtimes"]);
   run("cleanup", ["--yes"]);
+  const confirmBy = Date.now() + 5_000;
   let sessions: unknown;
-  try { sessions = JSON.parse(run("ps")); }
-  catch (error) { throw new Error(`Could not read fixture runtimes; preserving state: ${error}`); }
+  do {
+    try { sessions = JSON.parse(run("ps")); }
+    catch (error) { throw new Error(`Could not read fixture runtimes; preserving state: ${error}`); }
+    // After an explicit Stop the leader can exit before its children are gone.
+    // Wait only for the daemon's own confirmation; do not signal a reaped group.
+    if (!Array.isArray(sessions) || sessions.some((session) => session?.alive !== false) || sessions.every((session) => session.cleanup?.group_stopped === true)) break;
+    await setTimeout(50);
+  } while (Date.now() < confirmBy);
   if (!Array.isArray(sessions) || sessions.some((session) => !session || session.alive !== false || session.cleanup?.group_stopped !== true)) {
     throw new Error(`Fixture process-group shutdown unconfirmed; preserving daemon and state for manual review: ${JSON.stringify(sessions)}`);
   }
