@@ -148,9 +148,19 @@ export function PersistentTerminal({ active, sessionId, paneId, layoutPanelId, o
     finally { setClosing(false); }
   }
 
-  const status = !connected ? "Reconnecting to shell…" : error ?? (closed ? "Shell closed." : current?.state === "lost"
+  // A shell whose process ended is done: its panel (or, undocked, its shell) closes, as any terminal emulator
+  // closes a tab on `exit`. A lost shell is not an exit and keeps its notice.
+  const exited = current?.state === "exited";
+  useEffect(() => {
+    if (!exited) return;
+    if (layoutPanelId) getDockviewController()?.closePanel(layoutPanelId);
+    else void closeShell();
+    // closeShell reads the current shell; the exit is the only trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exited]);
+
+  const status = !connected ? "Reconnecting to shell…" : error ?? (closed || exited ? "Shell closed." : current?.state === "lost"
     ? "This shell process is no longer available. Open a new shell to continue."
-    : current?.state === "exited" ? `Shell exited (code ${current.exitCode ?? "unknown"}).`
     : !current ? "Opening shell…" : null);
 
   return <div className="terminal terminal--persistent" data-session-id={sessionId} data-terminal-id={current?.id} data-pane-id={selected ?? undefined}>

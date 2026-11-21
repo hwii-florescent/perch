@@ -11,7 +11,7 @@
         "disabled": false
       },
       "error": null,
-      "ended": null,
+      "sleeping": false,
       "state": {
         "controlling": false,
         "shared": false,

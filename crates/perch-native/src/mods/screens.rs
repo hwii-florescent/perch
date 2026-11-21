@@ -9,7 +9,7 @@
 //!   nothing is open in it), `folder-browser` (the sidebar draws its own copy in its Add project
 //!   dialog) and `worktree` (the sidebar draws its own copy on each git project's row), which the
 //!   window places nowhere yet, and over each terminal on screen `agent-control` (keyed
-//!   `agent-control#<tab id>`, while the agent has a chip, an error or an ended banner),
+//!   `agent-control#<tab id>`, while the agent has a chip, an error or a sleeping banner),
 //!   `terminal-search` (`terminal-search#<tab id>`, while its find is open) and `phone-size`
 //!   (`phone-size#<tab id>`, while a phone holds its size and this window may take it back), and
 //!   `files`: the explorer in the drawer's Files tab (`files#drawer`) and a file's editor in each

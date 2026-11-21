@@ -2578,8 +2578,8 @@ declare module "@perch/sdk" {
   }
 
   /** `stock:agent-control`, over an agent's terminal (1.10), drawn in two places: `top` (the chip) and `bottom` (the
-   * error line and the ended banner). Each action moves the terminal's lease or starts or closes the agent, through
-   * Perch. */
+   * error line and the sleeping banner). Each action moves the terminal's lease or starts the agent, through Perch. An
+   * agent that exited is not shown here: its tab closes. */
   export interface AgentControlProps {
     part: "top" | "bottom";
     /** The agent's id (claude, codex, terminal, ...). */
@@ -2595,8 +2595,8 @@ declare module "@perch/sdk" {
     control: { label: string; disabled: boolean; onClick(): void } | null;
     /** The agent's error, or null. */
     error: string | null;
-    /** The agent's process ended (`sleeping`: hibernated, its conversation kept); null while it runs. */
-    ended: { sleeping: boolean; exitCode: number | null; onRestart(): void; onClose: (() => void) | null } | null;
+    /** The agent was hibernated to save memory, its conversation kept; `onResume` starts it again. Null otherwise. */
+    sleeping: { onResume(): void } | null;
     /** How this view stands, for a copy that words the chip itself. */
     state: { controlling: boolean; shared: boolean; writable: boolean; phone: boolean };
   }

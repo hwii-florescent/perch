@@ -88,6 +88,8 @@ test.describe("Session lifecycle", () => {
     const exited = await startChat(page);
     await page.getByTestId("persistent-agent-terminal").locator(".xterm-helper-textarea").pressSequentially("exit\n");
     await expect(page.getByTestId(`workspace-session-${exited}`)).toHaveCount(0, { timeout: 15000 });
+    await expect(page.getByTestId(`tab-${exited}`)).toHaveCount(0);
+    await expect(page.locator(".terminal__exited")).toHaveCount(0);
 
     await page.reload({ waitUntil: "networkidle" });
     await expect(page.locator(".sidebar")).toBeVisible({ timeout: 15000 });

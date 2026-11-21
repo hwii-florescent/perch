@@ -15,7 +15,7 @@ afterEach(() => { act(() => root.unmount()); host.remove(); });
 
 const q = (id: string) => host.querySelector<HTMLElement>(`[data-testid="${id}"]`);
 const base: AgentControlProps = {
-  part: "top", agent: "Claude", label: null, connected: true, pending: false, onRetry: null, control: null, error: null, ended: null,
+  part: "top", agent: "Claude", label: null, connected: true, pending: false, onRetry: null, control: null, error: null, sleeping: null,
   state: { controlling: true, shared: false, writable: true, phone: false },
 };
 const draw = (props: Partial<AgentControlProps>) => act(() => root.render(<AgentControl {...base} {...props} />));
@@ -35,24 +35,21 @@ it("the top part shows Perch's label and asks Perch to take control or retry; no
   act(() => [...host.querySelectorAll("button")].find((b) => b.textContent === "Retry CLI")!.click());
   expect(retry).toHaveBeenCalledTimes(1);
   // The bottom part's error and banner are not drawn at the top.
-  draw({ label: "Viewing agent", error: "boom", ended: { sleeping: false, exitCode: 1, onRestart: () => {}, onClose: null } });
+  draw({ label: "Viewing agent", error: "boom", sleeping: { onResume: () => {} } });
   expect(host.querySelector('[role="alert"]')).toBeNull();
-  expect(q("cli-exited")).toBeNull();
+  expect(q("cli-sleeping")).toBeNull();
 });
 
-it("the bottom part shows the error and the ended banner, and Restart, Resume and Close go to Perch", () => {
-  const restart = vi.fn(), close = vi.fn();
-  draw({ part: "bottom", label: "Viewing agent", error: "spawn failed", ended: { sleeping: false, exitCode: 2, onRestart: restart, onClose: close } });
+it("the bottom part shows the error and the sleeping banner, and Resume goes to Perch; an exit has no banner", () => {
+  const resume = vi.fn();
+  draw({ part: "bottom", label: "Viewing agent", error: "spawn failed" });
   expect(host.querySelector('[role="alert"]')!.textContent).toBe("spawn failed");
   expect(q("agent-control-chip")).toBeNull();
-  expect(q("cli-exited")!.textContent).toContain("Claude exited (code 2)");
-  act(() => q("cli-restart")!.click());
-  act(() => q("cli-close-session")!.click());
-  expect([restart.mock.calls.length, close.mock.calls.length]).toEqual([1, 1]);
+  expect(host.querySelector(".terminal__exited")).toBeNull();
 
-  draw({ part: "bottom", ended: { sleeping: true, exitCode: null, onRestart: restart, onClose: null } });
+  draw({ part: "bottom", sleeping: { onResume: resume } });
   expect(q("cli-sleeping")!.textContent).toContain("sleeping to save memory");
-  expect(q("cli-close-session")).toBeNull();
+  expect(host.querySelectorAll("button").length).toBe(1);
   act(() => q("cli-resume")!.click());
-  expect(restart).toHaveBeenCalledTimes(2);
+  expect(resume).toHaveBeenCalledTimes(1);
 });

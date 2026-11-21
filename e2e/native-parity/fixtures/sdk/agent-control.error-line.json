@@ -8,7 +8,7 @@
       "retry": false,
       "control": null,
       "error": "Shared typing is unavailable in this terminal version. Use Take control.",
-      "ended": null,
+      "sleeping": false,
       "state": {
         "controlling": false,
         "shared": false,

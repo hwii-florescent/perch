@@ -177,13 +177,13 @@ function TerminalSearchDemo({ Bar, query: first }: { Bar: ComponentType<Json>; q
   return <TerminalFrame><Bar query={query} setQuery={setQuery} findNext={noop} findPrevious={noop} close={noop} /></TerminalFrame>;
 }
 /** The agent's controls in both places the terminal draws them (`part` top, before the surface; bottom, after it). */
-interface ControlInput { agent: string; label: string | null; connected: boolean; pending: boolean; retry: boolean; control: { label: string; disabled: boolean } | null; error: string | null; ended: { sleeping: boolean; exitCode: number | null; close: boolean } | null; state: Json }
+interface ControlInput { agent: string; label: string | null; connected: boolean; pending: boolean; retry: boolean; control: { label: string; disabled: boolean } | null; error: string | null; sleeping: boolean; state: Json }
 function AgentControlDemo({ Control, ac }: { Control: ComponentType<Json>; ac: ControlInput }) {
   const shared = {
     agent: ac.agent, label: ac.label, connected: ac.connected, pending: ac.pending, state: ac.state, error: ac.error,
     onRetry: ac.retry ? noop : null,
     control: ac.control ? { ...ac.control, onClick: noop } : null,
-    ended: ac.ended ? { sleeping: ac.ended.sleeping, exitCode: ac.ended.exitCode, onRestart: noop, onClose: ac.ended.close ? noop : null } : null,
+    sleeping: ac.sleeping ? { onResume: noop } : null,
   };
   return <div className="terminal terminal--persistent" data-testid="persistent-agent-terminal"><Control {...shared} part="top" /><div className="terminal__surface" /><Control {...shared} part="bottom" /></div>;
 }

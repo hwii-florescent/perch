@@ -8,11 +8,7 @@
       "retry": false,
       "control": null,
       "error": null,
-      "ended": {
-        "sleeping": true,
-        "exitCode": null,
-        "close": true
-      },
+      "sleeping": true,
       "state": {
         "controlling": false,
         "shared": false,

@@ -2772,14 +2772,14 @@
         {
           "name": "agent-control-ended-text",
           "selector": ".terminal__exited-text",
-          "description": "What happened to the agent.",
+          "description": "What happened to the agent: it is asleep.",
           "text": true,
           "textSized": true
         },
         {
           "name": "agent-control-ended-button",
           "selector": ".terminal__exited-actions > button",
-          "description": "Restart CLI / Resume agent (primary) and Close session (soft).",
+          "description": "Resume agent (primary).",
           "key": {
             "self": true,
             "attr": "data-testid"

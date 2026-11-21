@@ -9,6 +9,7 @@ import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
 import { attachAgentFileDrop, type FileDropNotice } from "../agentFileDrop";
 import { PersistentTerminal } from "./PersistentTerminal";
+import { getDockviewController } from "../dockview/dockviewController";
 
 export function TerminalView({ active, paneId, sessionId: ownerSessionId, layoutPanelId, onPaneChange }: {
   active: boolean; paneId?: string; sessionId?: string; layoutPanelId?: string; onPaneChange?: (paneId: string) => void;
@@ -17,10 +18,10 @@ export function TerminalView({ active, paneId, sessionId: ownerSessionId, layout
   const ready = usePerchStore((state) => state.connected && state.serverInfo !== null);
   const persistent = usePerchStore((state) => state.serverInfo?.capabilities?.includes("terminal.open") === true);
   if (!ready || !sessionId) return <div className="terminal__notice" role="status">Connecting to terminal…</div>;
-  return persistent ? <PersistentTerminal key={sessionId} active={active} sessionId={sessionId} paneId={paneId} layoutPanelId={layoutPanelId} onPaneChange={onPaneChange} /> : <LegacyTerminalView key={sessionId} active={active} sessionId={sessionId} />;
+  return persistent ? <PersistentTerminal key={sessionId} active={active} sessionId={sessionId} paneId={paneId} layoutPanelId={layoutPanelId} onPaneChange={onPaneChange} /> : <LegacyTerminalView key={sessionId} active={active} sessionId={sessionId} layoutPanelId={layoutPanelId} />;
 }
 
-function LegacyTerminalView({ active, sessionId }: { active: boolean; sessionId: string }) {
+function LegacyTerminalView({ active, sessionId, layoutPanelId }: { active: boolean; sessionId: string; layoutPanelId?: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const perchTermRef = useRef<PerchTerminal | null>(null);
@@ -109,6 +110,10 @@ function LegacyTerminalView({ active, sessionId }: { active: boolean; sessionId:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (exitCode !== null && layoutPanelId) getDockviewController()?.closePanel(layoutPanelId);
+  }, [exitCode, layoutPanelId]);
+
   // Stream PTY output straight into xterm, bypassing React state.
   useEffect(() => {
     if (!terminalId) return;
@@ -130,9 +135,6 @@ function LegacyTerminalView({ active, sessionId }: { active: boolean; sessionId:
       <div className="terminal__surface" ref={containerRef} />
       <TerminalSearchBar controller={search} />
       {fileDrop && <div className="terminal__notice" role={fileDrop.error ? "alert" : "status"}>{fileDrop.message}</div>}
-      {exitCode !== null && (
-        <div className="terminal__exited">process exited (code {exitCode})</div>
-      )}
     </div>
   );
 }

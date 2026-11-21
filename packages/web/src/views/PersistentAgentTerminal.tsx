@@ -226,8 +226,9 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
   }
 
   // The agent and the shell it runs in have both exited (the user left the
-  // shell): the session is done, so close it like its tab's ×. Hibernation
-  // also closes the pty but leaves the agent `sleeping`, never `exited`.
+  // shell): the session is done, so close it like its tab's ×, with no banner,
+  // as any terminal emulator closes a tab on `exit`. Hibernation also closes
+  // the pty but leaves the agent `sleeping`, never `exited`.
   const finished = exitCode !== null && status?.state === "exited";
   useEffect(() => {
     if (finished) onClose?.();
@@ -252,7 +253,7 @@ export function PersistentAgentTerminal({ sessionId, agent, cliError, onClose }:
       ? { label: pending ? (shared ? "Fitting…" : "Taking control…") : shared ? "Fit here" : "Take control", disabled: pending || !connected, onClick: () => void view?.takeControl() }
       : null,
     error: error || cliError || null,
-    ended: exitCode !== null || sleeping ? { sleeping, exitCode, onRestart: startOver, onClose: onClose ?? null } : null,
+    sleeping: sleeping ? { onResume: startOver } : null,
     state: { controlling, shared, writable, phone: isMobile },
   };
   return <div className="terminal terminal--persistent" data-testid="persistent-agent-terminal" data-session-id={sessionId} data-terminal-id={terminalId ?? undefined} data-controlling={controlling || undefined} data-writable={writable || undefined}>

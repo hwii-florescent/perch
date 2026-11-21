@@ -17,7 +17,7 @@
  * Tests (serial):
  *   E1 — host switcher lists "test-remote" with a connected dot
  *   E2 — "+ New session" on the remote host creates a session under it
- *   E4 — a remote claude terminal renders, takes /exit, shows the exited banner
+ *   E4 — a remote claude terminal renders, takes /exit, and closes without a banner
  *   E5 — disable host in settings → disabled dot in the switcher; re-enable → connected
  *   E8 — a remote agent made over the protocol peeks like a local one (the same xterm, nothing stopped)
  *
@@ -461,15 +461,14 @@ test.describe("Stage F3: federation e2e", () => {
     await expect(rows).toContainText(/Haiku 4\.5/i, { timeout: 30_000 });
     await shot(page, "fed-e4-cli-relay.png");
 
-    // Input relay: /exit reaches the CLI. A remote pane runs the CLI bare (no
-    // login shell around it), so its exit shows the exited banner (exit relay).
+    // Input relay and exit relay: /exit reaches the CLI. A remote pane runs the CLI bare (no
+    // login shell around it), so its exit ends the session and the tab closes by itself,
+    // with no banner, as a terminal emulator's does.
     await input.pressSequentially("/exit");
     await expect(rows).toContainText("Exit the CLI");
     await input.press("Enter");
-    await expect(page.locator(".terminal__exited")).toBeVisible({ timeout: 30_000 });
-    await shot(page, "fed-e4-cli-exited.png");
-    await page.getByTestId("cli-close-session").click();
-    await expect(page.getByTestId(`tab-${id}`)).toHaveCount(0, { timeout: 10_000 });
+    await expect(page.getByTestId(`tab-${id}`)).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.locator(".terminal__exited")).toHaveCount(0);
   });
 
   // -------------------------------------------------------------------------

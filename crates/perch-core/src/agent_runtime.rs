@@ -281,6 +281,10 @@ pub struct AgentRuntimeAdapter {
     /// when the phone gives the size up, that view has it again at that size
     /// ([`Self::give_size_back`]). A desktop taking the size clears it.
     size_before_phone: Mutex<HashMap<AgentKey, (ClientIdentity, Option<(u16, u16)>)>>,
+    /// Asks the lifecycle task to look at the foreground jobs now instead of at its next tick:
+    /// a person pressed Enter (a command may have started an agent) or a process ended, and a tab
+    /// should show it at once ([`Self::nudge`]).
+    nudge: Arc<tokio::sync::Notify>,
 }
 
 /// A launch's Perch identity (`agent_identity.rs`) and the `perch` binary it runs.
@@ -313,7 +317,19 @@ impl AgentRuntimeAdapter {
             instructions: std::sync::OnceLock::new(),
             identities: std::sync::OnceLock::new(),
             size_before_phone: Mutex::new(HashMap::new()),
+            nudge: Arc::new(tokio::sync::Notify::new()),
         }
+    }
+
+    /// Wake the foreground observer now. Cheap and coalescing: any number of calls before it wakes
+    /// are one.
+    pub fn nudge(&self) {
+        self.nudge.notify_one();
+    }
+
+    /// Resolves when [`Self::nudge`] was called since the last wait.
+    pub async fn nudged(&self) {
+        self.nudge.notified().await;
     }
 
     pub fn set_exit_listener(&self, listener: PersonTurnListener) -> anyhow::Result<()> {
@@ -1265,6 +1281,7 @@ impl AgentRuntimeAdapter {
         let turn_boundary = self.turn_boundary.clone();
         let identities = self.identities.get().cloned();
         let exit_listener = self.exit_listener.get().cloned();
+        let nudge = self.nudge.clone();
         let wrapped_on_exit: TerminalExitListener = Arc::new(move |terminal_id, code| {
             let intentional_stop = event_suppress.load(Ordering::Acquire);
             let identity = event_identity_slot.lock().unwrap().clone();
@@ -1326,6 +1343,9 @@ impl AgentRuntimeAdapter {
                 }) {
                     active.remove(&event_key);
                 }
+                drop(active);
+                // The tab shows the end now, not at the next tick.
+                nudge.notify_one();
             }
         });
 
@@ -1728,6 +1748,10 @@ impl AgentRuntimeAdapter {
     /// Remember that some client's bytes are reaching this session's PTY now (a person typing, a
     /// terminal's own reports). Core-originated writes are not recorded: they are checked, not heard.
     pub(crate) fn note_terminal_input(&self, session_id: &str, data: &str) {
+        // A line entered may have started an agent in a shell, or ended one: look soon.
+        if data.contains(['\r', '\n']) {
+            self.nudge();
+        }
         let now = std::time::Instant::now();
         self.last_input
             .lock()
@@ -2688,6 +2712,22 @@ mod tests {
         let lifecycle = Arc::new(AgentLifecycleRegistry::new());
         let terminals = Arc::new(AgentTerminalRegistry::new(Arc::new(|_| {})));
         AgentRuntimeAdapter::new(providers, lifecycle, terminals)
+    }
+
+    /// A line entered wakes the foreground observer at once, so a tab shows an agent starting
+    /// or ending without waiting for the next tick; plain typing does not.
+    #[tokio::test]
+    async fn a_line_entered_nudges_the_foreground_observer() {
+        let adapter = adapter();
+        let woke = || tokio::time::timeout(Duration::from_millis(50), adapter.nudged());
+        adapter.note_terminal_input("s1", "claude");
+        assert!(woke().await.is_err(), "typing without Enter is not a command");
+        adapter.note_terminal_input("s1", "\r");
+        assert!(woke().await.is_ok(), "Enter may have started an agent");
+        adapter.nudge();
+        adapter.nudge();
+        assert!(woke().await.is_ok());
+        assert!(woke().await.is_err(), "calls before a wake are one");
     }
 
     struct RuntimeCleanup<'a> {

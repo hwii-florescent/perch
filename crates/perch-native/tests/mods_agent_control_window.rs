@@ -9,9 +9,9 @@
 //!   restarted;
 //! - an attach the core refused: "Agent unavailable" with its reason, and Retry CLI attaches again
 //!   only on the click;
-//! - the shell ended: the banner with Restart CLI, which attaches again, and Close session, which
-//!   asks the core to delete the session (the tab waits for the core); a hibernated agent's banner
-//!   offers Resume agent.
+//! - the shell ended: no banner. Once the core says the agent exited, the window asks it to delete
+//!   the session (the tab waits for the core); a hibernated agent's banner offers Resume agent and
+//!   asks for nothing to be deleted.
 //!
 //! Offscreen, as the other render tests: no window is shown or focused, and no core runs. The
 //! terminal's connection is a pair of channels this test answers on; the core the window finds
@@ -309,38 +309,44 @@ fn main() {
         "Retry CLI attaches again"
     );
 
-    // The shell ends: the banner, no chip. Close session asks the core to delete the session,
-    // and the tab waits for the core; Restart CLI attaches again.
+    // The shell ends: no banner and no chip. The exit alone deletes nothing; once the core says
+    // the agent exited, the window asks it to delete the session, and the tab waits for the core.
     let (_to_core, core) = rig.link(agent(AgentState::Idle, true, false));
     rig.say(&core, FromCore::Exited(1));
     let drawn = rig.drawn();
+    assert!(drawn.is_empty(), "an exit draws nothing: {drawn:?}");
     assert!(
-        drawn.iter().any(|n| n == "agent-control-ended:cli-exited"),
-        "{drawn:?}"
+        !rig.asked()
+            .iter()
+            .any(|c| matches!(c, Command::DeleteSession { .. })),
+        "an exit alone is not the end of the session"
     );
-    assert!(!drawn.iter().any(|n| n == "agent-control-chip"));
-    rig.asked();
-    rig.click("agent-control-ended-button:cli-close-session");
-    assert!(
-        rig.asked().iter().any(
-            |c| matches!(c, Command::DeleteSession { session_id, .. } if session_id == "alpha")
-        ),
-        "Close session asks the core"
+    rig.say(&core, FromCore::Agent(agent(AgentState::Exited, true, false)));
+    rig.draw();
+    let asked = rig.asked();
+    assert_eq!(
+        asked
+            .iter()
+            .filter(|c| matches!(c, Command::DeleteSession { session_id, .. } if session_id == "alpha"))
+            .count(),
+        1,
+        "the exited agent's session is deleted once: {asked:?}"
     );
     assert!(
         rig.ws(|ws, _, _| ws.tabs().contains("alpha")),
         "the tab waits for the core"
     );
-    rig.click("agent-control-ended-button:cli-restart");
-    assert!(
-        !matches!(rig.view(|v, _| v.status().clone()), Status::Exited(_)),
-        "Restart CLI attaches again"
-    );
 
-    // A hibernated agent's banner offers Resume agent, with no exit code.
+    // A hibernated agent's banner offers Resume agent, and its session is kept.
     let (_to_core, core) = rig.link(agent(AgentState::Sleeping, true, false));
     rig.say(&core, FromCore::Exited(0));
     let drawn = rig.drawn();
+    assert!(
+        !rig.asked()
+            .iter()
+            .any(|c| matches!(c, Command::DeleteSession { .. })),
+        "a sleeping agent is not deleted"
+    );
     assert!(
         drawn
             .iter()

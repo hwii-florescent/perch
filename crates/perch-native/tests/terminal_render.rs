@@ -2007,11 +2007,32 @@ fn disconnect_keeps_the_screen() {
     // Only the core saying so marks the shell as ended.
     h.say(FromCore::Exited(3));
     assert_eq!(h.view(|v, _| v.status().clone()), Status::Exited(3));
-    // The agent's banner says so, with Restart CLI and Close session.
-    let ended = h.view(|v, _| v.agent_control()["ended"].clone());
+    // An exit has no banner, and alone it does not finish the session: the core's word that the
+    // agent exited does, once.
     assert_eq!(
-        ended,
-        serde_json::json!({"sleeping": false, "exitCode": 3, "close": true})
+        h.view(|v, _| v.agent_control()["sleeping"].clone()),
+        serde_json::json!(false)
+    );
+    assert!(!events.borrow().contains(&TerminalEvent::Finished));
+    use perch_core::agent_fleet::AgentState;
+    use perch_native::terminal::attach::AgentInfo;
+    let exited = AgentInfo {
+        state: AgentState::Exited,
+        input: true,
+        resize: true,
+        input_elsewhere: false,
+        resize_on_device: false,
+    };
+    h.say(FromCore::Agent(exited));
+    h.say(FromCore::Agent(exited));
+    assert_eq!(
+        events
+            .borrow()
+            .iter()
+            .filter(|e| **e == TerminalEvent::Finished)
+            .count(),
+        1,
+        "the tab is told once that its session is done"
     );
     let events = events.borrow();
     assert!(events.contains(&TerminalEvent::Title("the title".into())));
@@ -2304,9 +2325,9 @@ fn ownership_and_named_actions() {
     )));
     h.say(FromCore::Exited(0));
     assert_eq!(
-        h.view(|v, _| v.agent_control()["ended"].clone()),
-        serde_json::json!({"sleeping": true, "exitCode": null, "close": true}),
-        "Resume agent, not an exit code"
+        h.view(|v, _| v.agent_control()["sleeping"].clone()),
+        serde_json::json!(true),
+        "Resume agent, not an exit"
     );
 }
 

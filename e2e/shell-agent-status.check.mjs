@@ -48,14 +48,16 @@ if (provider === 'pi' || provider === 'omp') {
   const config = JSON.parse(fs.readFileSync(process.argv[process.argv.indexOf('--settings') + 1], 'utf8'));
   const transcript = path.join(process.cwd(), id + '.jsonl');
   fs.writeFileSync(transcript, '');
-  const event = name => {
+  const event = (name, tool_name) => {
     const result = spawnSync('/bin/sh', ['-c', config.hooks[name][0].hooks[0].command], {
-      input: JSON.stringify({ hook_event_name: name, session_id: id, transcript_path: transcript, cwd: process.cwd() })
+      input: JSON.stringify({ hook_event_name: name, session_id: id, transcript_path: transcript, cwd: process.cwd(), tool_name })
     });
     if (result.status !== 0) throw Error('hook failed');
   };
   event('SessionStart');
-  publish = name => event(({ agent_start: 'UserPromptSubmit', ask: 'PermissionRequest', answer: 'PostToolUse', agent_end: 'Stop' })[name]);
+  // AskUserQuestion uses PreToolUse even when the Claude version is unknown to the launcher.
+  publish = name => event(({ agent_start: 'UserPromptSubmit', ask: 'PreToolUse', answer: 'PostToolUse', agent_end: 'Stop' })[name],
+    name === 'ask' || name === 'answer' ? 'AskUserQuestion' : undefined);
 } else if (provider === 'aider') {
   publish = name => process.stdout.write('\\x1b]0;' + ({ agent_start: '⠋ aider', ask: 'aider - action required', answer: '⠋ aider', agent_end: 'aider ready' })[name] + '\\x07');
 } else {

@@ -3,11 +3,11 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 //! Agent terminal controls, the stock screen `stock:agent-control`: what sits over an agent's terminal. Drawn in two
 //! places (`part`): `top`, the chip at the top right that says how this view stands ("Viewing agent", "Another view
 //! is typing in this agent", "Reconnecting…", ...) with Take control / Fit here, or Retry CLI when the agent could not
-//! start; `bottom`, the agent's error line and, once its process has ended, the banner with Restart CLI or Resume agent
-//! and Close session.
+//! start; `bottom`, the agent's error line and, while the agent is hibernated, the banner with Resume agent. An agent
+//! that exited has no banner: its tab closes.
 //!
-//! The terminal's authority is Perch's: taking control moves the input and resize lease, Restart/Resume starts the
-//! agent again, Close session closes it, each through Perch (props); this screen only asks, and shows what Perch says.
+//! The terminal's authority is Perch's: taking control moves the input and resize lease, Resume starts the agent
+//! again, each through Perch (props); this screen only asks, and shows what Perch says.
 //! Perch shows it, or the person's package chosen for it (`perch mod use stock:agent-control <id>`), with the same
 //! props. A phone keeps Perch's own.
 //!
@@ -16,7 +16,7 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 //! it (docs/MOD-SDK.md).
 import { buttonClass, cn, glassClass } from "@perch/sdk";
 const TAP = "[.app--mobile_&]:min-h-11";
-export default function AgentControl({ part, agent, label, pending, onRetry, control, error, ended }) {
+export default function AgentControl({ part, agent, label, pending, onRetry, control, error, sleeping }) {
     if (part === "top") {
         if (!label)
             return null;
@@ -50,32 +50,26 @@ export default function AgentControl({ part, agent, label, pending, onRetry, con
                 className: "terminal__cli-error",
                 role: "alert",
                 children: error
-            }), ended && (_jsxs("div", {
+            }), sleeping && (_jsxs("div", {
                 className: "terminal__exited terminal__exited--cli",
-                "data-testid": ended.sleeping ? "cli-sleeping" : "cli-exited",
+                "data-testid": "cli-sleeping",
                 children: [
-                    _jsx("span", {
-                        className: "terminal__exited-text",
-                        children: ended.sleeping ? `${agent} is sleeping to save memory — its conversation is kept` : `${agent} exited (code ${ended.exitCode})`
-                    }),
                     _jsxs("span", {
-                        className: "terminal__exited-actions",
+                        className: "terminal__exited-text",
                         children: [
-                            _jsx("button", {
-                                type: "button",
-                                className: buttonClass({ variant: "primary", size: "md", className: TAP }),
-                                "data-testid": ended.sleeping ? "cli-resume" : "cli-restart",
-                                onClick: ended.onRestart,
-                                children: ended.sleeping ? "Resume agent" : "Restart CLI"
-                            }),
-                            ended.onClose && _jsx("button", {
-                                type: "button",
-                                className: buttonClass({ variant: "soft", size: "md", className: TAP }),
-                                "data-testid": "cli-close-session",
-                                onClick: ended.onClose,
-                                children: "Close session"
-                            })
+                            agent,
+                            " is sleeping to save memory \u2014 its conversation is kept"
                         ]
+                    }),
+                    _jsx("span", {
+                        className: "terminal__exited-actions",
+                        children: _jsx("button", {
+                            type: "button",
+                            className: buttonClass({ variant: "primary", size: "md", className: TAP }),
+                            "data-testid": "cli-resume",
+                            onClick: sleeping.onResume,
+                            children: "Resume agent"
+                        })
                     })
                 ]
             }))] }));

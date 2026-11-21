@@ -10,7 +10,6 @@ import { useTerminalSearch } from "../terminalSearch";
 import { TerminalSearchBar } from "../components/TerminalSearchBar";
 import { attachClipboardImagePaste } from "../clipboardImagePaste";
 import { attachAgentFileDrop, type FileDropNotice } from "../agentFileDrop";
-import { button } from "../components/ui/button";
 import { BorrowTerminals, borrowLentTerminal, lendTerminal } from "../terminalKeeper";
 
 function LegacyAgentCliTerminal({
@@ -31,11 +30,6 @@ function LegacyAgentCliTerminal({
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [termInstance, setTermInstance] = useState<Terminal | null>(null);
   const [fileDrop, setFileDrop] = useState<FileDropNotice>(null);
-  // Bumped by "Restart CLI" — the attach effect below keys off it, so a bump
-  // tears down the dead xterm+PTY pair and builds a fresh one (see the effect
-  // comment for why a *fresh* xterm, not a reattach, is the only thing that
-  // renders correctly).
-  const [restartNonce, setRestartNonce] = useState(0);
   const search = useTerminalSearch(termInstance);
 
   const attachAgentCli = usePerchStore((s) => s.attachAgentCli);
@@ -139,24 +133,19 @@ function LegacyAgentCliTerminal({
       surface.remove();
       if (currentId) killTerminal(currentId);
     };
-    // Deliberately re-run only on mount and on an explicit "Restart CLI"
-    // (`restartNonce`): sessionId/agent are fixed for the lifetime of this
+    // Deliberately run only on mount: sessionId/agent are fixed for the lifetime of this
     // component instance (key prop in Chat.tsx ensures a remount when session
     // or agent changes).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [restartNonce]);
+  }, []);
 
-  /** "Restart CLI" — respawn the agent CLI in place after its process exited.
-   * Without this the pane is a dead end: the xterm still shows whatever the
-   * CLI left on screen (usually a cleared screen after `/exit`), keystrokes go
-   * to a pty whose child is gone, and the only escape is switching the global
-   * chat mode or creating another session. */
-  function restartCli() {
-    terminalIdRef.current = null;
-    setTerminalId(null);
-    setRestartNonce((n) => n + 1);
-  }
-
+  // The process ended (the user left the CLI and its shell): the session is done, so close it like its tab's ×,
+  // with no banner, as any terminal emulator closes a tab on `exit`.
+  useEffect(() => {
+    if (exitCode !== null) onClose?.();
+    // The exit is the only trigger: `onClose` is a fresh function on every render of the pane.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exitCode]);
 
   // Stream PTY output straight into xterm, bypassing React state.
   useEffect(() => {
@@ -188,33 +177,6 @@ function LegacyAgentCliTerminal({
       )}
       {cliError && (
         <div className="terminal__cli-error">{cliError}</div>
-      )}
-      {exitCode !== null && (
-        <div className="terminal__exited terminal__exited--cli" data-testid="cli-exited">
-          <span className="terminal__exited-text">
-            {agent} exited (code {exitCode})
-          </span>
-          <span className="terminal__exited-actions">
-            <button
-              type="button"
-              className={button({ variant: "primary", size: "md", className: "[.app--mobile_&]:min-h-11" })}
-              data-testid="cli-restart"
-              onClick={restartCli}
-            >
-              Restart CLI
-            </button>
-            {onClose && (
-              <button
-                type="button"
-                className={button({ variant: "soft", size: "md", className: "[.app--mobile_&]:min-h-11" })}
-                data-testid="cli-close-session"
-                onClick={onClose}
-              >
-                Close session
-              </button>
-            )}
-          </span>
-        </div>
       )}
     </div>
   );

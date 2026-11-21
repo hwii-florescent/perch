@@ -17,10 +17,12 @@
 //!   this tab" (the input and the size) and "Take back all tabs" (the window takes the size alone
 //!   of each terminal a phone holds); without shared typing the agent's chip offers Take control.
 //! - What the pane says about the agent (the chip: "Viewing agent", "Reconnecting…"; Take control,
-//!   Retry CLI; the error line; the exited or sleeping banner with Restart CLI, Resume agent and
-//!   Close session) is the window's `agent-control` screen over the pane, drawn from
-//!   [`TerminalView::agent_control`]. Starting the agent again is only ever a person's click
-//!   ([`TerminalView::restart`]), after the core said the attach failed or the shell ended.
+//!   Retry CLI; the error line; the sleeping banner with Resume agent) is the window's
+//!   `agent-control` screen over the pane, drawn from [`TerminalView::agent_control`]. Starting
+//!   the agent again is only ever a person's click ([`TerminalView::restart`]), after the core
+//!   said the attach failed or the agent was put to sleep. An exited shell has no banner: once the
+//!   core says the agent exited, the view says [`TerminalEvent::Finished`] and the window closes
+//!   the tab, as any terminal emulator does.
 //! - Find is the view's (the query, the matches, the highlights); its bar is the window's
 //!   `terminal-search` screen over the pane, which [`TerminalEvent::Chrome`] says to draw.
 //! - A dropped connection leaves the screen as it was and says so. It is never taken for the end
@@ -112,6 +114,9 @@ pub enum TerminalEvent {
     /// The program asks to set the system clipboard. Nothing has been written.
     ClipboardWrite(String),
     Status(Status),
+    /// The shell ended and the core says the agent exited (never asleep, never merely unknown):
+    /// the session is done and its tab closes. Said once per attach.
+    Finished,
     /// The core deleted the session this terminal shows, when asked to (see [`TerminalView::end`])
     /// or by anyone else, and however long after.
     Ended,
@@ -250,6 +255,8 @@ pub struct TerminalView {
     dark_override: Option<bool>,
     applied_dark: Option<bool>,
     agent: Option<AgentInfo>,
+    /// [`TerminalEvent::Finished`] was said for this attach.
+    finished: bool,
     status: Status,
     title: String,
     pending: Option<Pending>,
@@ -359,6 +366,7 @@ impl TerminalView {
             dark_override: None,
             applied_dark: None,
             agent: None,
+            finished: false,
             status: Status::Detached,
             title: String::new(),
             pending: None,
@@ -569,9 +577,9 @@ impl TerminalView {
         self.attach_again(core, cx)
     }
 
-    /// Starts the agent again at a person's request, as the web's Retry CLI, Restart CLI and
-    /// Resume agent do: only once the core said it could not attach or the shell ended, never on
-    /// a drop, whose shell is not known to have ended. False otherwise.
+    /// Starts the agent again at a person's request, as the web's Retry CLI and Resume agent do:
+    /// only once the core said it could not attach or the agent was put to sleep (its shell
+    /// ended), never on a drop, whose shell is not known to have ended. False otherwise.
     pub fn restart(&mut self, core: Core, cx: &mut Context<Self>) -> bool {
         if !matches!(self.status, Status::Failed(_) | Status::Exited(_)) {
             return false;
@@ -599,6 +607,7 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) {
         self.to_core = Some(to_core);
+        self.finished = false;
         self.set_status(Status::Connecting, cx);
         self._reader = Some(cx.spawn(async move |this, cx| {
             while let Some(event) = from_core.next().await {
@@ -877,9 +886,13 @@ impl TerminalView {
                 self.resize_lease = agent.resize;
                 self.agent = Some(agent);
                 self.holds_changed(offered, cx);
+                self.settle_finished(cx);
                 cx.notify();
             }
-            FromCore::Exited(code) => self.set_status(Status::Exited(code), cx),
+            FromCore::Exited(code) => {
+                self.set_status(Status::Exited(code), cx);
+                self.settle_finished(cx);
+            }
             FromCore::Ended => cx.emit(TerminalEvent::Ended),
             FromCore::EndRefused(reason) => cx.emit(TerminalEvent::EndRefused(reason)),
             FromCore::Failed(reason) => {
@@ -896,6 +909,18 @@ impl TerminalView {
                 self.agent = None;
                 self.set_status(Status::Disconnected(reason), cx);
             }
+        }
+    }
+
+    /// Says [`TerminalEvent::Finished`] once the shell has ended and the core's own word is that
+    /// the agent exited. A hibernated agent's pty closes the same way but the core calls it
+    /// sleeping, and the exit may reach this view before that word does, so the exit alone never
+    /// finishes a session.
+    fn settle_finished(&mut self, cx: &mut Context<Self>) {
+        let exited = self.agent.is_some_and(|a| a.state == AgentState::Exited);
+        if !self.finished && exited && matches!(self.status, Status::Exited(_)) {
+            self.finished = true;
+            cx.emit(TerminalEvent::Finished);
         }
     }
 
@@ -2342,8 +2367,8 @@ impl TerminalView {
 
     /// The props of the web's `agent-control` screen over this terminal, as
     /// `PersistentAgentTerminal` works them out on a desktop, with the actions as flags (`retry`,
-    /// `control`, `ended.close`) that the screen's mod turns into the window's commands. Empty
-    /// (no `label`, `error` or `ended`) when there is nothing to draw. Where the native view
+    /// `control`, `sleeping`) that the screen's mod turns into the window's commands. Empty
+    /// (no `label`, `error` or `sleeping`) when there is nothing to draw. Where the native view
     /// knows more than the web, it says only what is known: a drop the window will not
     /// reattach is "Disconnected", not "Reconnecting…".
     pub fn agent_control(&self) -> Value {
@@ -2382,14 +2407,8 @@ impl TerminalView {
             Status::Failed(reason) => Some(reason.as_str()),
             _ => None,
         };
-        let ended = match self.status {
-            Status::Exited(code) => Some(json!({
-                "sleeping": sleeping,
-                "exitCode": if sleeping { Value::Null } else { json!(code) },
-                "close": true,
-            })),
-            _ => None,
-        };
+        // Only a hibernated agent leaves its pane with something to say: an exit closes the tab.
+        let asleep = sleeping && matches!(self.status, Status::Exited(_));
         json!({
             "agent": self.target.as_ref().map_or("", |t| t.1.as_str()),
             "label": label,
@@ -2398,7 +2417,7 @@ impl TerminalView {
             "retry": matches!(self.status, Status::Failed(_)) && self.target.is_some(),
             "control": control,
             "error": error,
-            "ended": ended,
+            "sleeping": asleep,
             "state": {
                 "controlling": self.input_lease,
                 "shared": shared,
@@ -2961,7 +2980,7 @@ impl gpui::Render for TerminalView {
         let focused = self.focus.is_focused(window);
         let mut bg = color(self.vt.background());
         bg.a = self.settings.opacity;
-        // The agent's chip, error line and ended banner are the window's `agent-control`
+        // The agent's chip, error line and sleeping banner are the window's `agent-control`
         // screen over the pane; only what a file drop or paste said is drawn here.
         let notice = self.drop_notice.clone();
         let control = self.agent_control();

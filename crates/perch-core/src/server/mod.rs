@@ -1582,7 +1582,14 @@ fn spawn_agent_lifecycle_task(state: AppState) {
     tokio::spawn(async move {
         let mut seen = HashMap::new();
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            // A tick, or sooner when a line was entered or a process ended; then a moment for the
+            // process table to show what the line started.
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {}
+                _ = state.agent_runtime.nudged() => {
+                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                }
+            }
             match state.agent_runtime.refresh_current_providers().await {
                 Ok(changed) => {
                     for session_id in changed {

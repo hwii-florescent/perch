@@ -2513,7 +2513,7 @@ const WINDOW_COMMANDS: [(&str, &str, &str); 45] = [
     ),
     (
         "terminal.restart",
-        "Start a tab's agent again after it ended or could not start (Retry CLI, Restart CLI, Resume agent)",
+        "Start a tab's agent again after it could not start or was put to sleep (Retry CLI, Resume agent)",
         "{id}",
     ),
     (

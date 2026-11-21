@@ -2199,7 +2199,7 @@ impl Workspace {
                 );
             }
         }
-        // Over each terminal on screen: the agent's chip, error line and ended banner while it
+        // Over each terminal on screen: the agent's chip, error line and sleeping banner while it
         // has one, its find bar while find is open, and the phone-size notice while a phone
         // holds its size and this window may take it back.
         for id in shown {
@@ -2208,9 +2208,10 @@ impl Workspace {
             };
             let view = view.read(cx);
             let mut control = view.agent_control();
-            if ["label", "error", "ended"]
+            if ["label", "error"]
                 .iter()
                 .any(|key| !control[key].is_null())
+                || control["sleeping"] == json!(true)
             {
                 control["id"] = json!(id);
                 want("agent-control", format!("agent-control#{id}"), control);
@@ -2409,6 +2410,17 @@ impl Workspace {
                     );
                 }
                 self.schedule_reattach(id, cx);
+            }
+            // The shell ended and the core says the agent exited: the session is done, so the core
+            // is asked to delete it (the tab goes when it says so, like the tab's ×) with no guard,
+            // as nothing is left running. A tab already being closed waits for that answer.
+            TerminalEvent::Finished => {
+                if self.panes.get(id).is_some_and(|p| p.closing.is_none()) {
+                    self.sidebar.read(cx).send(Command::DeleteSession {
+                        session_id: id.to_string(),
+                        stop_sub_sessions: false,
+                    });
+                }
             }
             // The core deleted the session: its tab goes, whether this window asked for it, or
             // asked too long ago to be waiting still.
@@ -3826,9 +3838,9 @@ impl Workspace {
                 cx.notify();
             }
             "terminal.takeBackAll" => self.take_back_all(cx)?,
-            // The agent-control screen's Retry CLI, Restart CLI and Resume agent: the agent of
-            // tab `id` starts again, only after the core said its attach failed or its shell
-            // ended. A drop is never started over (the window reattaches it instead).
+            // The agent-control screen's Retry CLI and Resume agent: the agent of tab `id` starts
+            // again, only after the core said its attach failed or it was put to sleep. A drop is
+            // never started over (the window reattaches it instead).
             "terminal.restart" => {
                 let view = self.terminal_named(text("id"))?;
                 let core = self

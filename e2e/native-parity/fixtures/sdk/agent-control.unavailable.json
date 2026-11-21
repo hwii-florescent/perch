@@ -8,7 +8,7 @@
       "retry": true,
       "control": null,
       "error": "claude: command not found",
-      "ended": null,
+      "sleeping": false,
       "state": {
         "controlling": false,
         "shared": false,
