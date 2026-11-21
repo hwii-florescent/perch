@@ -38,6 +38,15 @@ concurrent background agents in that same terminal do not steal it. Providers
 without native events or meaningful marker/title evidence cannot have verified
 turn state merely from output volume, process liveness or silence.
 
+## The tab follows the foreground
+
+A Terminal tab is an agent tab only while an agent runs in it: the core reads the
+foreground job (`SessionSummary.currentProviderId`) when a line is entered in a
+terminal or a process ends, within about 150 ms, and otherwise once a second, so
+typing `claude` or leaving it changes the tab's icon and kind at once. When the
+shell itself exits, the session ends and its tab closes; there is no exited
+banner (see DECISIONS, 2026-11-20).
+
 ## Chat view
 
 In UI mode a Terminal tab shows the native chat while a shim-launched agent

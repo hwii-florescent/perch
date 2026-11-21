@@ -293,6 +293,11 @@ Useful existing coverage (not a claim of a fresh passing run):
 - `needs-you.spec.ts`: question persistence/resolution and By status navigation.
 - `context-bridge.config.ts`: isolated Chromium/WebKit real Claude probe: one Haiku turn for Perch's own dialog and
   one more for an untouched clone of `stock:context-bridge` chosen in its place (each test has its own core).
+- `native-review.config.ts`: isolated desktop-to-phone review with two paid turns per provider. Use
+  `--project=chromium --grep 'claude: phone review'` for the focused Haiku case. Select changed files with
+  the Diff file dropdown, which is available even when the narrow review hides the file rail.
+- `sessions.spec.ts` S4 and `federation.spec.ts` E4 cover automatic tab closure without an exit overlay.
+  `agent-hibernation.spec.ts` covers the separate case where the session survives and can resume.
 - `federation.spec.ts` E8 (main config) creates a remote Claude session over the protocol (the store's
   `session.create` with the host, not E2's picker path) and peeks it through a package: no prompt is sent. It runs
   before E2, the known base failure, so the serial run reaches it.

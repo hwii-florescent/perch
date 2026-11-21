@@ -614,8 +614,9 @@ phone's own: `stock:mobile-header`, `stock:mobile-switcher`,
     are the terminal's.
   - **Agent control** is drawn twice: `part: "top"` is the chip (how this view
     stands, with Take control or Fit here, which move the input or resize lease,
-    or Retry CLI), `part: "bottom"` the agent's error line and, once its process
-    ended, the banner (Restart CLI or Resume agent, Close session). `state`
+    or Retry CLI), `part: "bottom"` the agent's error line and, while the agent
+    is hibernated, the banner (`sleeping`, with Resume agent). An agent that
+    exited has no banner: Perch closes its tab. `state`
     gives the facts (`controlling`, `shared`, `writable`, `phone`) for a copy
     that words the chip itself.
   - **Dock tab**: `defaultTab` is dockview's own tab (title and close), which a

@@ -77,7 +77,7 @@ shells, real agent CLIs
   `MobilePaneShell`, `MobileFiles`, `MobileKeyBar`) is thin host routes over
   those five stock screens.
 - **Terminal and dock chrome are screens; authority is not.** The shell
-  toolbar, the agent control chip and banners (`stock:agent-control`, drawn as
+  toolbar, the agent control chip and sleeping banner (`stock:agent-control`, drawn as
   `top` and `bottom` parts so the banner stays over the surface), a docked
   pane's tab and group buttons and the browser toolbar are stock screens whose
   buttons call Perch's actions: lease moves (`takeControl`), process start/stop,

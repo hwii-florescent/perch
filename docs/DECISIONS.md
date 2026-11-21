@@ -7,6 +7,22 @@ contracts live in [ARCHITECTURE](ARCHITECTURE.md), remaining work in
 [UI-UX-DIRECTION](UI-UX-DIRECTION.md) supplies interaction proposals and shared
 conventions, not automatic approval. AGENTS is only a brief contributor entry point.
 
+## 2026-11-20 — Exiting ends the tab; a tab's state follows what runs in it at once (owner)
+
+- **An exit closes the tab.** When a terminal or agent session's process ends (`exit`, Ctrl-D, an agent's `/exit`
+  in a session that runs it bare), its session ends and its tab closes by itself, as in any terminal emulator.
+  There is no "claude exited (code 0)" banner and no Restart CLI or Close session, on the web and the native
+  client, for Terminal tabs, agent tabs and a workspace's shell panes (a docked shell's panel closes). Only a
+  confirmed exit closes it: the native view waits for the core's word that the agent exited (as the web's
+  `PersistentAgentTerminal` already did), so a dropped connection or an unknown state is never an exit. A
+  hibernated agent is not an exit either: it keeps its tab and its "sleeping" banner with Resume agent. Retry CLI
+  stays for an agent that could not start.
+- **A tab is what runs in it, now.** An agent that exits back to its shell leaves a plain terminal tab, and a
+  shell that starts an agent becomes an agent tab. The core looks at the foreground job within about 150 ms of a
+  line being entered or a process ending, instead of waiting for its next one-second look.
+- **Contract change.** `AgentControlProps.ended` (`sleeping`, `exitCode`, `onRestart`, `onClose`) is replaced by
+  `sleeping: { onResume } | null`; a copy of `stock:agent-control` that reads `ended` shows no banner until updated.
+
 ## 2026-11-19 — A terminal's size follows typing, not window focus; resizes are coalesced (owner)
 
 - **The size goes where a person types.** A terminal's PTY size (the resize lease) moves to a window or the phone
@@ -322,12 +338,12 @@ control chip and banners, the dock's tab and group buttons and the browser toolb
 impossible; phones get their own screens and mods, opt-in per phone, never the desktop's by default. Supersedes the
 "Terminal authority" and "Engines" items of the 1.9 entry below for the parts named here.
 - **Screens.** `stock:terminal-toolbar` (`PersistentTerminal`), `stock:agent-control` (`PersistentAgentTerminal`,
-  drawn in two places, `part: "top"` for the chip and `"bottom"` for the error line and the exited/sleeping banner,
+  drawn in two places, `part: "top"` for the chip and `"bottom"` for the error line and the sleeping banner,
   so the banner stays over the terminal surface), `stock:dock-tab` and `stock:dock-actions` (`DockviewShell`'s
   `PaneTab` and `PaneGroupHeaderActions`), `stock:browser-toolbar` (`WorkspaceBrowser`), and the phone's own
   `stock:mobile-header`, `-switcher`, `-panes`, `-files` and `-keys`. Data and Perch's actions are props, as since 1.7.
 - **The authority stays Perch's.** The screens ask; Perch acts: Take control / Fit here move the input or resize
-  lease (`view.takeControl()`), Restart/Resume and Close session start or close the agent, New/Close shell open and
+  lease (`view.takeControl()`), Resume starts a hibernated agent again, New/Close shell open and
   end shells, the dock tab's close and menu and the group's + and Split go to dockview and Perch's dock controller, the
   browser's address, suggestions, keys and page are `WorkspaceBrowser`'s (a typed address survives a swap), a phone
   key types only through the terminal view's own input. Dockview still draws the tab strip, drag and drop; the tab's
@@ -356,7 +372,7 @@ impossible; phones get their own screens and mods, opt-in per phone, never the d
   - *Terminal text and the suggestions pill:* `PersistentTerminal`'s one-line status ("Opening shell…", a lost
     shell's message) and file-drop notice, and `TerminalSuggestions` (acting on a suggestion needs the input lease;
     its cards are `stock:chat`'s source).
-  - *Remote and legacy terminal views* (`Terminal.tsx`, `AgentCliTerminal.tsx` with its own exited banner): they
+  - *Remote and legacy terminal views* (`Terminal.tsx`, `AgentCliTerminal.tsx`, which closes its session on exit like the rest): they
     show another host's sessions, and stock cloning is for the local device only.
   - *Engines:* dockview's strip, drag and drop and its default tab element; the browser page (native webview or
     sandboxed frame); the file viewers; xterm and CodeMirror.

@@ -79,10 +79,16 @@ bundled core when `core.json` names none that is running, on port 47788; the cor
 and serves the phone and terminals. Replaced bundles are kept in `~/.perch/replaced-apps/`.
 `scripts/reinstall-desktop.sh` still builds the Tauri app.
 
-Rebuild: `ZIG=/opt/homebrew/opt/zig@0.16/bin/zig sh scripts/reinstall-desktop-native.sh`, from a checkout
-that has the gitignored `crates/perch-desktop/tauri.macos.conf.json` (the signing identity; copy it into a
-worktree). It builds web, native, `perch-core` and the `perch` CLI, keeps the app's signature, opens the app
-with `open -g` (no focus), and restarts the core so it serves the new web build.
+For a local-only reinstall, run:
+
+```sh
+PERCH_SKIP_RELAY=1 ZIG=/opt/homebrew/opt/zig@0.16/bin/zig sh scripts/reinstall-desktop-native.sh
+```
+
+Use a checkout with the gitignored `crates/perch-desktop/tauri.macos.conf.json` for signing. The
+installer keeps the signature, restarts the core to serve the new web assets, and opens the app
+without taking focus. Without `PERCH_SKIP_RELAY=1`, it also attempts to deploy the phone's web app
+through [scripts/deploy-relay.sh](../scripts/deploy-relay.sh).
 
 ## Not yet the same as the Tauri app
 
@@ -94,6 +100,5 @@ with `open -g` (no focus), and restarts the core so it serves the new web build.
   listed yet (the window is starting) waits up to 30 s, the latest replacing an older one; a link that is malformed,
   not ours, or names no session is ignored with a log line. Without a session, files/changes/browser use the shown
   workspace (the browser, else the computer's first).
-- The install script does not deploy the relay (the phone's web app); the mobile plan covers it.
 - Remaining differences and visual gate failures: `plans/261113-0037-native-terminal-fixes-and-mod-engine/next-steps.md`
   and `node e2e/native-parity/compare.mjs`.
